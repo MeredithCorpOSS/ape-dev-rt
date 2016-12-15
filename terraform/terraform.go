@@ -331,6 +331,20 @@ func Output(rootPath string) (map[string]string, error) {
 
 }
 
+func Validate(rootpath string) (*CmdOutput, error) {
+	out, err := Cmd("validate", []string{}, rootpath, ioutil.Discard, ioutil.Discard)
+	if err != nil {
+		return nil, err
+	}
+
+	if out.ExitCode != 0 {
+		return nil, fmt.Errorf("Error(s) occured (exit code %d). Stderr:\n%s",
+			out.ExitCode, out.Stderr)
+	}
+	return out, nil
+
+}
+
 func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Writer) (*CmdOutput, error) {
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -376,6 +390,9 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 			Meta: meta,
 		},
 		"untaint": &command.UntaintCommand{
+			Meta: meta,
+		},
+		"validate": &command.ValidateCommand{
 			Meta: meta,
 		},
 	}

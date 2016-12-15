@@ -322,6 +322,28 @@ var Commands = []cli.Command{
 		},
 		Before: beforeAuthedCommand,
 	},
+	{
+		Name:   "validate-infra",
+		Usage:  "Validates the current working directory for valid Terraform code",
+		Action: wrapCommand(command.ValidateInfra),
+		Flags: []cli.Flag{
+			flags.AwsProfile,
+			flags.Environment,
+			flags.AppName,
+		},
+		Before: beforeAuthedCommand,
+	},
+	{
+		Name:   "validate-slots",
+		Usage:  "Validates the slots directories for valid Terraform code",
+		Action: wrapCommand(command.ValidateSlots),
+		Flags: []cli.Flag{
+			flags.AwsProfile,
+			flags.Environment,
+			flags.AppName,
+		},
+		Before: beforeAuthedCommand,
+	},
 }
 
 func beforeAuthedCommand(c *cli.Context) error {
