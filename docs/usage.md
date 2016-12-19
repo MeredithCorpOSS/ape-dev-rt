@@ -17,24 +17,32 @@ COMMANDS:
      disable-traffic            Detach load-balancers from the version scaling-group
      enable-traffic             Attach load-balancers to the version scaling-group
      show-traffic               Show which Scaling Groups have Load Balancers attached
-     list-apps                  list-apps is deprecated as it would be ambiguous due to app/deploymentstate relationship
+     list-apps                  list all apps for a given environment
      list-slots                 List all slots for a given app in a given environment
+     list-slot-prefixes         List all slot prefixes for a given app in a given environment
+     cleanup-slots              Cleanup inactive slots for a given app in a given environment
+     add-slot-prefix            Add a new slot prefix for a given app in a given environment
+     delete-slot-prefix         Delete a slot prefix for a given app in a given environment
      taint-infra-resource       Taint an infrastructure resource
      untaint-infra-resource     Untaint an infrastructure resource
      taint-deployed-resource    Taint a deployed resource
      untaint-deployed-resource  Untaint a deployed resource
      version                    Get version
+     output                     List output variables of a given app
+     slot-output                List output variables of a given app and slot-id
      list-deployments           List last deployment of a given app in a given environment
+     validate-infra             Validates the current working directory for valid Terraform code
+     validate-slots             Validates the slots directories for valid Terraform code
      help, h                    Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --config							Path to the RT configuration file, defaults to ~/.rt/config [$RT_CONFIG]
-   --profile						Name profile to load from RT configuration, ~/.rt/config [$RT_PROFILE]
-   --verbose, -v					Prints all log messages [$RT_LOG]
-   --enable-file-logging		Sends all log messages to designated location [$RT_ENABLE_FILE_LOGGING]
-   --aws-profile "default"		Specified the AWS Credential Profile used to resolve AWS credentials [$RT_AWS_PROFILE]
-   --help, -h						show help
-   --generate-bash-completion
+   --config value         Path to the RT configuration file, defaults to ~/.rt/config [$RT_CONFIG]
+   --profile value        Name profile to load from RT configuration, ~/.rt/config [$RT_PROFILE]
+   --verbose, -v          Prints all log messages [$RT_LOG]
+   --enable-file-logging  Sends all log messages to designated location [$RT_ENABLE_FILE_LOGGING]
+   --aws-profile value    Specify the AWS Credential Profile used to resolve AWS credentials (default: "default") [$RT_AWS_PROFILE]
+   --module value         Name of the module the resource belongs to
+   --help, -h             show help
 
 ```
 
