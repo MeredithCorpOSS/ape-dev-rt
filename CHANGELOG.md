@@ -1,8 +1,15 @@
-## 0.8.0 (Unreleased)
+## 0.8.1 (Unreleased)
 
 BREAKING CHANGES:
 
 IMPROVEMENTS:
+
+## 0.8.0 (December 19, 2017)
+
+BREAKING CHANGES:
+
+IMPROVEMENTS:
+ - Upgraded to Terraform v0.8
 
 ## 0.7.0 (December 16, 2016)
 
