@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -343,6 +344,13 @@ func beforeAuthedCommand(c *cli.Context) error {
 			cfgPath, url)
 	}
 	c.App.Metadata["remote_state"] = cfg.RemoteState
+
+	if c.String("env") == "" {
+		return errors.New("No environment defined. Please use -env flag")
+	}
+	if c.String("app") == "" {
+		return fmt.Errorf("No application name defined for environment '%s'. Please use -app flag", c.String("env"))
+	}
 
 	ds, err := loadDeploymentState(c.String("env"), c.String("app"), cfg.DeploymentState)
 	if err != nil {
