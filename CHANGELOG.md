@@ -4,7 +4,7 @@ BREAKING CHANGES:
 
 IMPROVEMENTS:
 
-## 0.8.0 (December 19, 2017)
+## 0.8.0 (December 19, 2016)
 
 BREAKING CHANGES:
 
@@ -27,7 +27,7 @@ IMPROVEMENTS:
  - Added namespace flag that allows users to chose a custom namespace or default to AWS Account Id [GH-279]
 
 BUG FIXES:
-- Apply and destrpy commands can now be carried out regardless of a resource change using force flag [GH-275]
+- Apply and destroy commands can now be carried out regardless of a resource change using force flag [GH-275]
 
 ## 0.6.3 (December 9, 2016)
 
