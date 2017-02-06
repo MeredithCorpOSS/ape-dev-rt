@@ -26,6 +26,7 @@ type FreshPlanInput struct {
 	Refresh      bool
 	Target       string
 	Destroy      bool
+	XLegacy      bool
 }
 
 type PlanInput struct {
@@ -37,6 +38,7 @@ type PlanInput struct {
 	Refresh      bool
 	Target       string
 	Destroy      bool
+	XLegacy      bool
 }
 
 type PlanOutput struct {
@@ -61,6 +63,7 @@ type FreshApplyInput struct {
 	Target       string
 	Refresh      bool
 	PlanFilePath string
+	XLegacy      bool
 }
 
 type ApplyInput struct {
@@ -71,6 +74,7 @@ type ApplyInput struct {
 	Refresh      bool
 	Variables    map[string]string
 	PlanFilePath string
+	XLegacy      bool
 }
 
 type ApplyOutput struct {
@@ -96,6 +100,7 @@ type FreshDestroyInput struct {
 	Refresh      bool
 	Target       string
 	Variables    map[string]string
+	XLegacy      bool
 }
 
 type DestroyInput struct {
@@ -105,6 +110,7 @@ type DestroyInput struct {
 	Refresh      bool
 	Target       string
 	Variables    map[string]string
+	XLegacy      bool
 }
 
 type DestroyOutput struct {

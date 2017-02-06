@@ -30,6 +30,7 @@ type FlagDefinitions struct {
 	Variable          cli.StringSliceFlag
 	SlotPrefix        cli.StringFlag
 	PreviousSlot      cli.BoolFlag
+	Xlegacy           cli.BoolFlag
 }
 
 var flags = FlagDefinitions{
@@ -138,6 +139,11 @@ var flags = FlagDefinitions{
 	Force: cli.BoolFlag{
 		Name:  "f, force",
 		Usage: "Forces an Apply or Destroy command without a need for a creation or deletion of resources",
+	},
+
+	Xlegacy: cli.BoolFlag{
+		Name:  "x, xlegacy",
+		Usage: "Terraform core graphing is done using pre-Terraform v0.8.0 paths",
 	},
 
 	Variable: cli.StringSliceFlag{

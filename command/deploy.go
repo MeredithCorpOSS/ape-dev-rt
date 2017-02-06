@@ -145,6 +145,7 @@ func Deploy(c *commons.Context) error {
 		Refresh:      true,
 		Target:       c.String("target"),
 		Destroy:      false,
+		XLegacy:      c.Bool("x"),
 	})
 	planFinishTime := time.Now().UTC()
 	if err != nil {
@@ -188,6 +189,7 @@ func Deploy(c *commons.Context) error {
 		input := terraform.ApplyInput{
 			RootPath:     rootDir,
 			Target:       "",
+			XLegacy:      c.Bool("x"),
 			Refresh:      true,
 			PlanFilePath: planFilePath,
 			StderrWriter: ioutil.Discard,

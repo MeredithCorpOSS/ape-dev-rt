@@ -44,6 +44,7 @@ func FreshPlan(input *FreshPlanInput) (*PlanOutput, error) {
 		Destroy:      input.Destroy,
 		StderrWriter: input.StderrWriter,
 		StdoutWriter: input.StdoutWriter,
+		XLegacy:      input.XLegacy,
 	})
 }
 
@@ -63,6 +64,9 @@ func Plan(input *PlanInput) (*PlanOutput, error) {
 	}
 	if input.Target != "" {
 		tfArguments = append(tfArguments, fmt.Sprintf("-target=%s", input.Target))
+	}
+	if input.XLegacy {
+		tfArguments = append(tfArguments, "-Xlegacy-graph")
 	}
 
 	out, err := Cmd("plan", tfArguments, input.RootPath,
@@ -103,6 +107,7 @@ func FreshApply(input *FreshApplyInput) (*ApplyOutput, error) {
 		PlanFilePath: input.PlanFilePath,
 		StderrWriter: input.StderrWriter,
 		StdoutWriter: input.StdoutWriter,
+		XLegacy:      input.XLegacy,
 	})
 }
 
@@ -161,6 +166,7 @@ func FreshDestroy(input *FreshDestroyInput) (*DestroyOutput, error) {
 		Variables:    input.Variables,
 		StderrWriter: input.StderrWriter,
 		StdoutWriter: input.StdoutWriter,
+		XLegacy:      input.XLegacy,
 	})
 }
 
@@ -177,6 +183,9 @@ func Destroy(input *DestroyInput) (*DestroyOutput, error) {
 	}
 	if input.Target != "" {
 		tfArguments = append(tfArguments, fmt.Sprintf("-target=%s", input.Target))
+	}
+	if input.XLegacy {
+		tfArguments = append(tfArguments, "-Xlegacy-graph")
 	}
 
 	out, err := Cmd("destroy", tfArguments, input.RootPath,

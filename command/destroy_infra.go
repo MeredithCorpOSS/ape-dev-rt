@@ -112,6 +112,7 @@ func DestroyInfra(c *commons.Context) error {
 		Refresh:     true,
 		Target:      c.String("target"),
 		Destroy:     true,
+		XLegacy:     c.Bool("x"),
 	})
 	planFinishTime := time.Now().UTC()
 	if err != nil {
@@ -141,6 +142,7 @@ func DestroyInfra(c *commons.Context) error {
 		input := terraform.DestroyInput{
 			RootPath:     rootDir,
 			Target:       "",
+			XLegacy:      c.Bool("x"),
 			Variables:    tfVariables,
 			Refresh:      true,
 			StderrWriter: ioutil.Discard,

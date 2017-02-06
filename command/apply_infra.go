@@ -83,7 +83,6 @@ func ApplyInfra(c *commons.Context) error {
 
 	tfVariables["app_name"] = c.String("app")
 	tfVariables["environment"] = c.String("env")
-
 	planStartTime := time.Now().UTC()
 	planFilePath := path.Join(rootDir, "planfile")
 	filesToCleanup = append(filesToCleanup, path.Join(rootDir, ".terraform"))
@@ -96,6 +95,7 @@ func ApplyInfra(c *commons.Context) error {
 		Refresh:      true,
 		Target:       c.String("target"),
 		Destroy:      false,
+		XLegacy:      c.Bool("x"),
 	})
 	planFinishTime := time.Now().UTC()
 	if err != nil {
@@ -124,6 +124,7 @@ func ApplyInfra(c *commons.Context) error {
 		input := terraform.ApplyInput{
 			RootPath:     rootDir,
 			Target:       "",
+			XLegacy:      c.Bool("x"),
 			Refresh:      true,
 			PlanFilePath: planFilePath,
 			StderrWriter: ioutil.Discard,
