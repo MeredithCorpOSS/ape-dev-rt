@@ -18,7 +18,6 @@ var basicFunctions = template.FuncMap{
 	"title": strings.Title,
 	"lower": strings.ToLower,
 	"upper": strings.ToUpper,
-	"pad":   padWithSpace,
 }
 
 // Parse creates a new annonymous template with the basic functions
@@ -31,12 +30,4 @@ func Parse(format string) (*template.Template, error) {
 // and parses the given format.
 func NewParse(tag, format string) (*template.Template, error) {
 	return template.New(tag).Funcs(basicFunctions).Parse(format)
-}
-
-// padWithSpace adds whitespace to the input if the input is non-empty
-func padWithSpace(source string, prefix, suffix int) string {
-	if source == "" {
-		return source
-	}
-	return strings.Repeat(" ", prefix) + source + strings.Repeat(" ", suffix)
 }

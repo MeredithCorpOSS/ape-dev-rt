@@ -13,8 +13,8 @@ type aclCreateResponse struct {
 	ID string
 }
 
-// aclDisabled handles if ACL datacenter is not configured
-func aclDisabled(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+// ACLDisabled handles if ACL datacenter is not configured
+func ACLDisabled(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
 	resp.WriteHeader(401)
 	resp.Write([]byte("ACL support disabled"))
 	return nil, nil
@@ -204,4 +204,21 @@ func (s *HTTPServer) ACLList(resp http.ResponseWriter, req *http.Request) (inter
 		out.ACLs = make(structs.ACLs, 0)
 	}
 	return out.ACLs, nil
+}
+
+func (s *HTTPServer) ACLReplicationStatus(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	// Note that we do not forward to the ACL DC here. This is a query for
+	// any DC that's doing replication.
+	args := structs.DCSpecificRequest{}
+	s.parseSource(req, &args.Source)
+	if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
+		return nil, nil
+	}
+
+	// Make the request.
+	var out structs.ACLReplicationStatus
+	if err := s.agent.RPC("ACL.ReplicationStatus", &args, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

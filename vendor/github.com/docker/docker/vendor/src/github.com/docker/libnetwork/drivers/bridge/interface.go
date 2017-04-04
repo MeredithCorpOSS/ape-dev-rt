@@ -28,7 +28,7 @@ type bridgeInterface struct {
 // an already existing device identified by the configuration BridgeName field,
 // or the default bridge name when unspecified, but doesn't attempt to create
 // one when missing
-func newInterface(nlh *netlink.Handle, config *networkConfiguration) (*bridgeInterface, error) {
+func newInterface(nlh *netlink.Handle, config *networkConfiguration) *bridgeInterface {
 	var err error
 	i := &bridgeInterface{nlh: nlh}
 
@@ -41,10 +41,8 @@ func newInterface(nlh *netlink.Handle, config *networkConfiguration) (*bridgeInt
 	i.Link, err = nlh.LinkByName(config.BridgeName)
 	if err != nil {
 		logrus.Debugf("Did not find any interface with name %s: %v", config.BridgeName, err)
-	} else if _, ok := i.Link.(*netlink.Bridge); !ok {
-		return nil, fmt.Errorf("existing interface %s is not a bridge", i.Link.Attrs().Name)
 	}
-	return i, nil
+	return i
 }
 
 // exists indicates if the existing bridge interface exists on the system.

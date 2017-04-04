@@ -41,7 +41,7 @@ A stack is created using the `docker deploy` command:
 
 Usage:  docker deploy [OPTIONS] STACK
 
-Create and update a stack from a Distributed Application Bundle (DAB)
+Create and update a stack
 
 Options:
       --file   string        Path to a Distributed Application Bundle file (Default: STACK.dab)
@@ -93,7 +93,6 @@ Options:
 Commands:
   config      Print the stack configuration
   deploy      Create and update a stack
-  ls          List stacks
   rm          Remove the stack
   services    List the services in the stack
   tasks       List the tasks in the stack

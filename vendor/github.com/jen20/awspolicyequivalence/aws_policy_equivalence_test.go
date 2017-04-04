@@ -159,6 +159,12 @@ func TestPolicyEquivalence(t *testing.T) {
 			policy2:    policyTest20b,
 			equivalent: true,
 		},
+		{
+			name:       "Single Statement vs []Statement",
+			policy1:    policyTest21a,
+			policy2:    policyTest21b,
+			equivalent: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -870,6 +876,33 @@ const policyTest20a = `{
 }`
 
 const policyTest20b = `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Action": ["sts:AssumeRole"],
+      "Effect": "allow",
+      "Principal": {
+        "Service": "spotfleet.amazonaws.com"
+      }
+    }
+  ]
+}`
+
+const policyTest21a = `{
+  "Version": "2012-10-17",
+  "Statement":
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "spotfleet.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+}`
+
+const policyTest21b = `{
   "Version": "2012-10-17",
   "Statement": [
     {

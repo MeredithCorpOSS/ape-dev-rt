@@ -1,24 +1,17 @@
----
-title: "Access authorization plugin"
-description: "How to create authorization plugins to manage access control to your Docker daemon."
-keywords: ["security, authorization, authentication, docker, documentation, plugin, extend"]
-aliases: ["/engine/extend/authorization/"]
----
+<!--[metadata]>
++++
+title = "Access authorization plugin"
+description = "How to create authorization plugins to manage access control to your Docker daemon."
+keywords = ["security, authorization, authentication, docker, documentation, plugin, extend"]
+aliases = ["/engine/extend/authorization/"]
+[menu.main]
+parent = "engine_extend"
+weight = -1
++++
+<![end-metadata]-->
 
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
 
 # Create an authorization plugin
-
-This document describes the Docker Engine plugins generally available in Docker
-Engine. To view information on plugins managed by Docker Engine currently in
-experimental status, refer to [Docker Engine plugin system](index.md).
 
 Docker's out-of-the-box authorization model is all or nothing. Any user with
 permission to access the Docker daemon can run any Docker client command. The
@@ -115,7 +108,7 @@ Authorization plugins can be loaded without restarting the daemon. Refer
 to the [`dockerd` documentation](../reference/commandline/dockerd.md#configuration-reloading) for more information.
 
 ```bash
-$ dockerd --authorization-plugin=plugin1 --authorization-plugin=plugin2,...
+$ docker daemon --authorization-plugin=plugin1 --authorization-plugin=plugin2,...
 ```
 
 Docker's authorization subsystem supports multiple `--authorization-plugin` parameters.

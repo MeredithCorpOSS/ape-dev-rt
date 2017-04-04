@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Sirupsen/logrus"
-	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/links"
 	"github.com/docker/docker/pkg/fileutils"
@@ -20,11 +19,13 @@ import (
 	"github.com/docker/docker/pkg/mount"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/runconfig"
+	containertypes "github.com/docker/engine-api/types/container"
+	networktypes "github.com/docker/engine-api/types/network"
 	"github.com/docker/libnetwork"
 	"github.com/opencontainers/runc/libcontainer/configs"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/label"
-	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/opencontainers/specs/specs-go"
 )
 
 func u32Ptr(i int64) *uint32     { u := uint32(i); return &u }
@@ -35,7 +36,7 @@ func (daemon *Daemon) setupLinkedContainers(container *container.Container) ([]s
 	children := daemon.children(container)
 
 	bridgeSettings := container.NetworkSettings.Networks[runconfig.DefaultDaemonNetworkMode().NetworkName()]
-	if bridgeSettings == nil || bridgeSettings.EndpointSettings == nil {
+	if bridgeSettings == nil {
 		return nil, nil
 	}
 
@@ -45,7 +46,7 @@ func (daemon *Daemon) setupLinkedContainers(container *container.Container) ([]s
 		}
 
 		childBridgeSettings := child.NetworkSettings.Networks[runconfig.DefaultDaemonNetworkMode().NetworkName()]
-		if childBridgeSettings == nil || childBridgeSettings.EndpointSettings == nil {
+		if childBridgeSettings == nil {
 			return nil, fmt.Errorf("container %s not attached to default bridge network", child.ID)
 		}
 
@@ -57,7 +58,9 @@ func (daemon *Daemon) setupLinkedContainers(container *container.Container) ([]s
 			child.Config.ExposedPorts,
 		)
 
-		env = append(env, link.ToEnv()...)
+		for _, envVar := range link.ToEnv() {
+			env = append(env, envVar)
+		}
 	}
 
 	return env, nil
@@ -94,6 +97,61 @@ func (daemon *Daemon) getSize(container *container.Container) (int64, int64) {
 		}
 	}
 	return sizeRw, sizeRootfs
+}
+
+// ConnectToNetwork connects a container to a network
+func (daemon *Daemon) ConnectToNetwork(container *container.Container, idOrName string, endpointConfig *networktypes.EndpointSettings) error {
+	if endpointConfig == nil {
+		endpointConfig = &networktypes.EndpointSettings{}
+	}
+	if !container.Running {
+		if container.RemovalInProgress || container.Dead {
+			return errRemovalContainer(container.ID)
+		}
+		if _, err := daemon.updateNetworkConfig(container, idOrName, endpointConfig, true); err != nil {
+			return err
+		}
+		container.NetworkSettings.Networks[idOrName] = endpointConfig
+	} else {
+		if err := daemon.connectToNetwork(container, idOrName, endpointConfig, true); err != nil {
+			return err
+		}
+	}
+	if err := container.ToDiskLocking(); err != nil {
+		return fmt.Errorf("Error saving container to disk: %v", err)
+	}
+	return nil
+}
+
+// DisconnectFromNetwork disconnects container from network n.
+func (daemon *Daemon) DisconnectFromNetwork(container *container.Container, n libnetwork.Network, force bool) error {
+	if container.HostConfig.NetworkMode.IsHost() && containertypes.NetworkMode(n.Type()).IsHost() {
+		return runconfig.ErrConflictHostNetwork
+	}
+	if !container.Running {
+		if container.RemovalInProgress || container.Dead {
+			return errRemovalContainer(container.ID)
+		}
+		if _, ok := container.NetworkSettings.Networks[n.Name()]; ok {
+			delete(container.NetworkSettings.Networks, n.Name())
+		} else {
+			return fmt.Errorf("container %s is not connected to the network %s", container.ID, n.Name())
+		}
+	} else {
+		if err := disconnectFromNetwork(container, n, false); err != nil {
+			return err
+		}
+	}
+
+	if err := container.ToDiskLocking(); err != nil {
+		return fmt.Errorf("Error saving container to disk: %v", err)
+	}
+
+	attributes := map[string]string{
+		"container": container.ID,
+	}
+	daemon.LogNetworkEventWithAttributes(n, "disconnect", attributes)
+	return nil
 }
 
 func (daemon *Daemon) getIpcContainer(container *container.Container) (*container.Container, error) {
@@ -322,33 +380,6 @@ func isLinkable(child *container.Container) bool {
 	return ok
 }
 
-func enableIPOnPredefinedNetwork() bool {
-	return false
-}
-
-func (daemon *Daemon) isNetworkHotPluggable() bool {
-	return true
-}
-
-func setupPathsAndSandboxOptions(container *container.Container, sboxOptions *[]libnetwork.SandboxOption) error {
-	var err error
-
-	container.HostsPath, err = container.GetRootResourcePath("hosts")
-	if err != nil {
-		return err
-	}
-	*sboxOptions = append(*sboxOptions, libnetwork.OptionHostsPath(container.HostsPath))
-
-	container.ResolvConfPath, err = container.GetRootResourcePath("resolv.conf")
-	if err != nil {
-		return err
-	}
-	*sboxOptions = append(*sboxOptions, libnetwork.OptionResolvConfPath(container.ResolvConfPath))
-	return nil
-}
-
-func initializeNetworkingPaths(container *container.Container, nc *container.Container) {
-	container.HostnamePath = nc.HostnamePath
-	container.HostsPath = nc.HostsPath
-	container.ResolvConfPath = nc.ResolvConfPath
+func errRemovalContainer(containerID string) error {
+	return fmt.Errorf("Container %s is marked for removal and cannot be connected or disconnected to the network", containerID)
 }

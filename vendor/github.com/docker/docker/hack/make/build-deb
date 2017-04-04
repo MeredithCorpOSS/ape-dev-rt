@@ -52,14 +52,7 @@ set -e
 
 		image="dockercore/builder-deb:$version"
 		if ! docker inspect "$image" &> /dev/null; then
-			(
-				# Add the APT_MIRROR args only if the consuming Dockerfile uses it
-				# Otherwise this will cause the build to fail
-				if [ "$(grep 'ARG APT_MIRROR=' $dir/Dockerfile)" ] && [ "$BUILD_APT_MIRROR" ]; then
-					DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS $BUILD_APT_MIRROR"
-				fi
-				set -x && docker build ${DOCKER_BUILD_ARGS} -t "$image" "$dir"
-			)
+			( set -x && docker build ${DOCKER_BUILD_ARGS} -t "$image" "$dir" )
 		fi
 
 		mkdir -p "$DEST/$version"
@@ -72,11 +65,24 @@ set -e
 				&& ln -snf /usr/src/docker /go/src/github.com/docker/docker
 		EOF
 
-		cat >> "$DEST/$version/Dockerfile.build" <<-EOF
-			# Install runc and containerd
-			RUN ./hack/dockerfile/install-binaries.sh runc-dynamic containerd-dynamic
-		EOF
+		# get the RUNC and CONTAINERD commit from the root Dockerfile, this keeps the commits in sync
+		awk '$1 == "ENV" && $2 == "RUNC_COMMIT" { print; exit }' Dockerfile >> "$DEST/$version/Dockerfile.build"
+		awk '$1 == "ENV" && $2 == "CONTAINERD_COMMIT" { print; exit }' Dockerfile >> "$DEST/$version/Dockerfile.build"
 
+		# add runc and containerd compile and install
+		cat >> "$DEST/$version/Dockerfile.build" <<-EOF
+			# Install runc
+			RUN git clone https://github.com/opencontainers/runc.git "/go/src/github.com/opencontainers/runc" \
+					&& cd "/go/src/github.com/opencontainers/runc" \
+					&& git checkout -q "\$RUNC_COMMIT"
+			RUN set -x && export GOPATH="/go" && cd "/go/src/github.com/opencontainers/runc" \
+					&& make BUILDTAGS="\$RUNC_BUILDTAGS" && make install
+			# Install containerd
+			RUN git clone https://github.com/docker/containerd.git "/go/src/github.com/docker/containerd" \
+					&& cd "/go/src/github.com/docker/containerd" \
+					&& git checkout -q "\$CONTAINERD_COMMIT"
+			RUN set -x && export GOPATH="/go" && cd "/go/src/github.com/docker/containerd" && make && make install
+		EOF
 		if [ "$DOCKER_EXPERIMENTAL" ]; then
 			echo 'ENV DOCKER_EXPERIMENTAL 1' >> "$DEST/$version/Dockerfile.build"
 		fi

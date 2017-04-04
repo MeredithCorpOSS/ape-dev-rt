@@ -48,16 +48,13 @@ func New(req *csr.CertificateRequest) (cert, csrPEM, key []byte, err error) {
 		if req.CA.Expiry != "" {
 			policy.Default.ExpiryString = req.CA.Expiry
 			policy.Default.Expiry, err = time.ParseDuration(req.CA.Expiry)
-			if err != nil {
-				return
-			}
 		}
 
-		policy.Default.CAConstraint.MaxPathLen = req.CA.PathLength
+		signer.MaxPathLen = req.CA.PathLength
 		if req.CA.PathLength != 0 && req.CA.PathLenZero == true {
 			log.Infof("ignore invalid 'pathlenzero' value")
 		} else {
-			policy.Default.CAConstraint.MaxPathLenZero = req.CA.PathLenZero
+			signer.MaxPathLenZero = req.CA.PathLenZero
 		}
 	}
 
@@ -75,11 +72,12 @@ func New(req *csr.CertificateRequest) (cert, csrPEM, key []byte, err error) {
 		return
 	}
 
-	s, err := local.NewSigner(priv, nil, signer.DefaultSigAlgo(priv), policy)
+	s, err := local.NewSigner(priv, nil, signer.DefaultSigAlgo(priv), nil)
 	if err != nil {
 		log.Errorf("failed to create signer: %v", err)
 		return
 	}
+	s.SetPolicy(policy)
 
 	signReq := signer.SignRequest{Hosts: req.Hosts, Request: string(csrPEM)}
 	cert, err = s.Sign(signReq)
@@ -145,11 +143,11 @@ func NewFromSigner(req *csr.CertificateRequest, priv crypto.Signer) (cert, csrPE
 			}
 		}
 
-		policy.Default.CAConstraint.MaxPathLen = req.CA.PathLength
+		signer.MaxPathLen = req.CA.PathLength
 		if req.CA.PathLength != 0 && req.CA.PathLenZero == true {
 			log.Infof("ignore invalid 'pathlenzero' value")
 		} else {
-			policy.Default.CAConstraint.MaxPathLenZero = req.CA.PathLenZero
+			signer.MaxPathLenZero = req.CA.PathLenZero
 		}
 	}
 
@@ -158,11 +156,12 @@ func NewFromSigner(req *csr.CertificateRequest, priv crypto.Signer) (cert, csrPE
 		return nil, nil, err
 	}
 
-	s, err := local.NewSigner(priv, nil, signer.DefaultSigAlgo(priv), policy)
+	s, err := local.NewSigner(priv, nil, signer.DefaultSigAlgo(priv), nil)
 	if err != nil {
 		log.Errorf("failed to create signer: %v", err)
 		return
 	}
+	s.SetPolicy(policy)
 
 	signReq := signer.SignRequest{Request: string(csrPEM)}
 	cert, err = s.Sign(signReq)
@@ -218,7 +217,7 @@ var CAPolicy = func() *config.Signing {
 			Usage:        []string{"cert sign", "crl sign"},
 			ExpiryString: "43800h",
 			Expiry:       5 * helpers.OneYear,
-			CAConstraint: config.CAConstraint{IsCA: true},
+			CA:           true,
 		},
 	}
 }

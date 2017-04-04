@@ -2,8 +2,8 @@ package ca
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"sync"
-	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/swarmkit/api"
@@ -12,33 +12,23 @@ import (
 	"github.com/docker/swarmkit/manager/state"
 	"github.com/docker/swarmkit/manager/state/store"
 	"github.com/docker/swarmkit/protobuf/ptypes"
-	"github.com/pkg/errors"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 )
 
-const (
-	defaultReconciliationRetryInterval = 10 * time.Second
-)
-
 // Server is the CA and NodeCA API gRPC server.
-// TODO(aaronl): At some point we may want to have separate implementations of
+// TODO(diogo): At some point we may want to have separate implementations of
 // CA, NodeCA, and other hypothetical future CA services. At the moment,
 // breaking it apart doesn't seem worth it.
 type Server struct {
-	mu                          sync.Mutex
-	wg                          sync.WaitGroup
-	ctx                         context.Context
-	cancel                      func()
-	store                       *store.MemoryStore
-	securityConfig              *SecurityConfig
-	joinTokens                  *api.JoinTokens
-	reconciliationRetryInterval time.Duration
-
-	// pending is a map of nodes with pending certificates issuance or
-	// renewal. They are indexed by node ID.
-	pending map[string]*api.Node
+	mu             sync.Mutex
+	wg             sync.WaitGroup
+	ctx            context.Context
+	cancel         func()
+	store          *store.MemoryStore
+	securityConfig *SecurityConfig
+	joinTokens     *api.JoinTokens
 
 	// Started is a channel which gets closed once the server is running
 	// and able to service RPCs.
@@ -55,18 +45,10 @@ func DefaultCAConfig() api.CAConfig {
 // NewServer creates a CA API server.
 func NewServer(store *store.MemoryStore, securityConfig *SecurityConfig) *Server {
 	return &Server{
-		store:                       store,
-		securityConfig:              securityConfig,
-		pending:                     make(map[string]*api.Node),
-		started:                     make(chan struct{}),
-		reconciliationRetryInterval: defaultReconciliationRetryInterval,
+		store:          store,
+		securityConfig: securityConfig,
+		started:        make(chan struct{}),
 	}
-}
-
-// SetReconciliationRetryInterval changes the time interval between
-// reconciliation attempts. This function must be called before Run.
-func (s *Server) SetReconciliationRetryInterval(reconciliationRetryInterval time.Duration) {
-	s.reconciliationRetryInterval = reconciliationRetryInterval
 }
 
 // NodeCertificateStatus returns the current issuance status of an issuance request identified by the nodeID
@@ -167,33 +149,16 @@ func (s *Server) IssueNodeCertificate(ctx context.Context, request *api.IssueNod
 	}
 	defer s.doneTask()
 
-	var (
-		removedNodes []*api.RemovedNode
-		clusters     []*api.Cluster
-		err          error
-	)
-
-	s.store.View(func(readTx store.ReadTx) {
-		clusters, err = store.FindClusters(readTx, store.ByName("default"))
-
-	})
-
-	// Not having a cluster object yet means we can't check
-	// the blacklist.
-	if err == nil && len(clusters) == 1 {
-		removedNodes = clusters[0].RemovedNodes
-	}
-
-	// If the remote node is a worker (either forwarded by a manager, or calling directly),
-	// issue a renew worker certificate entry with the correct ID
-	nodeID, err := AuthorizeForwardedRoleAndOrg(ctx, []string{WorkerRole}, []string{ManagerRole}, s.securityConfig.ClientTLSCreds.Organization(), removedNodes)
+	// If the remote node is an Agent (either forwarded by a manager, or calling directly),
+	// issue a renew agent certificate entry with the correct ID
+	nodeID, err := AuthorizeForwardedRoleAndOrg(ctx, []string{AgentRole}, []string{ManagerRole}, s.securityConfig.ClientTLSCreds.Organization())
 	if err == nil {
 		return s.issueRenewCertificate(ctx, nodeID, request.CSR)
 	}
 
-	// If the remote node is a manager (either forwarded by another manager, or calling directly),
+	// If the remote node is a Manager (either forwarded by another manager, or calling directly),
 	// issue a renew certificate entry with the correct ID
-	nodeID, err = AuthorizeForwardedRoleAndOrg(ctx, []string{ManagerRole}, []string{ManagerRole}, s.securityConfig.ClientTLSCreds.Organization(), removedNodes)
+	nodeID, err = AuthorizeForwardedRoleAndOrg(ctx, []string{ManagerRole}, []string{ManagerRole}, s.securityConfig.ClientTLSCreds.Organization())
 	if err == nil {
 		return s.issueRenewCertificate(ctx, nodeID, request.CSR)
 	}
@@ -275,6 +240,7 @@ func (s *Server) issueRenewCertificate(ctx context.Context, nodeID string, csr [
 		node *api.Node
 	)
 	err := s.store.Update(func(tx store.Tx) error {
+
 		// Attempt to retrieve the node with nodeID
 		node = store.GetNode(tx, nodeID)
 		if node == nil {
@@ -334,13 +300,14 @@ func (s *Server) Run(ctx context.Context) error {
 	s.mu.Lock()
 	if s.isRunning() {
 		s.mu.Unlock()
-		return errors.New("CA signer is already running")
+		return fmt.Errorf("CA signer is already running")
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
 
 	defer s.wg.Done()
-	ctx = log.WithModule(ctx, "ca")
+	logger := log.G(ctx).WithField("module", "ca")
+	ctx = log.WithLogger(ctx, logger)
 
 	// Retrieve the channels to keep track of changes in the cluster
 	// Retrieve all the currently registered nodes
@@ -353,7 +320,7 @@ func (s *Server) Run(ctx context.Context) error {
 				return err
 			}
 			if len(clusters) != 1 {
-				return errors.New("could not find cluster object")
+				return fmt.Errorf("could not find cluster object")
 			}
 			s.updateCluster(ctx, clusters[0])
 
@@ -390,9 +357,6 @@ func (s *Server) Run(ctx context.Context) error {
 		}).WithError(err).Errorf("error attempting to reconcile certificates")
 	}
 
-	ticker := time.NewTicker(s.reconciliationRetryInterval)
-	defer ticker.Stop()
-
 	// Watch for new nodes being created, new nodes being updated, and changes
 	// to the cluster
 	for {
@@ -410,16 +374,7 @@ func (s *Server) Run(ctx context.Context) error {
 			case state.EventUpdateCluster:
 				s.updateCluster(ctx, v.Cluster)
 			}
-		case <-ticker.C:
-			for _, node := range s.pending {
-				if err := s.evaluateAndSignNodeCert(ctx, node); err != nil {
-					// If this sign operation did not succeed, the rest are
-					// unlikely to. Yield so that we don't hammer an external CA.
-					// Since the map iteration order is randomized, there is no
-					// risk of getting stuck on a problematic CSR.
-					break
-				}
-			}
+
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.ctx.Done():
@@ -433,7 +388,7 @@ func (s *Server) Stop() error {
 	s.mu.Lock()
 	if !s.isRunning() {
 		s.mu.Unlock()
-		return errors.New("CA signer is already stopped")
+		return fmt.Errorf("CA signer is already stopped")
 	}
 	s.cancel()
 	s.mu.Unlock()
@@ -539,29 +494,28 @@ func (s *Server) updateCluster(ctx context.Context, cluster *api.Cluster) {
 }
 
 // evaluateAndSignNodeCert implements the logic of which certificates to sign
-func (s *Server) evaluateAndSignNodeCert(ctx context.Context, node *api.Node) error {
+func (s *Server) evaluateAndSignNodeCert(ctx context.Context, node *api.Node) {
 	// If the desired membership and actual state are in sync, there's
 	// nothing to do.
 	if node.Spec.Membership == api.NodeMembershipAccepted && node.Certificate.Status.State == api.IssuanceStateIssued {
-		return nil
+		return
 	}
 
 	// If the certificate state is renew, then it is a server-sided accepted cert (cert renewals)
 	if node.Certificate.Status.State == api.IssuanceStateRenew {
-		return s.signNodeCert(ctx, node)
+		s.signNodeCert(ctx, node)
+		return
 	}
 
 	// Sign this certificate if a user explicitly changed it to Accepted, and
 	// the certificate is in pending state
 	if node.Spec.Membership == api.NodeMembershipAccepted && node.Certificate.Status.State == api.IssuanceStatePending {
-		return s.signNodeCert(ctx, node)
+		s.signNodeCert(ctx, node)
 	}
-
-	return nil
 }
 
 // signNodeCert does the bulk of the work for signing a certificate
-func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
+func (s *Server) signNodeCert(ctx context.Context, node *api.Node) {
 	rootCA := s.securityConfig.RootCA()
 	externalCA := s.securityConfig.externalCA
 
@@ -574,10 +528,8 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 			"node.id": node.ID,
 			"method":  "(*Server).signNodeCert",
 		}).WithError(err).Errorf("failed to parse role")
-		return errors.New("failed to parse role")
+		return
 	}
-
-	s.pending[node.ID] = node
 
 	// Attempt to sign the CSR
 	var (
@@ -599,24 +551,21 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 			"node.id": node.ID,
 			"method":  "(*Server).signNodeCert",
 		}).WithError(err).Errorf("failed to sign CSR")
-
+		// If this error is due the lack of signer, maybe some other
+		// manager in the future will pick it up. Return without
+		// changing the state of the certificate.
+		if err == ErrNoValidSigner {
+			return
+		}
 		// If the current state is already Failed, no need to change it
 		if node.Certificate.Status.State == api.IssuanceStateFailed {
-			delete(s.pending, node.ID)
-			return errors.New("failed to sign CSR")
+			return
 		}
-
-		if _, ok := err.(recoverableErr); ok {
-			// Return without changing the state of the certificate. We may
-			// retry signing it in the future.
-			return errors.New("failed to sign CSR")
-		}
-
 		// We failed to sign this CSR, change the state to FAILED
 		err = s.store.Update(func(tx store.Tx) error {
 			node := store.GetNode(tx, nodeID)
 			if node == nil {
-				return errors.Errorf("node %s not found", nodeID)
+				return fmt.Errorf("node %s not found", nodeID)
 			}
 
 			node.Certificate.Status = api.IssuanceStatus{
@@ -632,9 +581,7 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 				"method":  "(*Server).signNodeCert",
 			}).WithError(err).Errorf("transaction failed when setting state to FAILED")
 		}
-
-		delete(s.pending, node.ID)
-		return errors.New("failed to sign CSR")
+		return
 	}
 
 	// We were able to successfully sign the new CSR. Let's try to update the nodeStore
@@ -649,7 +596,7 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 			if err != nil {
 				node = store.GetNode(tx, nodeID)
 				if node == nil {
-					err = errors.Errorf("node %s does not exist", nodeID)
+					err = fmt.Errorf("node %s does not exist", nodeID)
 				}
 			}
 			return err
@@ -660,7 +607,6 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 				"node.role": node.Certificate.Role,
 				"method":    "(*Server).signNodeCert",
 			}).Debugf("certificate issued")
-			delete(s.pending, node.ID)
 			break
 		}
 		if err == store.ErrSequenceConflict {
@@ -671,9 +617,8 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 			"node.id": nodeID,
 			"method":  "(*Server).signNodeCert",
 		}).WithError(err).Errorf("transaction failed")
-		return errors.New("transaction failed")
+		return
 	}
-	return nil
 }
 
 // reconcileNodeCertificates is a helper method that calles evaluateAndSignNodeCert on all the

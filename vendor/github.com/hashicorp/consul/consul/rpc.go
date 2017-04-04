@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/armon/go-metrics"
+	"github.com/hashicorp/consul/consul/agent"
 	"github.com/hashicorp/consul/consul/state"
 	"github.com/hashicorp/consul/consul/structs"
 	"github.com/hashicorp/consul/lib"
+	"github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/yamux"
-	"github.com/inconshreveable/muxado"
 )
 
 type RPCType byte
@@ -24,9 +25,10 @@ type RPCType byte
 const (
 	rpcConsul RPCType = iota
 	rpcRaft
-	rpcMultiplex
+	rpcMultiplex // Old Muxado byte, no longer supported.
 	rpcTLS
 	rpcMultiplexV2
+	rpcSnapshot
 )
 
 const (
@@ -39,7 +41,8 @@ const (
 
 	// jitterFraction is a the limit to the amount of jitter we apply
 	// to a user specified MaxQueryTime. We divide the specified time by
-	// the fraction. So 16 == 6.25% limit of jitter
+	// the fraction. So 16 == 6.25% limit of jitter. This same fraction
+	// is applied to the RPCHoldTimeout
 	jitterFraction = 16
 
 	// Warn if the Raft command is larger than this.
@@ -106,9 +109,6 @@ func (s *Server) handleConn(conn net.Conn, isTLS bool) {
 		metrics.IncrCounter([]string{"consul", "rpc", "raft_handoff"}, 1)
 		s.raftLayer.Handoff(conn)
 
-	case rpcMultiplex:
-		s.handleMultiplex(conn)
-
 	case rpcTLS:
 		if s.rpcTLS == nil {
 			s.logger.Printf("[WARN] consul.rpc: TLS connection attempted, server not configured for TLS %s", logConn(conn))
@@ -121,27 +121,13 @@ func (s *Server) handleConn(conn net.Conn, isTLS bool) {
 	case rpcMultiplexV2:
 		s.handleMultiplexV2(conn)
 
+	case rpcSnapshot:
+		s.handleSnapshotConn(conn)
+
 	default:
 		s.logger.Printf("[ERR] consul.rpc: unrecognized RPC byte: %v %s", buf[0], logConn(conn))
 		conn.Close()
 		return
-	}
-}
-
-// handleMultiplex is used to multiplex a single incoming connection
-// using the Muxado multiplexer
-func (s *Server) handleMultiplex(conn net.Conn) {
-	defer conn.Close()
-	server := muxado.Server(conn)
-	for {
-		sub, err := server.Accept()
-		if err != nil {
-			if !strings.Contains(err.Error(), "closed") {
-				s.logger.Printf("[ERR] consul.rpc: multiplex conn accept failed: %v %s", err, logConn(conn))
-			}
-			return
-		}
-		go s.handleConsulConn(sub)
 	}
 }
 
@@ -186,9 +172,22 @@ func (s *Server) handleConsulConn(conn net.Conn) {
 	}
 }
 
+// handleSnapshotConn is used to dispatch snapshot saves and restores, which
+// stream so don't use the normal RPC mechanism.
+func (s *Server) handleSnapshotConn(conn net.Conn) {
+	go func() {
+		defer conn.Close()
+		if err := s.handleSnapshotRequest(conn); err != nil {
+			s.logger.Printf("[ERR] consul.rpc: Snapshot RPC error: %v %s", err, logConn(conn))
+		}
+	}()
+}
+
 // forward is used to forward to a remote DC or to forward to the local leader
 // Returns a bool of if forwarding was performed, as well as any error
 func (s *Server) forward(method string, info structs.RPCInfo, args interface{}, reply interface{}) (bool, error) {
+	var firstCheck time.Time
+
 	// Handle DC forwarding
 	dc := info.RequestDatacenter()
 	if dc != s.config.Datacenter {
@@ -201,20 +200,51 @@ func (s *Server) forward(method string, info structs.RPCInfo, args interface{}, 
 		return false, nil
 	}
 
-	// Handle leader forwarding
-	if !s.IsLeader() {
-		err := s.forwardLeader(method, args, reply)
+CHECK_LEADER:
+	// Find the leader
+	isLeader, remoteServer := s.getLeader()
+
+	// Handle the case we are the leader
+	if isLeader {
+		return false, nil
+	}
+
+	// Handle the case of a known leader
+	if remoteServer != nil {
+		err := s.forwardLeader(remoteServer, method, args, reply)
 		return true, err
 	}
-	return false, nil
+
+	// Gate the request until there is a leader
+	if firstCheck.IsZero() {
+		firstCheck = time.Now()
+	}
+	if time.Now().Sub(firstCheck) < s.config.RPCHoldTimeout {
+		jitter := lib.RandomStagger(s.config.RPCHoldTimeout / jitterFraction)
+		select {
+		case <-time.After(jitter):
+			goto CHECK_LEADER
+		case <-s.shutdownCh:
+		}
+	}
+
+	// No leader found and hold time exceeded
+	return true, structs.ErrNoLeader
 }
 
-// forwardLeader is used to forward an RPC call to the leader, or fail if no leader
-func (s *Server) forwardLeader(method string, args interface{}, reply interface{}) error {
+// getLeader returns if the current node is the leader, and if not then it
+// returns the leader which is potentially nil if the cluster has not yet
+// elected a leader.
+func (s *Server) getLeader() (bool, *agent.Server) {
+	// Check if we are the leader
+	if s.IsLeader() {
+		return true, nil
+	}
+
 	// Get the leader
 	leader := s.raft.Leader()
 	if leader == "" {
-		return structs.ErrNoLeader
+		return false, nil
 	}
 
 	// Lookup the server
@@ -222,6 +252,12 @@ func (s *Server) forwardLeader(method string, args interface{}, reply interface{
 	server := s.localConsuls[leader]
 	s.localLock.RUnlock()
 
+	// Server could be nil
+	return false, server
+}
+
+// forwardLeader is used to forward an RPC call to the leader, or fail if no leader
+func (s *Server) forwardLeader(server *agent.Server, method string, args interface{}, reply interface{}) error {
 	// Handle a missing server
 	if server == nil {
 		return structs.ErrNoLeader
@@ -229,23 +265,29 @@ func (s *Server) forwardLeader(method string, args interface{}, reply interface{
 	return s.connPool.RPC(s.config.Datacenter, server.Addr, server.Version, method, args, reply)
 }
 
-// forwardDC is used to forward an RPC call to a remote DC, or fail if no servers
-func (s *Server) forwardDC(method, dc string, args interface{}, reply interface{}) error {
-	// Bail if we can't find any servers
+// getRemoteServer returns a random server from a remote datacenter. This uses
+// the bool parameter to signal that none were available.
+func (s *Server) getRemoteServer(dc string) (*agent.Server, bool) {
 	s.remoteLock.RLock()
+	defer s.remoteLock.RUnlock()
 	servers := s.remoteConsuls[dc]
 	if len(servers) == 0 {
-		s.remoteLock.RUnlock()
+		return nil, false
+	}
+
+	offset := rand.Int31n(int32(len(servers)))
+	server := servers[offset]
+	return server, true
+}
+
+// forwardDC is used to forward an RPC call to a remote DC, or fail if no servers
+func (s *Server) forwardDC(method, dc string, args interface{}, reply interface{}) error {
+	server, ok := s.getRemoteServer(dc)
+	if !ok {
 		s.logger.Printf("[WARN] consul.rpc: RPC request for DC '%s', no path found", dc)
 		return structs.ErrNoDCPath
 	}
 
-	// Select a random addr
-	offset := rand.Int31n(int32(len(servers)))
-	server := servers[offset]
-	s.remoteLock.RUnlock()
-
-	// Forward to remote Consul
 	metrics.IncrCounter([]string{"consul", "rpc", "cross-dc", dc}, 1)
 	return s.connPool.RPC(dc, server.Addr, server.Version, method, args, reply)
 }
@@ -311,21 +353,21 @@ func (s *Server) raftApply(t structs.MessageType, msg interface{}) (interface{},
 	return future.Response(), nil
 }
 
-// blockingRPC is used for queries that need to wait for a minimum index. This
-// is used to block and wait for changes.
-func (s *Server) blockingRPC(queryOpts *structs.QueryOptions, queryMeta *structs.QueryMeta,
-	watch state.Watch, run func() error) error {
+// queryFn is used to perform a query operation. If a re-query is needed, the
+// passed-in watch set will be used to block for changes. The passed-in state
+// store should be used (vs. calling fsm.State()) since the given state store
+// will be correctly watched for changes if the state store is restored from
+// a snapshot.
+type queryFn func(memdb.WatchSet, *state.StateStore) error
+
+// blockingQuery is used to process a potentially blocking query operation.
+func (s *Server) blockingQuery(queryOpts *structs.QueryOptions, queryMeta *structs.QueryMeta,
+	fn queryFn) error {
 	var timeout *time.Timer
-	var notifyCh chan struct{}
 
 	// Fast path right to the non-blocking query.
 	if queryOpts.MinQueryIndex == 0 {
 		goto RUN_QUERY
-	}
-
-	// Make sure a watch was given if we were asked to block.
-	if watch == nil {
-		panic("no watch given for blocking query")
 	}
 
 	// Restrict the max query time, and ensure there is always one.
@@ -340,20 +382,7 @@ func (s *Server) blockingRPC(queryOpts *structs.QueryOptions, queryMeta *structs
 
 	// Setup a query timeout.
 	timeout = time.NewTimer(queryOpts.MaxQueryTime)
-
-	// Setup the notify channel.
-	notifyCh = make(chan struct{}, 1)
-
-	// Ensure we tear down any watches on return.
-	defer func() {
-		timeout.Stop()
-		watch.Clear(notifyCh)
-	}()
-
-REGISTER_NOTIFY:
-	// Register the notification channel. This may be done multiple times if
-	// we haven't reached the target wait index.
-	watch.Wait(notifyCh)
+	defer timeout.Stop()
 
 RUN_QUERY:
 	// Update the query metadata.
@@ -368,14 +397,36 @@ RUN_QUERY:
 
 	// Run the query.
 	metrics.IncrCounter([]string{"consul", "rpc", "query"}, 1)
-	err := run()
 
-	// Check for minimum query time.
+	// Operate on a consistent set of state. This makes sure that the
+	// abandon channel goes with the state that the caller is using to
+	// build watches.
+	state := s.fsm.State()
+
+	// We can skip all watch tracking if this isn't a blocking query.
+	var ws memdb.WatchSet
+	if queryOpts.MinQueryIndex > 0 {
+		ws = memdb.NewWatchSet()
+
+		// This channel will be closed if a snapshot is restored and the
+		// whole state store is abandoned.
+		ws.Add(state.AbandonCh())
+	}
+
+	// Block up to the timeout if we didn't see anything fresh.
+	err := fn(ws, state)
 	if err == nil && queryMeta.Index > 0 && queryMeta.Index <= queryOpts.MinQueryIndex {
-		select {
-		case <-notifyCh:
-			goto REGISTER_NOTIFY
-		case <-timeout.C:
+		if expired := ws.Watch(timeout.C); !expired {
+			// If a restore may have woken us up then bail out from
+			// the query immediately. This is slightly race-ey since
+			// this might have been interrupted for other reasons,
+			// but it's OK to kick it back to the caller in either
+			// case.
+			select {
+			case <-state.AbandonCh():
+			default:
+				goto RUN_QUERY
+			}
 		}
 	}
 	return err

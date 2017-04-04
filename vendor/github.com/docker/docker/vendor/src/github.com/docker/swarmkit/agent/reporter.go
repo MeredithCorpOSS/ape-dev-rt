@@ -79,9 +79,6 @@ func (sr *statusReporter) run(ctx context.Context) {
 	done := make(chan struct{})
 	defer close(done)
 
-	sr.mu.Lock() // released during wait, below.
-	defer sr.mu.Unlock()
-
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -91,28 +88,26 @@ func (sr *statusReporter) run(ctx context.Context) {
 		}
 	}()
 
+	sr.mu.Lock() // released during wait, below.
+	defer sr.mu.Unlock()
+
 	for {
 		if len(sr.statuses) == 0 {
 			sr.cond.Wait()
 		}
 
-		if sr.closed {
-			// TODO(stevvooe): Add support here for waiting until all
-			// statuses are flushed before shutting down.
-			return
-		}
-
 		for taskID, status := range sr.statuses {
+			if sr.closed {
+				// TODO(stevvooe): Add support here for waiting until all
+				// statuses are flushed before shutting down.
+				return
+			}
+
 			delete(sr.statuses, taskID) // delete the entry, while trying to send.
 
 			sr.mu.Unlock()
 			err := sr.reporter.UpdateTaskStatus(ctx, taskID, status)
 			sr.mu.Lock()
-
-			// reporter might be closed during UpdateTaskStatus call
-			if sr.closed {
-				return
-			}
 
 			if err != nil {
 				log.G(ctx).WithError(err).Error("failed reporting status to agent")

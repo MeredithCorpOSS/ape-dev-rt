@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -17,8 +16,6 @@ import (
 	"github.com/docker/swarmkit/manager/state/watch"
 	"github.com/docker/swarmkit/protobuf/ptypes"
 )
-
-const defaultMonitor = 30 * time.Second
 
 // UpdateSupervisor supervises a set of updates. It's responsible for keeping track of updates,
 // shutting them down and replacing them.
@@ -38,21 +35,16 @@ func NewUpdateSupervisor(store *store.MemoryStore, restartSupervisor *RestartSup
 	}
 }
 
-// Update starts an Update of `slots` belonging to `service` in the background
-// and returns immediately. Each slot contains a group of one or more tasks
-// occupying the same slot (replicated service) or node (global service). There
-// may be more than one task per slot in cases where an update is in progress
-// and the new task was started before the old one was shut down. If an update
-// for that service was already in progress, it will be cancelled before the
-// new one starts.
-func (u *UpdateSupervisor) Update(ctx context.Context, cluster *api.Cluster, service *api.Service, slots []slot) {
+// Update starts an Update of `tasks` belonging to `service` in the background and returns immediately.
+// If an update for that service was already in progress, it will be cancelled before the new one starts.
+func (u *UpdateSupervisor) Update(ctx context.Context, cluster *api.Cluster, service *api.Service, tasks []*api.Task) {
 	u.l.Lock()
 	defer u.l.Unlock()
 
 	id := service.ID
 
 	if update, ok := u.updates[id]; ok {
-		if reflect.DeepEqual(service.Spec, update.newService.Spec) {
+		if !update.isServiceDirty(service) {
 			// There's already an update working towards this goal.
 			return
 		}
@@ -62,7 +54,7 @@ func (u *UpdateSupervisor) Update(ctx context.Context, cluster *api.Cluster, ser
 	update := NewUpdater(u.store, u.restarts, cluster, service)
 	u.updates[id] = update
 	go func() {
-		update.Run(ctx, slots)
+		update.Run(ctx, tasks)
 		u.l.Lock()
 		if u.updates[id] == update {
 			delete(u.updates, id)
@@ -90,9 +82,6 @@ type Updater struct {
 	cluster    *api.Cluster
 	newService *api.Service
 
-	updatedTasks   map[string]time.Time // task ID to creation time
-	updatedTasksMu sync.Mutex
-
 	// stopChan signals to the state machine to stop running.
 	stopChan chan struct{}
 	// doneChan is closed when the state machine terminates.
@@ -102,14 +91,13 @@ type Updater struct {
 // NewUpdater creates a new Updater.
 func NewUpdater(store *store.MemoryStore, restartSupervisor *RestartSupervisor, cluster *api.Cluster, newService *api.Service) *Updater {
 	return &Updater{
-		store:        store,
-		watchQueue:   store.WatchQueue(),
-		restarts:     restartSupervisor,
-		cluster:      cluster.Copy(),
-		newService:   newService.Copy(),
-		updatedTasks: make(map[string]time.Time),
-		stopChan:     make(chan struct{}),
-		doneChan:     make(chan struct{}),
+		store:      store,
+		watchQueue: store.WatchQueue(),
+		restarts:   restartSupervisor,
+		cluster:    cluster.Copy(),
+		newService: newService.Copy(),
+		stopChan:   make(chan struct{}),
+		doneChan:   make(chan struct{}),
 	}
 }
 
@@ -120,29 +108,25 @@ func (u *Updater) Cancel() {
 }
 
 // Run starts the update and returns only once its complete or cancelled.
-func (u *Updater) Run(ctx context.Context, slots []slot) {
+func (u *Updater) Run(ctx context.Context, tasks []*api.Task) {
 	defer close(u.doneChan)
 
 	service := u.newService
 
 	// If the update is in a PAUSED state, we should not do anything.
-	if service.UpdateStatus != nil &&
-		(service.UpdateStatus.State == api.UpdateStatus_PAUSED ||
-			service.UpdateStatus.State == api.UpdateStatus_ROLLBACK_PAUSED) {
+	if service.UpdateStatus != nil && service.UpdateStatus.State == api.UpdateStatus_PAUSED {
 		return
 	}
 
-	var dirtySlots []slot
-	for _, slot := range slots {
-		if u.isSlotDirty(slot) {
-			dirtySlots = append(dirtySlots, slot)
+	dirtyTasks := []*api.Task{}
+	for _, t := range tasks {
+		if u.isTaskDirty(t) {
+			dirtyTasks = append(dirtyTasks, t)
 		}
 	}
 	// Abort immediately if all tasks are clean.
-	if len(dirtySlots) == 0 {
-		if service.UpdateStatus != nil &&
-			(service.UpdateStatus.State == api.UpdateStatus_UPDATING ||
-				service.UpdateStatus.State == api.UpdateStatus_ROLLBACK_STARTED) {
+	if len(dirtyTasks) == 0 {
+		if service.UpdateStatus != nil && service.UpdateStatus.State == api.UpdateStatus_UPDATING {
 			u.completeUpdate(ctx, service.ID)
 		}
 		return
@@ -160,40 +144,23 @@ func (u *Updater) Run(ctx context.Context, slots []slot) {
 	if parallelism == 0 {
 		// TODO(aluzzardi): We could try to optimize unlimited parallelism by performing updates in a single
 		// goroutine using a batch transaction.
-		parallelism = len(dirtySlots)
+		parallelism = len(dirtyTasks)
 	}
 
 	// Start the workers.
-	slotQueue := make(chan slot)
+	taskQueue := make(chan *api.Task)
 	wg := sync.WaitGroup{}
 	wg.Add(parallelism)
 	for i := 0; i < parallelism; i++ {
 		go func() {
-			u.worker(ctx, slotQueue)
+			u.worker(ctx, taskQueue)
 			wg.Done()
 		}()
 	}
 
-	failureAction := api.UpdateConfig_PAUSE
-	allowedFailureFraction := float32(0)
-	monitoringPeriod := defaultMonitor
-
-	if service.Spec.Update != nil {
-		failureAction = service.Spec.Update.FailureAction
-		allowedFailureFraction = service.Spec.Update.MaxFailureRatio
-
-		if service.Spec.Update.Monitor != nil {
-			var err error
-			monitoringPeriod, err = ptypes.Duration(service.Spec.Update.Monitor)
-			if err != nil {
-				monitoringPeriod = defaultMonitor
-			}
-		}
-	}
-
 	var failedTaskWatch chan events.Event
 
-	if failureAction != api.UpdateConfig_CONTINUE {
+	if service.Spec.Update == nil || service.Spec.Update.FailureAction == api.UpdateConfig_PAUSE {
 		var cancelWatch func()
 		failedTaskWatch, cancelWatch = state.Watch(
 			u.store.WatchQueue(),
@@ -206,140 +173,52 @@ func (u *Updater) Run(ctx context.Context, slots []slot) {
 	}
 
 	stopped := false
-	failedTasks := make(map[string]struct{})
-	totalFailures := 0
 
-	failureTriggersAction := func(failedTask *api.Task) bool {
-		// Ignore tasks we have already seen as failures.
-		if _, found := failedTasks[failedTask.ID]; found {
-			return false
-		}
-
-		// If this failed/completed task is one that we
-		// created as part of this update, we should
-		// follow the failure action.
-		u.updatedTasksMu.Lock()
-		startedAt, found := u.updatedTasks[failedTask.ID]
-		u.updatedTasksMu.Unlock()
-
-		if found && (startedAt.IsZero() || time.Since(startedAt) <= monitoringPeriod) {
-			failedTasks[failedTask.ID] = struct{}{}
-			totalFailures++
-			if float32(totalFailures)/float32(len(dirtySlots)) > allowedFailureFraction {
-				switch failureAction {
-				case api.UpdateConfig_PAUSE:
-					stopped = true
-					message := fmt.Sprintf("update paused due to failure or early termination of task %s", failedTask.ID)
-					u.pauseUpdate(ctx, service.ID, message)
-					return true
-				case api.UpdateConfig_ROLLBACK:
-					// Never roll back a rollback
-					if service.UpdateStatus != nil && service.UpdateStatus.State == api.UpdateStatus_ROLLBACK_STARTED {
-						message := fmt.Sprintf("rollback paused due to failure or early termination of task %s", failedTask.ID)
-						u.pauseUpdate(ctx, service.ID, message)
-						return true
-					}
-					stopped = true
-					message := fmt.Sprintf("update rolled back due to failure or early termination of task %s", failedTask.ID)
-					u.rollbackUpdate(ctx, service.ID, message)
-					return true
-				}
-			}
-		}
-
-		return false
-	}
-
-slotsLoop:
-	for _, slot := range dirtySlots {
+taskLoop:
+	for _, t := range dirtyTasks {
 	retryLoop:
 		for {
 			// Wait for a worker to pick up the task or abort the update, whichever comes first.
 			select {
 			case <-u.stopChan:
 				stopped = true
-				break slotsLoop
+				break taskLoop
 			case ev := <-failedTaskWatch:
-				if failureTriggersAction(ev.(state.EventUpdateTask).Task) {
-					break slotsLoop
+				failedTask := ev.(state.EventUpdateTask).Task
+
+				// If this failed/completed task has a spec matching
+				// the one we're updating to, we should pause the
+				// update.
+				if !u.isTaskDirty(failedTask) {
+					stopped = true
+					message := fmt.Sprintf("update paused due to failure or early termination of task %s", failedTask.ID)
+					u.pauseUpdate(ctx, service.ID, message)
+					break taskLoop
 				}
-			case slotQueue <- slot:
+			case taskQueue <- t:
 				break retryLoop
 			}
 		}
 	}
 
-	close(slotQueue)
+	close(taskQueue)
 	wg.Wait()
-
-	if !stopped {
-		// Keep watching for task failures for one more monitoringPeriod,
-		// before declaring the update complete.
-		doneMonitoring := time.After(monitoringPeriod)
-	monitorLoop:
-		for {
-			select {
-			case <-u.stopChan:
-				stopped = true
-				break monitorLoop
-			case <-doneMonitoring:
-				break monitorLoop
-			case ev := <-failedTaskWatch:
-				if failureTriggersAction(ev.(state.EventUpdateTask).Task) {
-					break monitorLoop
-				}
-			}
-		}
-	}
-
-	// TODO(aaronl): Potentially roll back the service if not enough tasks
-	// have reached RUNNING by this point.
 
 	if !stopped {
 		u.completeUpdate(ctx, service.ID)
 	}
 }
 
-func (u *Updater) worker(ctx context.Context, queue <-chan slot) {
-	for slot := range queue {
-		// Do we have a task with the new spec in desired state = RUNNING?
-		// If so, all we have to do to complete the update is remove the
-		// other tasks. Or if we have a task with the new spec that has
-		// desired state < RUNNING, advance it to running and remove the
-		// other tasks.
-		var (
-			runningTask *api.Task
-			cleanTask   *api.Task
-		)
-		for _, t := range slot {
-			if !u.isTaskDirty(t) {
-				if t.DesiredState == api.TaskStateRunning {
-					runningTask = t
-					break
-				}
-				if t.DesiredState < api.TaskStateRunning {
-					cleanTask = t
-				}
-			}
+func (u *Updater) worker(ctx context.Context, queue <-chan *api.Task) {
+	for t := range queue {
+		updated := newTask(u.cluster, u.newService, t.Slot)
+		updated.DesiredState = api.TaskStateReady
+		if isGlobalService(u.newService) {
+			updated.NodeID = t.NodeID
 		}
-		if runningTask != nil {
-			if err := u.useExistingTask(ctx, slot, runningTask); err != nil {
-				log.G(ctx).WithError(err).Error("update failed")
-			}
-		} else if cleanTask != nil {
-			if err := u.useExistingTask(ctx, slot, cleanTask); err != nil {
-				log.G(ctx).WithError(err).Error("update failed")
-			}
-		} else {
-			updated := newTask(u.cluster, u.newService, slot[0].Slot, "")
-			if isGlobalService(u.newService) {
-				updated = newTask(u.cluster, u.newService, slot[0].Slot, slot[0].NodeID)
-			}
-			updated.DesiredState = api.TaskStateReady
 
-			if err := u.updateTask(ctx, slot, updated); err != nil {
-				log.G(ctx).WithError(err).WithField("task.id", updated.ID).Error("update failed")
-			}
+		if err := u.updateTask(ctx, t, updated); err != nil {
+			log.G(ctx).WithError(err).WithField("task.id", t.ID).Error("update failed")
 		}
 
 		if u.newService.Spec.Update != nil && (u.newService.Spec.Update.Delay.Seconds != 0 || u.newService.Spec.Update.Delay.Nanos != 0) {
@@ -357,7 +236,8 @@ func (u *Updater) worker(ctx context.Context, queue <-chan slot) {
 	}
 }
 
-func (u *Updater) updateTask(ctx context.Context, slot slot, updated *api.Task) error {
+func (u *Updater) updateTask(ctx context.Context, original, updated *api.Task) error {
+	log.G(ctx).Debugf("replacing %s with %s", original.ID, updated.ID)
 	// Kick off the watch before even creating the updated task. This is in order to avoid missing any event.
 	taskUpdates, cancel := state.Watch(u.watchQueue, state.EventUpdateTask{
 		Task:   &api.Task{ID: updated.ID},
@@ -365,32 +245,28 @@ func (u *Updater) updateTask(ctx context.Context, slot slot, updated *api.Task) 
 	})
 	defer cancel()
 
-	// Create an empty entry for this task, so the updater knows a failure
-	// should count towards the failure count. The timestamp is added
-	// if/when the task reaches RUNNING.
-	u.updatedTasksMu.Lock()
-	u.updatedTasks[updated.ID] = time.Time{}
-	u.updatedTasksMu.Unlock()
-
 	var delayStartCh <-chan struct{}
 	// Atomically create the updated task and bring down the old one.
-	_, err := u.store.Batch(func(batch *store.Batch) error {
-		oldTask, err := u.removeOldTasks(ctx, batch, slot)
-		if err != nil {
+	err := u.store.Update(func(tx store.Tx) error {
+		t := store.GetTask(tx, original.ID)
+		if t == nil {
+			return fmt.Errorf("task %s not found while trying to update it", original.ID)
+		}
+		if t.DesiredState > api.TaskStateRunning {
+			return fmt.Errorf("task %s was already shut down when reached by updater", original.ID)
+		}
+		t.DesiredState = api.TaskStateShutdown
+		if err := store.UpdateTask(tx, t); err != nil {
 			return err
 		}
 
-		err = batch.Update(func(tx store.Tx) error {
-			if err := store.CreateTask(tx, updated); err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
+		if err := store.CreateTask(tx, updated); err != nil {
 			return err
 		}
 
-		delayStartCh = u.restarts.DelayStart(ctx, nil, oldTask, updated.ID, 0, true)
+		// Wait for the old task to stop or time out, and then set the new one
+		// to RUNNING.
+		delayStartCh = u.restarts.DelayStart(ctx, tx, original, updated.ID, 0, true)
 
 		return nil
 
@@ -399,9 +275,7 @@ func (u *Updater) updateTask(ctx context.Context, slot slot, updated *api.Task) 
 		return err
 	}
 
-	if delayStartCh != nil {
-		<-delayStartCh
-	}
+	<-delayStartCh
 
 	// Wait for the new task to come up.
 	// TODO(aluzzardi): Consider adding a timeout here.
@@ -410,9 +284,6 @@ func (u *Updater) updateTask(ctx context.Context, slot slot, updated *api.Task) 
 		case e := <-taskUpdates:
 			updated = e.(state.EventUpdateTask).Task
 			if updated.Status.State >= api.TaskStateRunning {
-				u.updatedTasksMu.Lock()
-				u.updatedTasks[updated.ID] = time.Now()
-				u.updatedTasksMu.Unlock()
 				return nil
 			}
 		case <-u.stopChan:
@@ -421,85 +292,14 @@ func (u *Updater) updateTask(ctx context.Context, slot slot, updated *api.Task) 
 	}
 }
 
-func (u *Updater) useExistingTask(ctx context.Context, slot slot, existing *api.Task) error {
-	var removeTasks []*api.Task
-	for _, t := range slot {
-		if t != existing {
-			removeTasks = append(removeTasks, t)
-		}
-	}
-	if len(removeTasks) != 0 || existing.DesiredState != api.TaskStateRunning {
-		var delayStartCh <-chan struct{}
-		_, err := u.store.Batch(func(batch *store.Batch) error {
-			var oldTask *api.Task
-			if len(removeTasks) != 0 {
-				var err error
-				oldTask, err = u.removeOldTasks(ctx, batch, removeTasks)
-				if err != nil {
-					return err
-				}
-			}
-
-			if existing.DesiredState != api.TaskStateRunning {
-				delayStartCh = u.restarts.DelayStart(ctx, nil, oldTask, existing.ID, 0, true)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		if delayStartCh != nil {
-			<-delayStartCh
-		}
-	}
-
-	return nil
-}
-
-// removeOldTasks shuts down the given tasks and returns one of the tasks that
-// was shut down, or an error.
-func (u *Updater) removeOldTasks(ctx context.Context, batch *store.Batch, removeTasks []*api.Task) (*api.Task, error) {
-	var (
-		lastErr     error
-		removedTask *api.Task
-	)
-	for _, original := range removeTasks {
-		err := batch.Update(func(tx store.Tx) error {
-			t := store.GetTask(tx, original.ID)
-			if t == nil {
-				return fmt.Errorf("task %s not found while trying to shut it down", original.ID)
-			}
-			if t.DesiredState > api.TaskStateRunning {
-				return fmt.Errorf("task %s was already shut down when reached by updater", original.ID)
-			}
-			t.DesiredState = api.TaskStateShutdown
-			return store.UpdateTask(tx, t)
-		})
-		if err != nil {
-			lastErr = err
-		} else {
-			removedTask = original
-		}
-	}
-
-	if removedTask == nil {
-		return nil, lastErr
-	}
-	return removedTask, nil
-}
-
-func isTaskDirty(s *api.Service, t *api.Task) bool {
-	return !reflect.DeepEqual(s.Spec.Task, t.Spec) ||
-		(t.Endpoint != nil && !reflect.DeepEqual(s.Spec.Endpoint, t.Endpoint.Spec))
-}
-
 func (u *Updater) isTaskDirty(t *api.Task) bool {
-	return isTaskDirty(u.newService, t)
+	return !reflect.DeepEqual(u.newService.Spec.Task, t.Spec) ||
+		(t.Endpoint != nil && !reflect.DeepEqual(u.newService.Spec.Endpoint, t.Endpoint.Spec))
 }
 
-func (u *Updater) isSlotDirty(slot slot) bool {
-	return len(slot) > 1 || (len(slot) == 1 && u.isTaskDirty(slot[0]))
+func (u *Updater) isServiceDirty(service *api.Service) bool {
+	return !reflect.DeepEqual(u.newService.Spec.Task, service.Spec.Task) ||
+		!reflect.DeepEqual(u.newService.Spec.Endpoint, service.Spec.Endpoint)
 }
 
 func (u *Updater) startUpdate(ctx context.Context, serviceID string) {
@@ -539,11 +339,7 @@ func (u *Updater) pauseUpdate(ctx context.Context, serviceID, message string) {
 			return nil
 		}
 
-		if service.UpdateStatus.State == api.UpdateStatus_ROLLBACK_STARTED {
-			service.UpdateStatus.State = api.UpdateStatus_ROLLBACK_PAUSED
-		} else {
-			service.UpdateStatus.State = api.UpdateStatus_PAUSED
-		}
+		service.UpdateStatus.State = api.UpdateStatus_PAUSED
 		service.UpdateStatus.Message = message
 
 		return store.UpdateService(tx, service)
@@ -551,38 +347,6 @@ func (u *Updater) pauseUpdate(ctx context.Context, serviceID, message string) {
 
 	if err != nil {
 		log.G(ctx).WithError(err).Errorf("failed to pause update of service %s", serviceID)
-	}
-}
-
-func (u *Updater) rollbackUpdate(ctx context.Context, serviceID, message string) {
-	log.G(ctx).Debugf("starting rollback of service %s", serviceID)
-
-	var service *api.Service
-	err := u.store.Update(func(tx store.Tx) error {
-		service = store.GetService(tx, serviceID)
-		if service == nil {
-			return nil
-		}
-		if service.UpdateStatus == nil {
-			// The service was updated since we started this update
-			return nil
-		}
-
-		service.UpdateStatus.State = api.UpdateStatus_ROLLBACK_STARTED
-		service.UpdateStatus.Message = message
-
-		if service.PreviousSpec == nil {
-			return errors.New("cannot roll back service because no previous spec is available")
-		}
-		service.Spec = *service.PreviousSpec
-		service.PreviousSpec = nil
-
-		return store.UpdateService(tx, service)
-	})
-
-	if err != nil {
-		log.G(ctx).WithError(err).Errorf("failed to start rollback of service %s", serviceID)
-		return
 	}
 }
 
@@ -598,13 +362,9 @@ func (u *Updater) completeUpdate(ctx context.Context, serviceID string) {
 			// The service was changed since we started this update
 			return nil
 		}
-		if service.UpdateStatus.State == api.UpdateStatus_ROLLBACK_STARTED {
-			service.UpdateStatus.State = api.UpdateStatus_ROLLBACK_COMPLETED
-			service.UpdateStatus.Message = "rollback completed"
-		} else {
-			service.UpdateStatus.State = api.UpdateStatus_COMPLETED
-			service.UpdateStatus.Message = "update completed"
-		}
+
+		service.UpdateStatus.State = api.UpdateStatus_COMPLETED
+		service.UpdateStatus.Message = "update completed"
 		service.UpdateStatus.CompletedAt = ptypes.MustTimestampProto(time.Now())
 
 		return store.UpdateService(tx, service)

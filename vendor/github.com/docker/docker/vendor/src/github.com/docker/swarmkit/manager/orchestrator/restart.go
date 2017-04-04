@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"container/list"
-	"errors"
 	"sync"
 	"time"
 
@@ -77,9 +76,6 @@ func (r *RestartSupervisor) waitRestart(ctx context.Context, oldDelay *delayedSt
 		if t == nil {
 			return nil
 		}
-		if t.DesiredState > api.TaskStateRunning {
-			return nil
-		}
 		service := store.GetService(tx, t.ServiceID)
 		if service == nil {
 			return nil
@@ -112,13 +108,6 @@ func (r *RestartSupervisor) Restart(ctx context.Context, tx store.Tx, cluster *a
 	}
 	r.mu.Unlock()
 
-	// Sanity check: was the task shut down already by a separate call to
-	// Restart? If so, we must avoid restarting it, because this will create
-	// an extra task. This should never happen unless there is a bug.
-	if t.DesiredState > api.TaskStateRunning {
-		return errors.New("Restart called on task that was already shut down")
-	}
-
 	t.DesiredState = api.TaskStateShutdown
 	err := store.UpdateTask(tx, &t)
 	if err != nil {
@@ -133,9 +122,10 @@ func (r *RestartSupervisor) Restart(ctx context.Context, tx store.Tx, cluster *a
 	var restartTask *api.Task
 
 	if isReplicatedService(service) {
-		restartTask = newTask(cluster, service, t.Slot, "")
+		restartTask = newTask(cluster, service, t.Slot)
 	} else if isGlobalService(service) {
-		restartTask = newTask(cluster, service, 0, t.NodeID)
+		restartTask = newTask(cluster, service, 0)
+		restartTask.NodeID = t.NodeID
 	} else {
 		log.G(ctx).Error("service not supported by restart supervisor")
 		return nil
@@ -345,8 +335,7 @@ func (r *RestartSupervisor) DelayStart(ctx context.Context, _ store.Tx, oldTask 
 			close(doneCh)
 		}()
 
-		oldTaskTimer := time.NewTimer(r.taskTimeout)
-		defer oldTaskTimer.Stop()
+		oldTaskTimeout := time.After(r.taskTimeout)
 
 		// Wait for the delay to elapse, if one is specified.
 		if delay != 0 {
@@ -357,10 +346,10 @@ func (r *RestartSupervisor) DelayStart(ctx context.Context, _ store.Tx, oldTask 
 			}
 		}
 
-		if waitStop && oldTask != nil {
+		if waitStop {
 			select {
 			case <-watch:
-			case <-oldTaskTimer.C:
+			case <-oldTaskTimeout:
 			case <-ctx.Done():
 				return
 			}

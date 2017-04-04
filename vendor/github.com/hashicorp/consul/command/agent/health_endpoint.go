@@ -11,6 +11,7 @@ func (s *HTTPServer) HealthChecksInState(resp http.ResponseWriter, req *http.Req
 	// Set default DC
 	args := structs.ChecksInStateRequest{}
 	s.parseSource(req, &args.Source)
+	args.NodeMetaFilters = s.parseMetaFilter(req)
 	if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
 		return nil, nil
 	}
@@ -70,6 +71,7 @@ func (s *HTTPServer) HealthServiceChecks(resp http.ResponseWriter, req *http.Req
 	// Set default DC
 	args := structs.ServiceSpecificRequest{}
 	s.parseSource(req, &args.Source)
+	args.NodeMetaFilters = s.parseMetaFilter(req)
 	if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
 		return nil, nil
 	}
@@ -100,6 +102,7 @@ func (s *HTTPServer) HealthServiceNodes(resp http.ResponseWriter, req *http.Requ
 	// Set default DC
 	args := structs.ServiceSpecificRequest{}
 	s.parseSource(req, &args.Source)
+	args.NodeMetaFilters = s.parseMetaFilter(req)
 	if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
 		return nil, nil
 	}
@@ -131,6 +134,9 @@ func (s *HTTPServer) HealthServiceNodes(resp http.ResponseWriter, req *http.Requ
 		out.Nodes = filterNonPassing(out.Nodes)
 	}
 
+	// Translate addresses after filtering so we don't waste effort.
+	translateAddresses(s.agent.config, args.Datacenter, out.Nodes)
+
 	// Use empty list instead of nil
 	for i, _ := range out.Nodes {
 		// TODO (slackpad) It's lame that this isn't a slice of pointers
@@ -143,6 +149,7 @@ func (s *HTTPServer) HealthServiceNodes(resp http.ResponseWriter, req *http.Requ
 	if out.Nodes == nil {
 		out.Nodes = make(structs.CheckServiceNodes, 0)
 	}
+
 	return out.Nodes, nil
 }
 

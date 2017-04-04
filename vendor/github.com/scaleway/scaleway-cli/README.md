@@ -105,7 +105,7 @@ mkdir -p /usr/local/bin
 mv /usr/local/bin/scw /tmp/scw.old
 
 # get latest release
-wget "https://github.com/scaleway/scaleway-cli/releases/download/v1.9.0/scw_1.9.0_darwin_amd64.zip" -O /tmp/scw.zip
+wget "https://github.com/scaleway/scaleway-cli/releases/download/v1.11.1/scw_1.11.1_darwin_amd64.zip" -O /tmp/scw.zip
 unzip /tmp/scw.zip \*/scw -d /tmp
 mv /tmp/scw_*/scw /usr/local/bin
 rm -rf /tmp/scw.zip /tmp/scw_*_darwin_amd64
@@ -119,7 +119,7 @@ Install the latest release on Linux:
 ```bash
 # get latest release
 export ARCH=amd64  # can be 'i386', 'amd64' or 'armhf'
-wget "https://github.com/scaleway/scaleway-cli/releases/download/v1.9.0/scw_1.9.0_${ARCH}.deb" -O /tmp/scw.deb
+wget "https://github.com/scaleway/scaleway-cli/releases/download/v1.11.1/scw_1.11.1_${ARCH}.deb" -O /tmp/scw.deb
 dpkg -i /tmp/scw.deb && rm -f /tmp/scw.deb
 
 # test
@@ -295,7 +295,7 @@ Options:
 
   -g, --gateway=""      Use a SSH gateway
   -h, --help=false      Print usage
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   --user=root           Specify SSH user
 
 Examples:
@@ -367,9 +367,10 @@ Run a command on a running server.
 
 Options:
 
+  -A=false              Enable SSH keys forwarding
   -g, --gateway=""      Use a SSH gateway
   -h, --help=false      Print usage
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   -T, --timeout=0       Set timeout values to seconds
   --user=root           Specify SSH user
   -w, --wait=false      Wait for SSH to be ready
@@ -566,7 +567,7 @@ Options:
 
   -g, --gateway=""      Use a SSH gateway
   -h, --help=false      Print usage
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   --user=root           Specify SSH user
 ```
 
@@ -582,7 +583,7 @@ Options:
 
   -g, --gateway=""      Use a SSH gateway
   -h, --help=false      Print usage
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   --user=root           Specify SSH user
 ```
 
@@ -716,7 +717,7 @@ Options:
   --ip-address=""       Assign a reserved public IP, a 'dynamic' one or 'none' (default to 'none' if gateway specified, 'dynamic' otherwise)
   --ipv6=false          Enable IPV6
   --name=""             Assign a name
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   --rm=false            Automatically remove the server when it exits
   --show-boot=false     Allows to show the boot
   -T, --timeout=0       Set timeout value to seconds
@@ -793,7 +794,6 @@ Options:
 #### `scw stop`
 
 ```console
-➜  scaleway-cli git:(master) ✗ clear; scw help stop
 Usage: scw stop [OPTIONS] SERVER [SERVER...]
 
 Stop a running server.
@@ -840,7 +840,7 @@ Options:
 
   -g, --gateway=""      Use a SSH gateway
   -h, --help=false      Print usage
-  --p, --port=22        Specify SSH port
+  -p, --port=22         Specify SSH port
   --user=root           Specify SSH user
 ```
 
@@ -861,7 +861,6 @@ Options:
 #### `scw wait`
 
 ```console
-➜  scaleway-cli git:(master) ✗ clear; scw help wait
 Usage: scw wait [OPTIONS] SERVER [SERVER...]
 
 Block until a server stops.
@@ -1203,10 +1202,18 @@ $ scw inspect myserver | jq '.[0].public_ip.address'
 
 ### master (unreleased)
 
+* cmd: exec, add -A flag to forward ssh keys
+* cmd: fix typo `-p` flag port instead of `--p`
+
+View full [commits list](https://github.com/scaleway/scaleway-cli/compare/v1.11...master)
+
+### v1.11.1 (2016-11-17)
+
+* API: try to connect trough the gateway when nc doesn't work
 * API: hotfix region with user images
 * API: fix filter on paginate page
 
-View full [commits list](https://github.com/scaleway/scaleway-cli/compare/v1.11...master)
+View full [commits list](https://github.com/scaleway/scaleway-cli/compare/v1.11...v1.11.1)
 
 ### v1.11 (2016-10-27)
 

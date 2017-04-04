@@ -2,9 +2,9 @@ package storage
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"reflect"
+	"time"
 
 	chk "gopkg.in/check.v1"
 )
@@ -44,46 +44,6 @@ func (c *CustomEntity) SetPartitionKey(s string) error {
 func (c *CustomEntity) SetRowKey(s string) error {
 	c.RKey = s
 	return nil
-}
-
-func (s *StorageBlobSuite) Test_SharedKeyLite(c *chk.C) {
-	cli := getTableClient(c)
-
-	// override the accountKey and accountName
-	// but make sure to reset when returning
-	oldAK := cli.client.accountKey
-	oldAN := cli.client.accountName
-
-	defer func() {
-		cli.client.accountKey = oldAK
-		cli.client.accountName = oldAN
-	}()
-
-	// don't worry, I've already changed mine :)
-	key, err := base64.StdEncoding.DecodeString("zHDHGs7C+Di9pZSDMuarxJJz3xRBzAHBYaobxpLEc7kwTptR/hPEa9j93hIfb2Tbe9IA50MViGmjQ6nUF/OVvA==")
-	if err != nil {
-		c.Fail()
-	}
-
-	cli.client.accountKey = key
-	cli.client.accountName = "mindgotest"
-
-	headers := map[string]string{
-		"Accept-Charset": "UTF-8",
-		"Content-Type":   "application/json",
-		"x-ms-date":      "Wed, 23 Sep 2015 16:40:05 GMT",
-		"Content-Length": "0",
-		"x-ms-version":   "2015-02-21",
-		"Accept":         "application/json;odata=nometadata",
-	}
-	url := "https://mindgotest.table.core.windows.net/tquery()"
-
-	ret, err := cli.client.createSharedKeyLite(url, headers)
-	if err != nil {
-		c.Fail()
-	}
-
-	c.Assert(ret, chk.Equals, "SharedKeyLite mindgotest:+32DTgsPUgXPo/O7RYaTs0DllA6FTXMj3uK4Qst8y/E=")
 }
 
 func (s *StorageBlobSuite) Test_CreateAndDeleteTable(c *chk.C) {
@@ -284,4 +244,85 @@ func randTable() string {
 		bytes[i] = alphanum[b%byte(len(alphanum))]
 	}
 	return string(bytes)
+}
+
+func appendTablePermission(policies []TableAccessPolicy, ID string,
+	canRead bool, canAppend bool, canUpdate bool, canDelete bool,
+	startTime time.Time, expiryTime time.Time) []TableAccessPolicy {
+
+	tap := TableAccessPolicy{
+		ID:         ID,
+		StartTime:  startTime,
+		ExpiryTime: expiryTime,
+		CanRead:    canRead,
+		CanAppend:  canAppend,
+		CanUpdate:  canUpdate,
+		CanDelete:  canDelete,
+	}
+	policies = append(policies, tap)
+	return policies
+}
+
+func (s *StorageBlobSuite) TestSetTablePermissionsSuccessfully(c *chk.C) {
+	cli := getTableClient(c)
+	tn := AzureTable(randTable())
+	err := cli.CreateTable(tn)
+	c.Assert(err, chk.IsNil)
+	defer cli.DeleteTable(tn)
+
+	policies := []TableAccessPolicy{}
+	policies = appendTablePermission(policies, "GolangRocksOnAzure", true, true, true, true, now, now.Add(10*time.Hour))
+
+	err = cli.SetTablePermissions(tn, policies, 0)
+	c.Assert(err, chk.IsNil)
+}
+
+func (s *StorageBlobSuite) TestSetTablePermissionsUnsuccessfully(c *chk.C) {
+	cli := getTableClient(c)
+	tn := AzureTable("nonexistingtable")
+
+	policies := []TableAccessPolicy{}
+	policies = appendTablePermission(policies, "GolangRocksOnAzure", true, true, true, true, now, now.Add(10*time.Hour))
+
+	err := cli.SetTablePermissions(tn, policies, 0)
+	c.Assert(err, chk.NotNil)
+}
+
+func (s *StorageBlobSuite) TestSetThenGetTablePermissionsSuccessfully(c *chk.C) {
+	cli := getTableClient(c)
+	tn := AzureTable(randTable())
+	err := cli.CreateTable(tn)
+	c.Assert(err, chk.IsNil)
+	defer cli.DeleteTable(tn)
+
+	policies := []TableAccessPolicy{}
+	policies = appendTablePermission(policies, "GolangRocksOnAzure", true, true, true, true, now, now.Add(10*time.Hour))
+	policies = appendTablePermission(policies, "AutoRestIsSuperCool", true, true, false, true, now.Add(20*time.Hour), now.Add(30*time.Hour))
+	err = cli.SetTablePermissions(tn, policies, 0)
+	c.Assert(err, chk.IsNil)
+
+	returnedPolicies, err := cli.GetTablePermissions(tn, 0)
+	c.Assert(err, chk.IsNil)
+
+	// now check policy set.
+	c.Assert(returnedPolicies, chk.HasLen, 2)
+
+	for i := range policies {
+		c.Assert(returnedPolicies[i].ID, chk.Equals, policies[i].ID)
+
+		// test timestamps down the second
+		// rounding start/expiry time original perms since the returned perms would have been rounded.
+		// so need rounded vs rounded.
+		c.Assert(returnedPolicies[i].StartTime.UTC().Round(time.Second).Format(time.RFC1123),
+			chk.Equals, policies[i].StartTime.UTC().Round(time.Second).Format(time.RFC1123))
+
+		c.Assert(returnedPolicies[i].ExpiryTime.UTC().Round(time.Second).Format(time.RFC1123),
+			chk.Equals, policies[i].ExpiryTime.UTC().Round(time.Second).Format(time.RFC1123))
+
+		c.Assert(returnedPolicies[i].CanRead, chk.Equals, policies[i].CanRead)
+		c.Assert(returnedPolicies[i].CanAppend, chk.Equals, policies[i].CanAppend)
+		c.Assert(returnedPolicies[i].CanUpdate, chk.Equals, policies[i].CanUpdate)
+		c.Assert(returnedPolicies[i].CanDelete, chk.Equals, policies[i].CanDelete)
+
+	}
 }

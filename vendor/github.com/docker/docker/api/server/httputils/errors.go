@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/versions"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/versions"
 	"github.com/gorilla/mux"
 	"google.golang.org/grpc"
 )
@@ -75,18 +75,13 @@ func GetHTTPErrorStatusCode(err error) int {
 	return statusCode
 }
 
-func apiVersionSupportsJSONErrors(version string) bool {
-	const firstAPIVersionWithJSONErrors = "1.23"
-	return version == "" || versions.GreaterThan(version, firstAPIVersionWithJSONErrors)
-}
-
 // MakeErrorHandler makes an HTTP handler that decodes a Docker error and
 // returns it in the response.
 func MakeErrorHandler(err error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		statusCode := GetHTTPErrorStatusCode(err)
 		vars := mux.Vars(r)
-		if apiVersionSupportsJSONErrors(vars["version"]) {
+		if vars["version"] == "" || versions.GreaterThan(vars["version"], "1.23") {
 			response := &types.ErrorResponse{
 				Message: err.Error(),
 			}

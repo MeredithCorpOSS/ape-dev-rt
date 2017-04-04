@@ -25,14 +25,14 @@ func Test_ProbesSelectProbes(t *testing.T) {
 	probes, resp, err := testClient.Probes.Select(r, "")
 
 	if err != nil {
-		if resp.Response.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == 404 {
 			t.Logf("ERROR - %+v", err)
 			t.SkipNow()
 		}
 		t.Fatal(err)
 	}
 	t.Logf("Probes: %+v \n", probes)
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 	for i, e := range probes {
 		t.Logf("DEBUG - Probe %d Data - %s\n", i, e.Details.data)
 		err = e.Details.Populate(e.ProbeType)

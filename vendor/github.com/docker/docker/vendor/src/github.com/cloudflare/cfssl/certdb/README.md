@@ -69,7 +69,3 @@ JSON dictionary:
 or
 
     {"driver":"postgres","data_source":"postgres://user:password@host/db"}
- 
-or
-
-    {"driver":"mysql","data_source":"user:password@tcp(hostname:3306)/db?parseTime=true"}

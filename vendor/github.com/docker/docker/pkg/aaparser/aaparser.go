@@ -23,10 +23,10 @@ func GetVersion() (int, error) {
 	return parseVersion(output)
 }
 
-// LoadProfile runs `apparmor_parser -r` on a specified apparmor profile to
-// replace the profile.
+// LoadProfile runs `apparmor_parser -r -W` on a specified apparmor profile to
+// replace and write it to disk.
 func LoadProfile(profilePath string) error {
-	_, err := cmd("", "-r", filepath.Dir(profilePath))
+	_, err := cmd(filepath.Dir(profilePath), "-r", "-W", filepath.Base(profilePath))
 	if err != nil {
 		return err
 	}

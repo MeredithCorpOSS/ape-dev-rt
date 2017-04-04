@@ -86,7 +86,7 @@ func (s *nodeStore) AddUnknown(n *api.Node, expireFunc func()) error {
 	return nil
 }
 
-// CheckRateLimit returns error if node with specified id is allowed to re-register
+// CheckRateLimit returs error if node with specified id is allowed to re-register
 // again.
 func (s *nodeStore) CheckRateLimit(id string) error {
 	s.mu.Lock()

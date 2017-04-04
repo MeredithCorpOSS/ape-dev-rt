@@ -3,7 +3,6 @@ package graphdriver
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/idtools"
-	"github.com/docker/docker/pkg/plugingetter"
 )
 
 // FsMagic unsigned id of the filesystem in use.
@@ -83,7 +81,7 @@ type Driver interface {
 	ProtoDriver
 	// Diff produces an archive of the changes between the specified
 	// layer and its parent layer which may be "".
-	Diff(id, parent string) (io.ReadCloser, error)
+	Diff(id, parent string) (archive.Archive, error)
 	// Changes produces a list of changes between the specified layer
 	// and its parent layer. If parent is "", then all changes will be ADD changes.
 	Changes(id, parent string) ([]archive.Change, error)
@@ -91,7 +89,7 @@ type Driver interface {
 	// layer with the specified id and parent, returning the size of the
 	// new layer in bytes.
 	// The archive.Reader must be an uncompressed stream.
-	ApplyDiff(id, parent string, diff io.Reader) (size int64, err error)
+	ApplyDiff(id, parent string, diff archive.Reader) (size int64, err error)
 	// DiffSize calculates the changes between the specified id
 	// and its parent and returns the size in bytes of the changes
 	// relative to its base filesystem directory.
@@ -136,11 +134,11 @@ func Register(name string, initFunc InitFunc) error {
 }
 
 // GetDriver initializes and returns the registered driver
-func GetDriver(name, home string, options []string, uidMaps, gidMaps []idtools.IDMap, pg plugingetter.PluginGetter) (Driver, error) {
+func GetDriver(name, home string, options []string, uidMaps, gidMaps []idtools.IDMap) (Driver, error) {
 	if initFunc, exists := drivers[name]; exists {
 		return initFunc(filepath.Join(home, name), options, uidMaps, gidMaps)
 	}
-	if pluginDriver, err := lookupPlugin(name, home, options, pg); err == nil {
+	if pluginDriver, err := lookupPlugin(name, home, options); err == nil {
 		return pluginDriver, nil
 	}
 	logrus.Errorf("Failed to GetDriver graph %s %s", name, home)
@@ -157,10 +155,10 @@ func getBuiltinDriver(name, home string, options []string, uidMaps, gidMaps []id
 }
 
 // New creates the driver and initializes it at the specified root.
-func New(root, name string, options []string, uidMaps, gidMaps []idtools.IDMap, pg plugingetter.PluginGetter) (Driver, error) {
+func New(root string, name string, options []string, uidMaps, gidMaps []idtools.IDMap) (Driver, error) {
 	if name != "" {
 		logrus.Debugf("[graphdriver] trying provided driver: %s", name) // so the logs show specified driver
-		return GetDriver(name, root, options, uidMaps, gidMaps, pg)
+		return GetDriver(name, root, options, uidMaps, gidMaps)
 	}
 
 	// Guess for prior driver

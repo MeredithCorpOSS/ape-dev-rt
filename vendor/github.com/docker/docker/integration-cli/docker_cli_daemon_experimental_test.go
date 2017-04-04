@@ -17,7 +17,6 @@ var pluginName = "tiborvass/no-remove"
 
 // TestDaemonRestartWithPluginEnabled tests state restore for an enabled plugin
 func (s *DockerDaemonSuite) TestDaemonRestartWithPluginEnabled(c *check.C) {
-	testRequires(c, Network)
 	if err := s.d.Start(); err != nil {
 		c.Fatalf("Could not start daemon: %v", err)
 	}
@@ -47,9 +46,8 @@ func (s *DockerDaemonSuite) TestDaemonRestartWithPluginEnabled(c *check.C) {
 	c.Assert(out, checker.Contains, "true")
 }
 
-// TestDaemonRestartWithPluginDisabled tests state restore for a disabled plugin
+// TestDaemonRestartWithPluginEnabled tests state restore for a disabled plugin
 func (s *DockerDaemonSuite) TestDaemonRestartWithPluginDisabled(c *check.C) {
-	testRequires(c, Network)
 	if err := s.d.Start(); err != nil {
 		c.Fatalf("Could not start daemon: %v", err)
 	}
@@ -79,7 +77,6 @@ func (s *DockerDaemonSuite) TestDaemonRestartWithPluginDisabled(c *check.C) {
 // TestDaemonKillLiveRestoreWithPlugins SIGKILLs daemon started with --live-restore.
 // Plugins should continue to run.
 func (s *DockerDaemonSuite) TestDaemonKillLiveRestoreWithPlugins(c *check.C) {
-	testRequires(c, Network)
 	if err := s.d.Start("--live-restore"); err != nil {
 		c.Fatalf("Could not start daemon: %v", err)
 	}
@@ -111,7 +108,6 @@ func (s *DockerDaemonSuite) TestDaemonKillLiveRestoreWithPlugins(c *check.C) {
 // TestDaemonShutdownLiveRestoreWithPlugins SIGTERMs daemon started with --live-restore.
 // Plugins should continue to run.
 func (s *DockerDaemonSuite) TestDaemonShutdownLiveRestoreWithPlugins(c *check.C) {
-	testRequires(c, Network)
 	if err := s.d.Start("--live-restore"); err != nil {
 		c.Fatalf("Could not start daemon: %v", err)
 	}
@@ -142,7 +138,6 @@ func (s *DockerDaemonSuite) TestDaemonShutdownLiveRestoreWithPlugins(c *check.C)
 
 // TestDaemonShutdownWithPlugins shuts down running plugins.
 func (s *DockerDaemonSuite) TestDaemonShutdownWithPlugins(c *check.C) {
-	testRequires(c, Network)
 	if err := s.d.Start(); err != nil {
 		c.Fatalf("Could not start daemon: %v", err)
 	}
@@ -180,7 +175,6 @@ func (s *DockerDaemonSuite) TestDaemonShutdownWithPlugins(c *check.C) {
 
 // TestVolumePlugin tests volume creation using a plugin.
 func (s *DockerDaemonSuite) TestVolumePlugin(c *check.C) {
-	testRequires(c, Network)
 	volName := "plugin-volume"
 	volRoot := "/data"
 	destDir := "/tmp/data/"
@@ -202,7 +196,7 @@ func (s *DockerDaemonSuite) TestVolumePlugin(c *check.C) {
 		}
 	}()
 
-	out, err = s.d.Cmd("volume", "create", "-d", pluginName, volName)
+	out, err = s.d.Cmd("volume", "create", "-d", pluginName, "--name", volName)
 	if err != nil {
 		c.Fatalf("Could not create volume: %v %s", err, out)
 	}
@@ -211,13 +205,6 @@ func (s *DockerDaemonSuite) TestVolumePlugin(c *check.C) {
 			c.Fatalf("Could not remove volume: %v %s", err, out)
 		}
 	}()
-
-	out, err = s.d.Cmd("volume", "ls")
-	if err != nil {
-		c.Fatalf("Could not list volume: %v %s", err, out)
-	}
-	c.Assert(out, checker.Contains, volName)
-	c.Assert(out, checker.Contains, pluginName)
 
 	mountPoint, err := s.d.Cmd("volume", "inspect", volName, "--format", "{{.Mountpoint}}")
 	if err != nil {

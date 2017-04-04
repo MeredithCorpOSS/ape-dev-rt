@@ -5,7 +5,11 @@ export GOVC_DATASTORE=${GOVC_DATASTORE-datastore1}
 export GOVC_NETWORK=${GOVC_NETWORK-"VM Network"}
 
 export GOVC_INSECURE=true
+export GOVC_PERSIST_SESSION=false
+unset GOVC_DEBUG
+unset GOVC_TLS_KNOWN_HOSTS
 unset GOVC_DATACENTER
+unset GOVC_HOST
 unset GOVC_USERNAME
 unset GOVC_PASSWORD
 
@@ -105,15 +109,11 @@ vcsim_env() {
   fi
 }
 
-skip_if_vca() {
-    if [ -n "$VCA" ]; then
-        skip "disabled in vCA"
-    fi
-}
-
 # remove username/password from $GOVC_URL and set $GOVC_{USERNAME,PASSWORD}
 govc_url_to_vars() {
-  eval "$(govc env)"
+  GOVC_USERNAME="$(govc env GOVC_USERNAME)"
+  GOVC_PASSWORD="$(govc env GOVC_PASSWORD)"
+  GOVC_URL="$(govc env GOVC_URL)"
   export GOVC_URL GOVC_USERNAME GOVC_PASSWORD
 
   # double check that we removed user/pass

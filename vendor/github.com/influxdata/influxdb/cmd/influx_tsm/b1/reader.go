@@ -1,3 +1,4 @@
+// Package b1 reads data from b1 shards.
 package b1 // import "github.com/influxdata/influxdb/cmd/influx_tsm/b1"
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/influxdata/influxdb/tsdb/engine/tsm1"
 )
 
+// DefaultChunkSize is the size of chunks read from the b1 shard
 const DefaultChunkSize int = 1000
 
 var excludedBuckets = map[string]bool{
@@ -30,10 +32,9 @@ type Reader struct {
 	cursors    []*cursor
 	currCursor int
 
-	keyBuf    string
-	tsmValues []tsm1.Value
-	values    []tsdb.Value
-	valuePos  int
+	keyBuf   string
+	values   []tsm1.Value
+	valuePos int
 
 	fields map[string]*tsdb.MeasurementFields
 	codecs map[string]*tsdb.FieldCodec
@@ -54,12 +55,7 @@ func NewReader(path string, stats *stats.Stats, chunkSize int) *Reader {
 		chunkSize = DefaultChunkSize
 	}
 
-	// known-sized slice of a known type, in a contiguous chunk
-	r.values = make([]tsdb.Value, chunkSize)
-	r.tsmValues = make([]tsm1.Value, len(r.values))
-	for i := range r.values {
-		r.tsmValues[i] = &r.values[i]
-	}
+	r.values = make([]tsm1.Value, chunkSize)
 
 	return r
 }
@@ -173,8 +169,7 @@ OUTER:
 				}
 			}
 
-			r.values[r.valuePos].T = k
-			r.values[r.valuePos].Val = v
+			r.values[r.valuePos] = tsm1.NewValue(k, v)
 			r.valuePos++
 
 			if r.valuePos >= len(r.values) {
@@ -188,7 +183,7 @@ OUTER:
 // emitted completely for every field, in every series, before the next field is processed.
 // Data from Read() adheres to the requirements for writing to tsm1 shards
 func (r *Reader) Read() (string, []tsm1.Value, error) {
-	return r.keyBuf, r.tsmValues[:r.valuePos], nil
+	return r.keyBuf, r.values[:r.valuePos], nil
 }
 
 // Close closes the reader.

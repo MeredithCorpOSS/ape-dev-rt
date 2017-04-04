@@ -64,11 +64,9 @@ docker-create - Create a new container
 [**--privileged**]
 [**--read-only**]
 [**--restart**[=*RESTART*]]
-[**--rm**]
 [**--security-opt**[=*[]*]]
 [**--storage-opt**[=*[]*]]
 [**--stop-signal**[=*SIGNAL*]]
-[**--stop-timeout**[=*TIMEOUT*]]
 [**--shm-size**[=*[]*]]
 [**--sysctl**[=*[]*]]
 [**-t**|**--tty**]
@@ -319,9 +317,6 @@ unit, `b` is used. Set LIMIT to `-1` to enable unlimited swap.
 **--restart**="*no*"
    Restart policy to apply when a container exits (no, on-failure[:max-retry], always, unless-stopped).
 
-**--rm**=*true*|*false*
-   Automatically remove the container when it exits. The default is *false*.
-
 **--shm-size**=""
    Size of `/dev/shm`. The format is `<number><unit>`. `number` must be greater than `0`.
    Unit is optional and can be `b` (bytes), `k` (kilobytes), `m` (megabytes), or `g` (gigabytes). If you omit the unit, the system uses bytes.
@@ -344,17 +339,11 @@ unit, `b` is used. Set LIMIT to `-1` to enable unlimited swap.
 
    $ docker create -it --storage-opt size=120G fedora /bin/bash
 
-   This (size) will allow to set the container rootfs size to 120G at creation time.
-   This option is only available for the `devicemapper`, `btrfs`, `overlay2` and `zfs` graph drivers.
-   For the `devicemapper`, `btrfs` and `zfs` storage drivers, user cannot pass a size less than the Default BaseFS Size.
-   For the `overlay2` storage driver, the size option is only available if the backing fs is `xfs` and mounted with the `pquota` mount option.
-   Under these conditions, user can pass any size less then the backing fs size.
+   This (size) will allow to set the container rootfs size to 120G at creation time. User cannot pass a size less than the Default BaseFS Size.
+   This option is only available for the `devicemapper`, `btrfs`, and `zfs` graph drivers.
   
 **--stop-signal**=*SIGTERM*
   Signal to stop a container. Default is SIGTERM.
-
-**--stop-timeout**=*10*
-  Timeout (in seconds) to stop a container. Default is 10.
 
 **--sysctl**=SYSCTL
   Configure namespaced kernel parameters at runtime

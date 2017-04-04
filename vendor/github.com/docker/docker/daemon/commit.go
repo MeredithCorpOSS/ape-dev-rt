@@ -3,20 +3,20 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/backend"
-	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/builder/dockerfile"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/layer"
+	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/reference"
+	containertypes "github.com/docker/engine-api/types/container"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -247,7 +247,7 @@ func (daemon *Daemon) Commit(name string, c *backend.ContainerCommitConfig) (str
 	return id.String(), nil
 }
 
-func (daemon *Daemon) exportContainerRw(container *container.Container) (io.ReadCloser, error) {
+func (daemon *Daemon) exportContainerRw(container *container.Container) (archive.Archive, error) {
 	if err := daemon.Mount(container); err != nil {
 		return nil, err
 	}

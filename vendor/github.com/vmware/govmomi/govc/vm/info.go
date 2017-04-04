@@ -24,6 +24,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"context"
+
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -33,7 +35,6 @@ import (
 	"github.com/vmware/govmomi/units"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type info struct {
@@ -167,6 +168,7 @@ func (r *infoResult) collectReferences(pc *property.Collector, ctx context.Conte
 
 	var host []mo.HostSystem
 	var network []mo.Network
+	var opaque []mo.OpaqueNetwork
 	var dvp []mo.DistributedVirtualPortgroup
 	var datastore []mo.Datastore
 	// Table to drive inflating refs to their mo.* counterparts (dest)
@@ -188,6 +190,13 @@ func (r *infoResult) collectReferences(pc *property.Collector, ctx context.Conte
 		"Network": {
 			&network, nil, func() {
 				for _, e := range network {
+					r.entities[e.Reference()] = e.Name
+				}
+			},
+		},
+		"OpaqueNetwork": {
+			&opaque, nil, func() {
+				for _, e := range opaque {
 					r.entities[e.Reference()] = e.Name
 				}
 			},
@@ -292,6 +301,9 @@ func (r *infoResult) Write(w io.Writer) error {
 		}
 
 		if r.cmd.Resources {
+			if s.Storage == nil {
+				s.Storage = new(types.VirtualMachineStorageSummary)
+			}
 			fmt.Fprintf(tw, "  CPU usage:\t%dMHz\n", s.QuickStats.OverallCpuUsage)
 			fmt.Fprintf(tw, "  Host memory usage:\t%dMB\n", s.QuickStats.HostMemoryUsage)
 			fmt.Fprintf(tw, "  Guest memory usage:\t%dMB\n", s.QuickStats.GuestMemoryUsage)

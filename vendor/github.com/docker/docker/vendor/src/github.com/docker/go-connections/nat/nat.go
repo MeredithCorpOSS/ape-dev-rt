@@ -85,10 +85,14 @@ func (p Port) Port() string {
 // Int returns the port number of a Port as an int
 func (p Port) Int() int {
 	portStr := p.Port()
+	if len(portStr) == 0 {
+		return 0
+	}
+
 	// We don't need to check for an error because we're going to
 	// assume that any error would have been found, and reported, in NewPort()
-	port, _ := ParsePort(portStr)
-	return port
+	port, _ := strconv.ParseUint(portStr, 10, 16)
+	return int(port)
 }
 
 // Range returns the start/end port numbers of a Port range as ints

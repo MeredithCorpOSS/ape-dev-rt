@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/integration/checker"
-	icmd "github.com/docker/docker/pkg/integration/cmd"
 	"github.com/go-check/check"
 )
 
@@ -68,6 +67,7 @@ func (s *DockerSuite) TestExecInteractive(c *check.C) {
 }
 
 func (s *DockerSuite) TestExecAfterContainerRestart(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	out, _ := runSleepingContainer(c)
 	cleanedContainerID := strings.TrimSpace(out)
 	c.Assert(waitRun(cleanedContainerID), check.IsNil)
@@ -119,29 +119,21 @@ func (s *DockerSuite) TestExecEnv(c *check.C) {
 	c.Assert(out, checker.Contains, "HOME=/root")
 }
 
-func (s *DockerSuite) TestExecSetEnv(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-	runSleepingContainer(c, "-e", "HOME=/root", "-d", "--name", "testing")
-	c.Assert(waitRun("testing"), check.IsNil)
-
-	out, _ := dockerCmd(c, "exec", "-e", "HOME=/another", "-e", "ABC=xyz", "testing", "env")
-	c.Assert(out, checker.Not(checker.Contains), "HOME=/root")
-	c.Assert(out, checker.Contains, "HOME=/another")
-	c.Assert(out, checker.Contains, "ABC=xyz")
-}
-
 func (s *DockerSuite) TestExecExitStatus(c *check.C) {
 	runSleepingContainer(c, "-d", "--name", "top")
 
-	result := icmd.RunCommand(dockerBinary, "exec", "top", "sh", "-c", "exit 23")
-	c.Assert(result, icmd.Matches, icmd.Expected{ExitCode: 23, Error: "exit status 23"})
+	// Test normal (non-detached) case first
+	cmd := exec.Command(dockerBinary, "exec", "top", "sh", "-c", "exit 23")
+	ec, _ := runCommand(cmd)
+	c.Assert(ec, checker.Equals, 23)
 }
 
 func (s *DockerSuite) TestExecPausedContainer(c *check.C) {
-	testRequires(c, IsPausable)
+	// Windows does not support pause
+	testRequires(c, DaemonIsLinux)
 	defer unpauseAllContainers()
 
-	out, _ := runSleepingContainer(c, "-d", "--name", "testing")
+	out, _ := dockerCmd(c, "run", "-d", "--name", "testing", "busybox", "top")
 	ContainerID := strings.TrimSpace(out)
 
 	dockerCmd(c, "pause", "testing")
@@ -175,6 +167,8 @@ func (s *DockerSuite) TestExecTTYCloseStdin(c *check.C) {
 }
 
 func (s *DockerSuite) TestExecTTYWithoutStdin(c *check.C) {
+	// TODO Windows CI: This requires some work to port to Windows.
+	testRequires(c, DaemonIsLinux)
 	out, _ := dockerCmd(c, "run", "-d", "-ti", "busybox")
 	id := strings.TrimSpace(out)
 	c.Assert(waitRun(id), checker.IsNil)
@@ -518,24 +512,4 @@ func (s *DockerSuite) TestExecStartFails(c *check.C) {
 	out, _, err := dockerCmdWithError("exec", name, "no-such-cmd")
 	c.Assert(err, checker.NotNil, check.Commentf(out))
 	c.Assert(out, checker.Contains, "executable file not found")
-}
-
-// Fix regression in https://github.com/docker/docker/pull/26461#issuecomment-250287297
-func (s *DockerSuite) TestExecWindowsPathNotWiped(c *check.C) {
-	testRequires(c, DaemonIsWindows)
-	out, _ := dockerCmd(c, "run", "-d", "--name", "testing", minimalBaseImage(), "powershell", "start-sleep", "60")
-	c.Assert(waitRun(strings.TrimSpace(out)), check.IsNil)
-
-	out, _ = dockerCmd(c, "exec", "testing", "powershell", "write-host", "$env:PATH")
-	out = strings.ToLower(strings.Trim(out, "\r\n"))
-	c.Assert(out, checker.Contains, `windowspowershell\v1.0`)
-}
-
-func (s *DockerSuite) TestExecEnvLinksHost(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-	runSleepingContainer(c, "-d", "--name", "foo")
-	runSleepingContainer(c, "-d", "--link", "foo:db", "--hostname", "myhost", "--name", "bar")
-	out, _ := dockerCmd(c, "exec", "bar", "env")
-	c.Assert(out, checker.Contains, "HOSTNAME=myhost")
-	c.Assert(out, checker.Contains, "DB_NAME=/bar/db")
 }

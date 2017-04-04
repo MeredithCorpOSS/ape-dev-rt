@@ -1,17 +1,12 @@
----
-title: "attach"
-description: "The attach command description and usage"
-keywords: ["attach, running, container"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "attach"
+description = "The attach command description and usage"
+keywords = ["attach, running, container"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # attach
 
@@ -47,13 +42,13 @@ the container. You can detach from a container and leave it running using the
 It is forbidden to redirect the standard input of a `docker attach` command
 while attaching to a tty-enabled container (i.e.: launched with `-t`).
 
-While a client is connected to container's stdio using `docker attach`, Docker
-uses a ~1MB memory buffer to maximize the throughput of the application. If
-this buffer is filled, the speed of the API connection will start to have an
-effect on the process output writing speed. This is similar to other
-applications like SSH. Because of this, it is not recommended to run
-performance critical applications that generate a lot of output in the
-foreground over a slow client connection. Instead, users should use the
+While a client is connected to container's stdio using `docker attach`, Docker 
+uses a ~1MB memory buffer to maximize the throughput of the application. If 
+this buffer is filled, the speed of the API connection will start to have an 
+effect on the process output writing speed. This is similar to other 
+applications like SSH. Because of this, it is not recommended to run 
+performance critical applications that generate a lot of output in the 
+foreground over a slow client connection. Instead, users should use the 
 `docker logs` command to get access to the logs.
 
 
@@ -124,7 +119,7 @@ process is returned by the `docker attach` command to its caller too:
     $ docker run --name test -d -it debian
     275c44472aebd77c926d4527885bb09f2f6db21d878c75f0a1c212c03d3bcfab
     $ docker attach test
-    root@f38c87f2a42d:/# exit 13
+    $$ exit 13
     exit
     $ echo $?
     13

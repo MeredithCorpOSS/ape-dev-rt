@@ -6,19 +6,19 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/integration/checker"
+	"github.com/docker/engine-api/types"
 	"github.com/go-check/check"
 )
 
-func (s *DockerSuite) TestAPIImagesFilter(c *check.C) {
+func (s *DockerSuite) TestApiImagesFilter(c *check.C) {
 	name := "utest:tag1"
 	name2 := "utest/docker:tag2"
 	name3 := "utest:5000/docker:tag3"
 	for _, n := range []string{name, name2, name3} {
 		dockerCmd(c, "tag", "busybox", n)
 	}
-	type image types.ImageSummary
+	type image types.Image
 	getImages := func(filter string) []image {
 		v := url.Values{}
 		v.Set("filter", filter)
@@ -47,7 +47,7 @@ func (s *DockerSuite) TestAPIImagesFilter(c *check.C) {
 	c.Assert(images[0].RepoTags, checker.HasLen, 1)
 }
 
-func (s *DockerSuite) TestAPIImagesSaveAndLoad(c *check.C) {
+func (s *DockerSuite) TestApiImagesSaveAndLoad(c *check.C) {
 	// TODO Windows to Windows CI: Investigate further why this test fails.
 	testRequires(c, Network)
 	testRequires(c, DaemonIsLinux)
@@ -71,7 +71,7 @@ func (s *DockerSuite) TestAPIImagesSaveAndLoad(c *check.C) {
 	c.Assert(strings.TrimSpace(string(inspectOut)), checker.Equals, id, check.Commentf("load did not work properly"))
 }
 
-func (s *DockerSuite) TestAPIImagesDelete(c *check.C) {
+func (s *DockerSuite) TestApiImagesDelete(c *check.C) {
 	if daemonPlatform != "windows" {
 		testRequires(c, Network)
 	}
@@ -95,7 +95,7 @@ func (s *DockerSuite) TestAPIImagesDelete(c *check.C) {
 	c.Assert(status, checker.Equals, http.StatusOK)
 }
 
-func (s *DockerSuite) TestAPIImagesHistory(c *check.C) {
+func (s *DockerSuite) TestApiImagesHistory(c *check.C) {
 	if daemonPlatform != "windows" {
 		testRequires(c, Network)
 	}
@@ -118,7 +118,7 @@ func (s *DockerSuite) TestAPIImagesHistory(c *check.C) {
 }
 
 // #14846
-func (s *DockerSuite) TestAPIImagesSearchJSONContentType(c *check.C) {
+func (s *DockerSuite) TestApiImagesSearchJSONContentType(c *check.C) {
 	testRequires(c, Network)
 
 	res, b, err := sockRequestRaw("GET", "/images/search?term=test", nil, "application/json")

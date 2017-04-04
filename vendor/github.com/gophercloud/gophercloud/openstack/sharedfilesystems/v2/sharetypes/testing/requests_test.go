@@ -69,3 +69,95 @@ func TestDelete(t *testing.T) {
 	res := sharetypes.Delete(client.ServiceClient(), "shareTypeID")
 	th.AssertNoErr(t, res.Err)
 }
+
+// Verifies that share types can be listed correctly
+func TestList(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	MockListResponse(t)
+
+	allPages, err := sharetypes.List(client.ServiceClient(), &sharetypes.ListOpts{}).AllPages()
+	th.AssertNoErr(t, err)
+	actual, err := sharetypes.ExtractShareTypes(allPages)
+	th.AssertNoErr(t, err)
+	expected := []sharetypes.ShareType{
+		{
+			ID:                 "be27425c-f807-4500-a056-d00721db45cf",
+			Name:               "default",
+			IsPublic:           true,
+			ExtraSpecs:         map[string]interface{}{"snapshot_support": "True", "driver_handles_share_servers": "True"},
+			RequiredExtraSpecs: map[string]interface{}{"driver_handles_share_servers": "True"},
+		},
+		{
+			ID:                 "f015bebe-c38b-4c49-8832-00143b10253b",
+			Name:               "d",
+			IsPublic:           true,
+			ExtraSpecs:         map[string]interface{}{"driver_handles_share_servers": "false", "snapshot_support": "True"},
+			RequiredExtraSpecs: map[string]interface{}{"driver_handles_share_servers": "True"},
+		},
+	}
+
+	th.CheckDeepEquals(t, expected, actual)
+}
+
+// Verifies that it is possible to get the default share type
+func TestGetDefault(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	MockGetDefaultResponse(t)
+
+	expected := sharetypes.ShareType{
+		ID:                 "be27425c-f807-4500-a056-d00721db45cf",
+		Name:               "default",
+		ExtraSpecs:         map[string]interface{}{"snapshot_support": "True", "driver_handles_share_servers": "True"},
+		RequiredExtraSpecs: map[string]interface{}(nil),
+	}
+
+	actual, err := sharetypes.GetDefault(client.ServiceClient()).Extract()
+	th.AssertNoErr(t, err)
+	th.CheckDeepEquals(t, &expected, actual)
+}
+
+// Verifies that it is possible to get the extra specifications for a share type
+func TestGetExtraSpecs(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	MockGetExtraSpecsResponse(t)
+
+	st, err := sharetypes.GetExtraSpecs(client.ServiceClient(), "shareTypeID").Extract()
+	th.AssertNoErr(t, err)
+
+	th.AssertEquals(t, st["snapshot_support"], "True")
+	th.AssertEquals(t, st["driver_handles_share_servers"], "True")
+	th.AssertEquals(t, st["my_custom_extra_spec"], "False")
+}
+
+// Verifies that an extra specs can be added to a share type
+func TestSetExtraSpecs(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	MockSetExtraSpecsResponse(t)
+
+	options := &sharetypes.SetExtraSpecsOpts{
+		Specs: map[string]interface{}{"my_key": "my_value"},
+	}
+
+	es, err := sharetypes.SetExtraSpecs(client.ServiceClient(), "shareTypeID", options).Extract()
+	th.AssertNoErr(t, err)
+
+	th.AssertEquals(t, es["my_key"], "my_value")
+}
+
+// Verifies that an extra specification can be unset for a share type
+func TestUnsetExtraSpecs(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	MockUnsetExtraSpecsResponse(t)
+	res := sharetypes.UnsetExtraSpecs(client.ServiceClient(), "shareTypeID", "my_key")
+	th.AssertNoErr(t, res.Err)
+}

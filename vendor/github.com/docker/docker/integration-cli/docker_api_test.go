@@ -5,23 +5,23 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/pkg/integration/checker"
-	icmd "github.com/docker/docker/pkg/integration/cmd"
 	"github.com/go-check/check"
 )
 
-func (s *DockerSuite) TestAPIOptionsRoute(c *check.C) {
+func (s *DockerSuite) TestApiOptionsRoute(c *check.C) {
 	status, _, err := sockRequest("OPTIONS", "/", nil)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusOK)
 }
 
-func (s *DockerSuite) TestAPIGetEnabledCORS(c *check.C) {
+func (s *DockerSuite) TestApiGetEnabledCors(c *check.C) {
 	res, body, err := sockRequestRaw("GET", "/version", nil, "")
 	c.Assert(err, checker.IsNil)
 	c.Assert(res.StatusCode, checker.Equals, http.StatusOK)
@@ -33,7 +33,7 @@ func (s *DockerSuite) TestAPIGetEnabledCORS(c *check.C) {
 	//c.Assert(res.Header.Get("Access-Control-Allow-Headers"), check.Equals, "Origin, X-Requested-With, Content-Type, Accept, X-Registry-Auth")
 }
 
-func (s *DockerSuite) TestAPIVersionStatusCode(c *check.C) {
+func (s *DockerSuite) TestApiVersionStatusCode(c *check.C) {
 	conn, err := sockConn(time.Duration(10*time.Second), "")
 	c.Assert(err, checker.IsNil)
 
@@ -48,7 +48,7 @@ func (s *DockerSuite) TestAPIVersionStatusCode(c *check.C) {
 	c.Assert(res.StatusCode, checker.Equals, http.StatusBadRequest)
 }
 
-func (s *DockerSuite) TestAPIClientVersionNewerThanServer(c *check.C) {
+func (s *DockerSuite) TestApiClientVersionNewerThanServer(c *check.C) {
 	v := strings.Split(api.DefaultVersion, ".")
 	vMinInt, err := strconv.Atoi(v[1])
 	c.Assert(err, checker.IsNil)
@@ -63,7 +63,7 @@ func (s *DockerSuite) TestAPIClientVersionNewerThanServer(c *check.C) {
 	c.Assert(getErrorMessage(c, body), checker.Equals, expected)
 }
 
-func (s *DockerSuite) TestAPIClientVersionOldNotSupported(c *check.C) {
+func (s *DockerSuite) TestApiClientVersionOldNotSupported(c *check.C) {
 	v := strings.Split(api.MinVersion, ".")
 	vMinInt, err := strconv.Atoi(v[1])
 	c.Assert(err, checker.IsNil)
@@ -78,7 +78,7 @@ func (s *DockerSuite) TestAPIClientVersionOldNotSupported(c *check.C) {
 	c.Assert(strings.TrimSpace(string(body)), checker.Equals, expected)
 }
 
-func (s *DockerSuite) TestAPIDockerAPIVersion(c *check.C) {
+func (s *DockerSuite) TestApiDockerApiVersion(c *check.C) {
 	var svrVersion string
 
 	server := httptest.NewServer(http.HandlerFunc(
@@ -89,15 +89,18 @@ func (s *DockerSuite) TestAPIDockerAPIVersion(c *check.C) {
 	defer server.Close()
 
 	// Test using the env var first
-	result := icmd.RunCmd(icmd.Cmd{
-		Command: binaryWithArgs("-H="+server.URL[7:], "version"),
-		Env:     appendBaseEnv(false, "DOCKER_API_VERSION=xxx"),
-	})
-	c.Assert(result, icmd.Matches, icmd.Expected{Out: "API version:  xxx", ExitCode: 1})
-	c.Assert(svrVersion, check.Equals, "/vxxx/version", check.Commentf("%s", result.Compare(icmd.Success)))
+	cmd := exec.Command(dockerBinary, "-H="+server.URL[7:], "version")
+	cmd.Env = appendBaseEnv(false, "DOCKER_API_VERSION=xxx")
+	out, _, _ := runCommandWithOutput(cmd)
+
+	c.Assert(svrVersion, check.Equals, "/vxxx/version")
+
+	if !strings.Contains(out, "API version:  xxx") {
+		c.Fatalf("Out didn't have 'xxx' for the API version, had:\n%s", out)
+	}
 }
 
-func (s *DockerSuite) TestAPIErrorJSON(c *check.C) {
+func (s *DockerSuite) TestApiErrorJSON(c *check.C) {
 	httpResp, body, err := sockRequestRaw("POST", "/containers/create", strings.NewReader(`{}`), "application/json")
 	c.Assert(err, checker.IsNil)
 	c.Assert(httpResp.StatusCode, checker.Equals, http.StatusInternalServerError)
@@ -107,7 +110,7 @@ func (s *DockerSuite) TestAPIErrorJSON(c *check.C) {
 	c.Assert(getErrorMessage(c, b), checker.Equals, "Config cannot be empty in order to create a container")
 }
 
-func (s *DockerSuite) TestAPIErrorPlainText(c *check.C) {
+func (s *DockerSuite) TestApiErrorPlainText(c *check.C) {
 	httpResp, body, err := sockRequestRaw("POST", "/v1.23/containers/create", strings.NewReader(`{}`), "application/json")
 	c.Assert(err, checker.IsNil)
 	c.Assert(httpResp.StatusCode, checker.Equals, http.StatusInternalServerError)
@@ -117,7 +120,7 @@ func (s *DockerSuite) TestAPIErrorPlainText(c *check.C) {
 	c.Assert(strings.TrimSpace(string(b)), checker.Equals, "Config cannot be empty in order to create a container")
 }
 
-func (s *DockerSuite) TestAPIErrorNotFoundJSON(c *check.C) {
+func (s *DockerSuite) TestApiErrorNotFoundJSON(c *check.C) {
 	// 404 is a different code path to normal errors, so test separately
 	httpResp, body, err := sockRequestRaw("GET", "/notfound", nil, "application/json")
 	c.Assert(err, checker.IsNil)
@@ -128,7 +131,7 @@ func (s *DockerSuite) TestAPIErrorNotFoundJSON(c *check.C) {
 	c.Assert(getErrorMessage(c, b), checker.Equals, "page not found")
 }
 
-func (s *DockerSuite) TestAPIErrorNotFoundPlainText(c *check.C) {
+func (s *DockerSuite) TestApiErrorNotFoundPlainText(c *check.C) {
 	httpResp, body, err := sockRequestRaw("GET", "/v1.23/notfound", nil, "application/json")
 	c.Assert(err, checker.IsNil)
 	c.Assert(httpResp.StatusCode, checker.Equals, http.StatusNotFound)

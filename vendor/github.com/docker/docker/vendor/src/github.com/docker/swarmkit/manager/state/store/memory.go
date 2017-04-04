@@ -96,14 +96,9 @@ func NewMemoryStore(proposer state.Proposer) *MemoryStore {
 
 	return &MemoryStore{
 		memDB:    memDB,
-		queue:    watch.NewQueue(),
+		queue:    watch.NewQueue(0),
 		proposer: proposer,
 	}
-}
-
-// Close closes the memory store and frees its associated resources.
-func (s *MemoryStore) Close() error {
-	return s.queue.Close()
 }
 
 func fromArgs(args ...interface{}) ([]byte, error) {

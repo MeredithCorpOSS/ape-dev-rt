@@ -52,7 +52,7 @@ func (eq *Queue) Close() error {
 	defer eq.mu.Unlock()
 
 	if eq.closed {
-		return nil
+		return ErrSinkClosed
 	}
 
 	// set closed flag

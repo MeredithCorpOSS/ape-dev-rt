@@ -1,17 +1,12 @@
----
-title: "login"
-description: "The login command description and usage"
-keywords: ["registry, login, image"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "login"
+description = "The login command description and usage"
+keywords = ["registry, login, image"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # login
 
@@ -43,6 +38,9 @@ You can log into any public or private repository for which you have
 credentials.  When you log in, the command stores encoded credentials in
 `$HOME/.docker/config.json` on Linux or `%USERPROFILE%/.docker/config.json` on Windows.
 
+> **Note**:  When running `sudo docker login` credentials are saved in `/root/.docker/config.json`.
+>
+
 ## Credentials store
 
 The Docker Engine can keep user credentials in an external credentials store,
@@ -57,12 +55,12 @@ This is the list of currently available credentials helpers and where
 you can download them from:
 
 - D-Bus Secret Service: https://github.com/docker/docker-credential-helpers/releases
-- Apple macOS keychain: https://github.com/docker/docker-credential-helpers/releases
+- Apple OS X keychain: https://github.com/docker/docker-credential-helpers/releases
 - Microsoft Windows Credential Manager: https://github.com/docker/docker-credential-helpers/releases
 
 ### Usage
 
-You need to specify the credentials store in `$HOME/.docker/config.json`
+You need to speficy the credentials store in `$HOME/.docker/config.json`
 to tell the docker engine to use it:
 
 ```json

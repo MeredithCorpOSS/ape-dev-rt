@@ -29,9 +29,9 @@ func (clnt *client) appendContainer(cont *container) {
 	clnt.containers[cont.containerID] = cont
 	clnt.mapMutex.Unlock()
 }
-func (clnt *client) deleteContainer(containerID string) {
+func (clnt *client) deleteContainer(friendlyName string) {
 	clnt.mapMutex.Lock()
-	delete(clnt.containers, containerID)
+	delete(clnt.containers, friendlyName)
 	clnt.mapMutex.Unlock()
 }
 

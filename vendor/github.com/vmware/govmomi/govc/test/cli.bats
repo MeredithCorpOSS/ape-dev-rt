@@ -14,8 +14,54 @@ load test_helper
   assert_success
 }
 
+@test "about.cert" {
+  run govc about.cert
+  assert_success
+
+  run govc about.cert -json
+  assert_success
+
+  run govc about.cert -show
+  assert_success
+
+  # with -k=true we get thumbprint output and exit 0
+  thumbprint=$(govc about.cert -k=true -thumbprint)
+
+  # with -k=true we get thumbprint output and exit 60
+  run govc about.cert -k=false -thumbprint
+  if [ "$status" -ne 60 ]; then
+    flunk $(printf "expected failed exit status=60, got status=%d" $status)
+  fi
+  assert_output "$thumbprint"
+
+  run govc about -k=false
+  assert_failure
+
+  run govc about -k=false -tls-known-hosts <(echo "$thumbprint")
+  assert_success
+
+  run govc about -k=false -tls-known-hosts <(echo "nope nope")
+  assert_failure
+}
+
+@test "version" {
+    run govc version
+    assert_success
+
+    v=$(govc version | awk '{print $NF}')
+    run govc version -require "$v"
+    assert_success
+
+    run govc version -require "not-a-version-string"
+    assert_failure
+
+    run govc version -require 100.0.0
+    assert_failure
+}
+
 @test "login attempt without credentials" {
-  run govc about -u $(echo $GOVC_URL | awk -F@ '{print $2}')
+  host=$(govc env -x GOVC_URL_HOST)
+  run govc about -u "enoent@$host"
   assert_failure "govc: ServerFaultCode: Cannot complete login due to an incorrect user name or password."
 }
 
@@ -47,4 +93,28 @@ load test_helper
   assert grep -q GOVC_URL_PATH=/sdk <<<${output}
   assert grep -q GOVC_URL_QUERY=key=val <<<${output}
   assert grep -q GOVC_URL_FRAGMENT=anchor <<<${output}
+
+  password="pa\$sword\!ok"
+  run govc env -u "user:${password}@enoent:99999" GOVC_PASSWORD
+  assert_output "$password"
+}
+
+@test "govc help" {
+  run govc
+  assert_failure
+
+  run govc -h
+  assert_success
+
+  run govc -enoent
+  assert_failure
+
+  run govc vm.create
+  assert_failure
+
+  run govc vm.create -h
+  assert_success
+
+  run govc vm.create -enoent
+  assert_failure
 }

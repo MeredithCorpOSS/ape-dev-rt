@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -9,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
@@ -19,62 +19,32 @@ import (
 	"github.com/docker/swarmkit/log"
 	"github.com/docker/swarmkit/manager/state/raft/membership"
 	"github.com/docker/swarmkit/manager/state/store"
-	"github.com/pkg/errors"
 	"golang.org/x/net/context"
 )
 
 var errNoWAL = errors.New("no WAL present")
 
-func (n *Node) legacyWALDir() string {
-	return filepath.Join(n.opts.StateDir, "wal")
-}
-
 func (n *Node) walDir() string {
-	return filepath.Join(n.opts.StateDir, "wal-v3")
-}
-
-func (n *Node) legacySnapDir() string {
-	return filepath.Join(n.opts.StateDir, "snap")
+	return filepath.Join(n.StateDir, "wal")
 }
 
 func (n *Node) snapDir() string {
-	return filepath.Join(n.opts.StateDir, "snap-v3")
+	return filepath.Join(n.StateDir, "snap")
 }
 
 func (n *Node) loadAndStart(ctx context.Context, forceNewCluster bool) error {
 	walDir := n.walDir()
 	snapDir := n.snapDir()
 
-	if !fileutil.Exist(snapDir) {
-		// If snapshots created by the etcd-v2 code exist, hard link
-		// them at the new path. This prevents etc-v2 creating
-		// snapshots that are visible to us, but out of sync with our
-		// WALs, after a downgrade.
-		legacySnapDir := n.legacySnapDir()
-		if fileutil.Exist(legacySnapDir) {
-			if err := migrateSnapshots(legacySnapDir, snapDir); err != nil {
-				return err
-			}
-		} else if err := os.MkdirAll(snapDir, 0700); err != nil {
-			return errors.Wrap(err, "failed to create snapshot directory")
-		}
+	if err := os.MkdirAll(snapDir, 0700); err != nil {
+		return fmt.Errorf("create snapshot directory error: %v", err)
 	}
 
 	// Create a snapshotter
 	n.snapshotter = snap.New(snapDir)
 
 	if !wal.Exist(walDir) {
-		// If wals created by the etcd-v2 wal code exist, copy them to
-		// the new path to avoid adding backwards-incompatible entries
-		// to those files.
-		legacyWALDir := n.legacyWALDir()
-		if !wal.Exist(legacyWALDir) {
-			return errNoWAL
-		}
-
-		if err := migrateWALs(legacyWALDir, walDir); err != nil {
-			return err
-		}
+		return errNoWAL
 	}
 
 	// Load snapshot data
@@ -98,106 +68,19 @@ func (n *Node) loadAndStart(ctx context.Context, forceNewCluster bool) error {
 	return nil
 }
 
-func migrateWALs(legacyWALDir, walDir string) error {
-	// keep temporary wal directory so WAL initialization appears atomic
-	tmpdirpath := filepath.Clean(walDir) + ".tmp"
-	if fileutil.Exist(tmpdirpath) {
-		if err := os.RemoveAll(tmpdirpath); err != nil {
-			return errors.Wrap(err, "could not remove temporary WAL directory")
-		}
-	}
-	if err := fileutil.CreateDirAll(tmpdirpath); err != nil {
-		return errors.Wrap(err, "could not create temporary WAL directory")
-	}
-
-	walNames, err := fileutil.ReadDir(legacyWALDir)
-	if err != nil {
-		return errors.Wrapf(err, "could not list WAL directory %s", legacyWALDir)
-	}
-
-	for _, fname := range walNames {
-		_, err := copyFile(filepath.Join(legacyWALDir, fname), filepath.Join(tmpdirpath, fname), 0600)
-		if err != nil {
-			return errors.Wrap(err, "error copying WAL file")
-		}
-	}
-
-	if err := os.Rename(tmpdirpath, walDir); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func migrateSnapshots(legacySnapDir, snapDir string) error {
-	// use temporary snaphot directory so initialization appears atomic
-	tmpdirpath := filepath.Clean(snapDir) + ".tmp"
-	if fileutil.Exist(tmpdirpath) {
-		if err := os.RemoveAll(tmpdirpath); err != nil {
-			return errors.Wrap(err, "could not remove temporary snapshot directory")
-		}
-	}
-	if err := fileutil.CreateDirAll(tmpdirpath); err != nil {
-		return errors.Wrap(err, "could not create temporary snapshot directory")
-	}
-
-	snapshotNames, err := fileutil.ReadDir(legacySnapDir)
-	if err != nil {
-		return errors.Wrapf(err, "could not list snapshot directory %s", legacySnapDir)
-	}
-
-	for _, fname := range snapshotNames {
-		err := os.Link(filepath.Join(legacySnapDir, fname), filepath.Join(tmpdirpath, fname))
-		if err != nil {
-			return errors.Wrap(err, "error linking snapshot file")
-		}
-	}
-
-	if err := os.Rename(tmpdirpath, snapDir); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// copyFile copies from src to dst until either EOF is reached
-// on src or an error occurs. It verifies src exists and removes
-// the dst if it exists.
-func copyFile(src, dst string, perm os.FileMode) (int64, error) {
-	cleanSrc := filepath.Clean(src)
-	cleanDst := filepath.Clean(dst)
-	if cleanSrc == cleanDst {
-		return 0, nil
-	}
-	sf, err := os.Open(cleanSrc)
-	if err != nil {
-		return 0, err
-	}
-	defer sf.Close()
-	if err := os.Remove(cleanDst); err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	df, err := os.OpenFile(cleanDst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return 0, err
-	}
-	defer df.Close()
-	return io.Copy(df, sf)
-}
-
 func (n *Node) createWAL(nodeID string) (raft.Peer, error) {
 	raftNode := &api.RaftMember{
 		RaftID: n.Config.ID,
 		NodeID: nodeID,
-		Addr:   n.opts.Addr,
+		Addr:   n.Address,
 	}
 	metadata, err := raftNode.Marshal()
 	if err != nil {
-		return raft.Peer{}, errors.Wrap(err, "error marshalling raft node")
+		return raft.Peer{}, fmt.Errorf("error marshalling raft node: %v", err)
 	}
 	n.wal, err = wal.Create(n.walDir(), metadata)
 	if err != nil {
-		return raft.Peer{}, errors.Wrap(err, "failed to create WAL")
+		return raft.Peer{}, fmt.Errorf("create wal error: %v", err)
 	}
 
 	n.cluster.AddMember(&membership.Member{RaftMember: raftNode})
@@ -207,7 +90,7 @@ func (n *Node) createWAL(nodeID string) (raft.Peer, error) {
 // moveWALAndSnap moves away the WAL and snapshot because we were removed
 // from the cluster and will need to recreate them if we are readded.
 func (n *Node) moveWALAndSnap() error {
-	newWALDir, err := ioutil.TempDir(n.opts.StateDir, "wal.")
+	newWALDir, err := ioutil.TempDir(n.StateDir, "wal.")
 	if err != nil {
 		return err
 	}
@@ -216,7 +99,7 @@ func (n *Node) moveWALAndSnap() error {
 		return err
 	}
 
-	newSnapDir, err := ioutil.TempDir(n.opts.StateDir, "snap.")
+	newSnapDir, err := ioutil.TempDir(n.StateDir, "snap.")
 	if err != nil {
 		return err
 	}
@@ -244,7 +127,7 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 	repaired := false
 	for {
 		if n.wal, err = wal.Open(n.walDir(), walsnap); err != nil {
-			return errors.Wrap(err, "failed to open WAL")
+			return fmt.Errorf("open wal error: %v", err)
 		}
 		if metadata, st, ents, err = n.wal.ReadAll(); err != nil {
 			if err := n.wal.Close(); err != nil {
@@ -252,12 +135,12 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 			}
 			// we can only repair ErrUnexpectedEOF and we never repair twice.
 			if repaired || err != io.ErrUnexpectedEOF {
-				return errors.Wrap(err, "irreparable WAL error")
+				return fmt.Errorf("read wal error (%v) and cannot be repaired", err)
 			}
 			if !wal.Repair(n.walDir()) {
-				return errors.Wrap(err, "WAL error cannot be repaired")
+				return fmt.Errorf("WAL error (%v) cannot be repaired", err)
 			}
-			log.G(ctx).WithError(err).Info("repaired WAL error")
+			log.G(ctx).Infof("repaired WAL error (%v)", err)
 			repaired = true
 			continue
 		}
@@ -267,14 +150,14 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 	defer func() {
 		if err != nil {
 			if walErr := n.wal.Close(); walErr != nil {
-				log.G(ctx).WithError(walErr).Error("error closing raft WAL")
+				n.Config.Logger.Errorf("error closing raft WAL: %v", walErr)
 			}
 		}
 	}()
 
 	var raftNode api.RaftMember
 	if err := raftNode.Unmarshal(metadata); err != nil {
-		return errors.Wrap(err, "failed to unmarshal WAL metadata")
+		return fmt.Errorf("error unmarshalling wal metadata: %v", err)
 	}
 	n.Config.ID = raftNode.RaftID
 
@@ -286,7 +169,7 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 		if ent.Index <= st.Commit && ent.Type == raftpb.EntryConfChange {
 			var cc raftpb.ConfChange
 			if err := cc.Unmarshal(ent.Data); err != nil {
-				return errors.Wrap(err, "failed to unmarshal config change")
+				return fmt.Errorf("error unmarshalling config change: %v", err)
 			}
 			if cc.Type == raftpb.ConfChangeRemoveNode {
 				n.cluster.RemoveMember(cc.NodeID)
@@ -298,7 +181,7 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 		// discard the previously uncommitted entries
 		for i, ent := range ents {
 			if ent.Index > st.Commit {
-				log.G(ctx).Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
+				log.G(context.Background()).Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
 				ents = ents[:i]
 				break
 			}
@@ -316,7 +199,7 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 			if ccEnt.Type == raftpb.EntryConfChange {
 				var cc raftpb.ConfChange
 				if err := cc.Unmarshal(ccEnt.Data); err != nil {
-					return errors.Wrap(err, "error unmarshalling force-new-cluster config change")
+					return fmt.Errorf("error unmarshalling force-new-cluster config change: %v", err)
 				}
 				if cc.Type == raftpb.ConfChangeRemoveNode {
 					n.cluster.RemoveMember(cc.NodeID)
@@ -328,7 +211,7 @@ func (n *Node) readWAL(ctx context.Context, snapshot *raftpb.Snapshot, forceNewC
 		// force commit newly appended entries
 		err := n.wal.Save(st, toAppEnts)
 		if err != nil {
-			log.G(ctx).WithError(err).Fatalf("failed to save WAL while forcing new cluster")
+			log.G(context.Background()).Fatalf("%v", err)
 		}
 		if len(toAppEnts) != 0 {
 			st.Commit = toAppEnts[len(toAppEnts)-1].Index
@@ -391,101 +274,28 @@ func (n *Node) saveSnapshot(snapshot raftpb.Snapshot, keepOldSnapshots uint64) e
 	// This means that if the current snapshot doesn't appear in the
 	// directory for some strange reason, we won't delete anything, which
 	// is the safe behavior.
-	curSnapshotIdx := -1
 	var (
-		removeErr      error
-		oldestSnapshot string
+		afterCurSnapshot bool
+		removeErr        error
 	)
-
 	for i, snapFile := range snapshots {
-		if curSnapshotIdx >= 0 && i > curSnapshotIdx {
-			if uint64(i-curSnapshotIdx) > keepOldSnapshots {
-				err := os.Remove(filepath.Join(n.snapDir(), snapFile))
-				if err != nil && removeErr == nil {
-					removeErr = err
-				}
-				continue
+		if afterCurSnapshot {
+			if uint64(len(snapshots)-i) <= keepOldSnapshots {
+				return removeErr
+			}
+			err := os.Remove(filepath.Join(n.snapDir(), snapFile))
+			if err != nil && removeErr == nil {
+				removeErr = err
 			}
 		} else if snapFile == curSnapshot {
-			curSnapshotIdx = i
-		}
-		oldestSnapshot = snapFile
-	}
-
-	if removeErr != nil {
-		return removeErr
-	}
-
-	// Remove any WAL files that only contain data from before the oldest
-	// remaining snapshot.
-
-	if oldestSnapshot == "" {
-		return nil
-	}
-
-	// Parse index out of oldest snapshot's filename
-	var snapTerm, snapIndex uint64
-	_, err = fmt.Sscanf(oldestSnapshot, "%016x-%016x.snap", &snapTerm, &snapIndex)
-	if err != nil {
-		return errors.Wrapf(err, "malformed snapshot filename %s", oldestSnapshot)
-	}
-
-	// List the WALs
-	dirents, err = ioutil.ReadDir(n.walDir())
-	if err != nil {
-		return err
-	}
-
-	var wals []string
-	for _, dirent := range dirents {
-		if strings.HasSuffix(dirent.Name(), ".wal") {
-			wals = append(wals, dirent.Name())
+			afterCurSnapshot = true
 		}
 	}
 
-	// Sort WAL filenames in lexical order
-	sort.Sort(sort.StringSlice(wals))
-
-	found := false
-	deleteUntil := -1
-
-	for i, walName := range wals {
-		var walSeq, walIndex uint64
-		_, err = fmt.Sscanf(walName, "%016x-%016x.wal", &walSeq, &walIndex)
-		if err != nil {
-			return errors.Wrapf(err, "could not parse WAL name %s", walName)
-		}
-
-		if walIndex >= snapIndex {
-			deleteUntil = i - 1
-			found = true
-			break
-		}
-	}
-
-	// If all WAL files started with indices below the oldest snapshot's
-	// index, we can delete all but the newest WAL file.
-	if !found && len(wals) != 0 {
-		deleteUntil = len(wals) - 1
-	}
-
-	for i := 0; i < deleteUntil; i++ {
-		walPath := filepath.Join(n.walDir(), wals[i])
-		l, err := fileutil.TryLockFile(walPath, os.O_WRONLY, fileutil.PrivateFileMode)
-		if err != nil {
-			return errors.Wrapf(err, "could not lock old WAL file %s for removal", wals[i])
-		}
-		err = os.Remove(walPath)
-		l.Close()
-		if err != nil {
-			return errors.Wrapf(err, "error removing old WAL file %s", wals[i])
-		}
-	}
-
-	return nil
+	return removeErr
 }
 
-func (n *Node) doSnapshot(ctx context.Context, raftConfig api.RaftConfig) {
+func (n *Node) doSnapshot(raftConfig *api.RaftConfig) {
 	snapshot := api.Snapshot{Version: api.Snapshot_V0}
 	for _, member := range n.cluster.Members() {
 		snapshot.Membership.Members = append(snapshot.Membership.Members,
@@ -515,19 +325,19 @@ func (n *Node) doSnapshot(ctx context.Context, raftConfig api.RaftConfig) {
 			snapshot.Store = *storeSnapshot
 		})
 		if err != nil {
-			log.G(ctx).WithError(err).Error("failed to read snapshot from store")
+			n.Config.Logger.Error(err)
 			return
 		}
 
 		d, err := snapshot.Marshal()
 		if err != nil {
-			log.G(ctx).WithError(err).Error("failed to marshal snapshot")
+			n.Config.Logger.Error(err)
 			return
 		}
 		snap, err := n.raftStore.CreateSnapshot(appliedIndex, &n.confState, d)
 		if err == nil {
 			if err := n.saveSnapshot(snap, raftConfig.KeepOldSnapshots); err != nil {
-				log.G(ctx).WithError(err).Error("failed to save snapshot")
+				n.Config.Logger.Error(err)
 				return
 			}
 			snapshotIndex = appliedIndex
@@ -535,11 +345,11 @@ func (n *Node) doSnapshot(ctx context.Context, raftConfig api.RaftConfig) {
 			if appliedIndex > raftConfig.LogEntriesForSlowFollowers {
 				err := n.raftStore.Compact(appliedIndex - raftConfig.LogEntriesForSlowFollowers)
 				if err != nil && err != raft.ErrCompacted {
-					log.G(ctx).WithError(err).Error("failed to compact snapshot")
+					n.Config.Logger.Error(err)
 				}
 			}
 		} else if err != raft.ErrSnapOutOfDate {
-			log.G(ctx).WithError(err).Error("failed to create snapshot")
+			n.Config.Logger.Error(err)
 		}
 	}(n.appliedIndex, n.snapshotIndex)
 
@@ -561,24 +371,18 @@ func (n *Node) restoreFromSnapshot(data []byte, forceNewCluster bool) error {
 		return err
 	}
 
-	oldMembers := n.cluster.Members()
+	n.cluster.Clear()
 
 	if !forceNewCluster {
 		for _, member := range snapshot.Membership.Members {
 			if err := n.registerNode(&api.RaftMember{RaftID: member.RaftID, NodeID: member.NodeID, Addr: member.Addr}); err != nil {
 				return err
 			}
-			delete(oldMembers, member.RaftID)
 		}
 	}
 
 	for _, removedMember := range snapshot.Membership.Removed {
 		n.cluster.RemoveMember(removedMember)
-		delete(oldMembers, removedMember)
-	}
-
-	for member := range oldMembers {
-		n.cluster.ClearMember(member)
 	}
 
 	return nil

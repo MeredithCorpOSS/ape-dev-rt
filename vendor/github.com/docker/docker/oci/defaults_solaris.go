@@ -1,7 +1,7 @@
 package oci
 
 import (
-	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/opencontainers/specs/specs-go"
 )
 
 // DefaultSpec returns default oci spec used by docker.

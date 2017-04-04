@@ -10,15 +10,16 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/errors"
-	"github.com/docker/docker/api/types"
-	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
+	"github.com/docker/docker/errors"
+	"github.com/docker/docker/libcontainerd"
 	"github.com/docker/docker/runconfig"
+	"github.com/docker/engine-api/types"
+	containertypes "github.com/docker/engine-api/types/container"
 )
 
 // ContainerStart starts a container.
-func (daemon *Daemon) ContainerStart(name string, hostConfig *containertypes.HostConfig, validateHostname bool, checkpoint string) error {
+func (daemon *Daemon) ContainerStart(name string, hostConfig *containertypes.HostConfig, validateHostname bool) error {
 	container, err := daemon.GetContainer(name)
 	if err != nil {
 		return err
@@ -38,7 +39,7 @@ func (daemon *Daemon) ContainerStart(name string, hostConfig *containertypes.Hos
 		// This is kept for backward compatibility - hostconfig should be passed when
 		// creating a container, not during start.
 		if hostConfig != nil {
-			logrus.Warn("DEPRECATED: Setting host configuration options when the container starts is deprecated and has been removed in Docker 1.12")
+			logrus.Warn("DEPRECATED: Setting host configuration options when the container starts is deprecated and will be removed in Docker 1.12")
 			oldNetworkMode := container.HostConfig.NetworkMode
 			if err := daemon.setSecurityOptions(container, hostConfig); err != nil {
 				return err
@@ -52,7 +53,7 @@ func (daemon *Daemon) ContainerStart(name string, hostConfig *containertypes.Hos
 			newNetworkMode := container.HostConfig.NetworkMode
 			if string(oldNetworkMode) != string(newNetworkMode) {
 				// if user has change the network mode on starting, clean up the
-				// old networks. It is a deprecated feature and has been removed in Docker 1.12
+				// old networks. It is a deprecated feature and will be removed in Docker 1.12
 				container.NetworkSettings.Networks = nil
 				if err := container.ToDisk(); err != nil {
 					return err
@@ -77,23 +78,23 @@ func (daemon *Daemon) ContainerStart(name string, hostConfig *containertypes.Hos
 		return err
 	}
 
-	return daemon.containerStart(container, checkpoint, true)
+	return daemon.containerStart(container)
 }
 
 // Start starts a container
 func (daemon *Daemon) Start(container *container.Container) error {
-	return daemon.containerStart(container, "", true)
+	return daemon.containerStart(container)
 }
 
 // containerStart prepares the container to run by setting up everything the
 // container needs, such as storage and networking, as well as links
 // between containers. The container is left waiting for a signal to
 // begin running.
-func (daemon *Daemon) containerStart(container *container.Container, checkpoint string, resetRestartManager bool) (err error) {
+func (daemon *Daemon) containerStart(container *container.Container) (err error) {
 	container.Lock()
 	defer container.Unlock()
 
-	if resetRestartManager && container.Running { // skip this check if already in restarting step and resetRestartManager==false
+	if container.Running {
 		return nil
 	}
 
@@ -140,16 +141,16 @@ func (daemon *Daemon) containerStart(container *container.Container, checkpoint 
 		return err
 	}
 
-	createOptions, err := daemon.getLibcontainerdCreateOptions(container)
+	createOptions := []libcontainerd.CreateOption{libcontainerd.WithRestartManager(container.RestartManager(true))}
+	copts, err := daemon.getLibcontainerdCreateOptions(container)
 	if err != nil {
 		return err
 	}
-
-	if resetRestartManager {
-		container.ResetRestartManager(true)
+	if copts != nil {
+		createOptions = append(createOptions, *copts...)
 	}
 
-	if err := daemon.containerd.Create(container.ID, checkpoint, container.CheckpointDir(), *spec, createOptions...); err != nil {
+	if err := daemon.containerd.Create(container.ID, *spec, createOptions...); err != nil {
 		errDesc := grpc.ErrorDesc(err)
 		logrus.Errorf("Create container failed with error: %s", errDesc)
 		// if we receive an internal error from the initial start of a container then lets

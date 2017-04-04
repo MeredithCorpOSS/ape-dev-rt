@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	jt "github.com/joyent/gocommon/testing"
+	"github.com/julienschmidt/httprouter"
 )
 
 type HTTPTestSuite struct {
@@ -28,16 +29,14 @@ func Test(t *testing.T) {
 var _ = gc.Suite(&HTTPTestSuite{})
 var _ = gc.Suite(&HTTPSTestSuite{jt.HTTPSuite{UseTLS: true}})
 
-type HelloHandler struct{}
-
-func (h *HelloHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func HelloHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(200)
 	w.Write([]byte("Hello World\n"))
 }
 
 func (s *HTTPTestSuite) TestHelloWorld(c *gc.C) {
-	s.Mux.Handle("/", &HelloHandler{})
+	s.Mux.GET("/", HelloHandler)
 	response, err := http.Get(s.Server.URL)
 	c.Check(err, gc.IsNil)
 	content, err := ioutil.ReadAll(response.Body)
@@ -49,7 +48,7 @@ func (s *HTTPTestSuite) TestHelloWorld(c *gc.C) {
 }
 
 func (s *HTTPSTestSuite) TestHelloWorldWithTLS(c *gc.C) {
-	s.Mux.Handle("/", &HelloHandler{})
+	s.Mux.GET("/", HelloHandler)
 	c.Check(s.Server.URL[:8], gc.Equals, "https://")
 	response, err := http.Get(s.Server.URL)
 	// Default http.Get fails because the cert is self-signed

@@ -1,4 +1,4 @@
-// Copyright (C) 2013-2014 by Maxim Bublis <b@codemonkey.ru>
+// Copyright (C) 2013-2015 by Maxim Bublis <b@codemonkey.ru>
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -113,9 +113,11 @@ func BenchmarkUnmarshalText(b *testing.B) {
 	}
 }
 
+var sink string
+
 func BenchmarkMarshalToString(b *testing.B) {
 	u := NewV4()
 	for i := 0; i < b.N; i++ {
-		u.String()
+		sink = u.String()
 	}
 }

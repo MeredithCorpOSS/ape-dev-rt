@@ -1,17 +1,13 @@
----
-title: "Remote API v1.18"
-description: "API Documentation for Docker"
-keywords: ["API, Docker, rcli, REST,  documentation"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "Remote API v1.18"
+description = "API Documentation for Docker"
+keywords = ["API, Docker, rcli, REST,  documentation"]
+[menu.main]
+parent = "engine_remoteapi"
+weight = 3
++++
+<![end-metadata]-->
 
 # Docker Remote API v1.18
 
@@ -131,131 +127,129 @@ Create a container
 
 **Example request**:
 
-    POST /containers/create HTTP/1.1
-    Content-Type: application/json
+      POST /containers/create HTTP/1.1
+        Content-Type: application/json
 
-    {
-           "Hostname": "",
-           "Domainname": "",
-           "User": "",
-           "AttachStdin": false,
-           "AttachStdout": true,
-           "AttachStderr": true,
-           "Tty": false,
-           "OpenStdin": false,
-           "StdinOnce": false,
-           "Env": [
-                   "FOO=bar",
-                   "BAZ=quux"
-           ],
-           "Cmd": [
-                   "date"
-           ],
-           "Entrypoint": null,
-           "Image": "ubuntu",
-           "Labels": {
-                   "com.example.vendor": "Acme",
-                   "com.example.license": "GPL",
-                   "com.example.version": "1.0"
-           },
-           "Volumes": {
-             "/volumes/data": {}
-           },
-           "WorkingDir": "",
-           "NetworkDisabled": false,
-           "MacAddress": "12:34:56:78:9a:bc",
-           "ExposedPorts": {
-                   "22/tcp": {}
-           },
-           "HostConfig": {
-             "Binds": ["/tmp:/tmp"],
-             "Links": ["redis3:redis"],
-             "LxcConf": {"lxc.utsname":"docker"},
-             "Memory": 0,
-             "MemorySwap": 0,
-             "CpuShares": 512,
-             "CpusetCpus": "0,1",
-             "PidMode": "",
-             "PortBindings": { "22/tcp": [{ "HostPort": "11022" }] },
-             "PublishAllPorts": false,
-             "Privileged": false,
-             "ReadonlyRootfs": false,
-             "Dns": ["8.8.8.8"],
-             "DnsSearch": [""],
-             "ExtraHosts": null,
-             "VolumesFrom": ["parent", "other:ro"],
-             "CapAdd": ["NET_ADMIN"],
-             "CapDrop": ["MKNOD"],
-             "RestartPolicy": { "Name": "", "MaximumRetryCount": 0 },
-             "NetworkMode": "bridge",
-             "Devices": [],
-             "Ulimits": [{}],
-             "LogConfig": { "Type": "json-file", "Config": {} },
-             "SecurityOpt": [],
-             "CgroupParent": ""
-          }
-      }
+        {
+             "Hostname": "",
+             "Domainname": "",
+             "User": "",
+             "AttachStdin": false,
+             "AttachStdout": true,
+             "AttachStderr": true,
+             "Tty": false,
+             "OpenStdin": false,
+             "StdinOnce": false,
+             "Env": [
+                     "FOO=bar",
+                     "BAZ=quux"
+             ],
+             "Cmd": [
+                     "date"
+             ],
+             "Entrypoint": null,
+             "Image": "ubuntu",
+             "Labels": {
+                     "com.example.vendor": "Acme",
+                     "com.example.license": "GPL",
+                     "com.example.version": "1.0"
+             },
+             "Volumes": {
+                     "/tmp": {}
+             },
+             "WorkingDir": "",
+             "NetworkDisabled": false,
+             "MacAddress": "12:34:56:78:9a:bc",
+             "ExposedPorts": {
+                     "22/tcp": {}
+             },
+             "HostConfig": {
+               "Binds": ["/tmp:/tmp"],
+               "Links": ["redis3:redis"],
+               "LxcConf": {"lxc.utsname":"docker"},
+               "Memory": 0,
+               "MemorySwap": 0,
+               "CpuShares": 512,
+               "CpusetCpus": "0,1",
+               "PidMode": "",
+               "PortBindings": { "22/tcp": [{ "HostPort": "11022" }] },
+               "PublishAllPorts": false,
+               "Privileged": false,
+               "ReadonlyRootfs": false,
+               "Dns": ["8.8.8.8"],
+               "DnsSearch": [""],
+               "ExtraHosts": null,
+               "VolumesFrom": ["parent", "other:ro"],
+               "CapAdd": ["NET_ADMIN"],
+               "CapDrop": ["MKNOD"],
+               "RestartPolicy": { "Name": "", "MaximumRetryCount": 0 },
+               "NetworkMode": "bridge",
+               "Devices": [],
+               "Ulimits": [{}],
+               "LogConfig": { "Type": "json-file", Config: {} },
+               "SecurityOpt": [],
+               "CgroupParent": ""
+            }
+        }
 
 **Example response**:
 
-      HTTP/1.1 201 Created
-      Content-Type: application/json
+        HTTP/1.1 201 Created
+        Content-Type: application/json
 
-      {
-           "Id":"e90e34656806",
-           "Warnings":[]
-      }
+        {
+             "Id":"e90e34656806",
+             "Warnings":[]
+        }
 
 **JSON parameters**:
 
--   **Hostname** - A string value containing the hostname to use for the
+-   **Hostname** - A string value containing the desired hostname to use for the
       container.
--   **Domainname** - A string value containing the domain name to use
+-   **Domainname** - A string value containing the desired domain name to use
       for the container.
--   **User** - A string value specifying the user inside the container.
--   **AttachStdin** - Boolean value, attaches to `stdin`.
--   **AttachStdout** - Boolean value, attaches to `stdout`.
--   **AttachStderr** - Boolean value, attaches to `stderr`.
--   **Tty** - Boolean value, Attach standard streams to a `tty`, including `stdin` if it is not closed.
--   **OpenStdin** - Boolean value, opens `stdin`,
--   **StdinOnce** - Boolean value, close `stdin` after the 1 attached client disconnects.
--   **Env** - A list of environment variables in the form of `["VAR=value", ...]`
--   **Labels** - Adds a map of labels to a container. To specify a map: `{"key":"value", ... }`
+-   **User** - A string value containing the user to use inside the container.
+-   **AttachStdin** - Boolean value, attaches to stdin.
+-   **AttachStdout** - Boolean value, attaches to stdout.
+-   **AttachStderr** - Boolean value, attaches to stderr.
+-   **Tty** - Boolean value, Attach standard streams to a tty, including stdin if it is not closed.
+-   **OpenStdin** - Boolean value, opens stdin,
+-   **StdinOnce** - Boolean value, close stdin after the 1 attached client disconnects.
+-   **Env** - A list of environment variables in the form of `["VAR=value"[,"VAR2=value2"]]`
+-   **Labels** - Adds a map of labels that to a container. To specify a map: `{"key":"value"[,"key2":"value2"]}`
 -   **Cmd** - Command to run specified as a string or an array of strings.
--   **Entrypoint** - Set the entry point for the container as a string or an array
-      of strings.
--   **Image** - A string specifying the image name to use for the container.
--   **Volumes** - An object mapping mount point paths (strings) inside the
+-   **Entrypoint** - Set the entrypoint for the container a string or an array
+      of strings
+-   **Image** - String value containing the image name to use for the container
+-   **Volumes** – An object mapping mountpoint paths (strings) inside the
       container to empty objects.
--   **WorkingDir** - A string specifying the working directory for commands to
+-   **WorkingDir** - A string value containing the working dir for commands to
       run in.
 -   **NetworkDisabled** - Boolean value, when true disables networking for the
       container
 -   **ExposedPorts** - An object mapping ports to an empty object in the form of:
       `"ExposedPorts": { "<port>/<tcp|udp>: {}" }`
 -   **HostConfig**
-    -   **Binds** – A list of bind-mounts for this container. Each item is a string in one of these forms:
-           + `host-src:container-dest` to bind-mount a host path into the
-             container. Both `host-src`, and `container-dest` must be an
-             _absolute_ path.
-           + `host-src:container-dest:ro` to make the bind-mount read-only
-             inside the container. Both `host-src`, and `container-dest` must be
-             an _absolute_ path.
+    -   **Binds** – A list of volume bindings for this container. Each volume
+            binding is a string of the form `container_path` (to create a new
+            volume for the container), `host_path:container_path` (to bind-mount
+            a host path into the container), or `host_path:container_path:ro`
+            (to make the bind-mount read-only inside the container).
     -   **Links** - A list of links for the container. Each link entry should be
           in the form of `container_name:alias`.
-    -   **LxcConf** - LXC specific configurations. These configurations only
+    -   **LxcConf** - LXC specific configurations. These configurations will only
           work when using the `lxc` execution driver.
     -   **Memory** - Memory limit in bytes.
     -   **MemorySwap** - Total memory limit (memory + swap); set `-1` to enable unlimited swap.
           You must use this with `memory` and make the swap value larger than `memory`.
-    -   **CpuShares** - An integer value containing the container's CPU Shares
+    -   **CpuShares** - An integer value containing the CPU Shares for container
           (ie. the relative weight vs other containers).
-    -   **CpusetCpus** - String value containing the `cgroups CpusetCpus` to use.
+    -   **CpusetCpus** - String value containing the cgroups CpusetCpus to use.
     -   **PidMode** - Set the PID (Process) Namespace mode for the container;
           `"container:<name|id>"`: joins another container's PID namespace
           `"host"`: use the host's PID namespace inside the container
     -   **PortBindings** - A map of exposed container ports and the host port they
-          should map to. A JSON object in the form
+          should map to. It should be specified in the form
           `{ <port>/<protocol>: [{ "HostPort": "<port>" }] }`
           Take note that `port` is specified as a string and not an integer value.
     -   **PublishAllPorts** - Allocates a random host port for all of a container's
@@ -264,9 +258,9 @@ Create a container
           a boolean value.
     -   **ReadonlyRootfs** - Mount the container's root filesystem as read only.
           Specified as a boolean value.
-    -   **Dns** - A list of DNS servers for the container to use.
+    -   **Dns** - A list of dns servers for the container to use.
     -   **DnsSearch** - A list of DNS search domains
-    -   **ExtraHosts** - A list of hostnames/IP mappings to add to the
+    -   **ExtraHosts** - A list of hostnames/IP mappings to be added to the
         container's `/etc/hosts` file. Specified in the form `["hostname:IP"]`.
     -   **VolumesFrom** - A list of volumes to inherit from another container.
           Specified in the form `<container name>[:<ro|rw>]`
@@ -282,19 +276,19 @@ Create a container
             is added before each restart to prevent flooding the server.
     -   **NetworkMode** - Sets the networking mode for the container. Supported
           values are: `bridge`, `host`, `none`, and `container:<name|id>`
-    -   **Devices** - A list of devices to add to the container specified as a JSON object in the
-      form
+    -   **Devices** - A list of devices to add to the container specified in the
+          form
           `{ "PathOnHost": "/dev/deviceName", "PathInContainer": "/dev/deviceName", "CgroupPermissions": "mrw"}`
-    -   **Ulimits** - A list of ulimits to set in the container, specified as
+    -   **Ulimits** - A list of ulimits to be set in the container, specified as
           `{ "Name": <name>, "Soft": <soft limit>, "Hard": <hard limit> }`, for example:
           `Ulimits: { "Name": "nofile", "Soft": 1024, "Hard": 2048 }`
     -   **SecurityOpt**: A list of string values to customize labels for MLS
         systems, such as SELinux.
-    -   **LogConfig** - Log configuration for the container, specified as a JSON object in the form
+    -   **LogConfig** - Log configuration for the container, specified as
           `{ "Type": "<driver_name>", "Config": {"key1": "val1"}}`.
           Available types: `json-file`, `syslog`, `journald`, `none`.
           `json-file` logging driver.
-    -   **CgroupParent** - Path to `cgroups` under which the container's `cgroup` is created. If the path is not absolute, the path is considered to be relative to the `cgroups` path of the init process. Cgroups are created if they do not already exist.
+    -   **CgroupParent** - Path to cgroups under which the cgroup for the container will be created. If the path is not absolute, the path is considered to be relative to the cgroups path of the init process. Cgroups will be created if they do not already exist.
 
 **Query parameters**:
 
@@ -430,7 +424,7 @@ Return low-level information on the container `id`
 			"Paused": false,
 			"Pid": 0,
 			"Restarting": false,
-			"Running": true,
+			"Running": false,
 			"StartedAt": "2015-01-06T15:47:32.072697474Z"
 		},
 		"Volumes": {},
@@ -527,18 +521,16 @@ Get `stdout` and `stderr` logs from the container ``id``
      Connection: Upgrade
      Upgrade: tcp
 
-     {% raw %}
      {{ STREAM }}
-     {% endraw %}
 
 **Query parameters**:
 
--   **follow** – 1/True/true or 0/False/false, return stream. Default `false`.
--   **stdout** – 1/True/true or 0/False/false, show `stdout` log. Default `false`.
--   **stderr** – 1/True/true or 0/False/false, show `stderr` log. Default `false`.
+-   **follow** – 1/True/true or 0/False/false, return stream. Default false
+-   **stdout** – 1/True/true or 0/False/false, show stdout log. Default false
+-   **stderr** – 1/True/true or 0/False/false, show stderr log. Default false
 -   **timestamps** – 1/True/true or 0/False/false, print timestamps for
-        every log line. Default `false`.
--   **tail** – Output specified number of lines at the end of logs: `all` or `<number>`. Default all.
+        every log line. Default false
+-   **tail** – Output specified number of lines at the end of logs: `all` or `<number>`. Default all
 
 **Status codes**:
 
@@ -604,9 +596,7 @@ Export the contents of container `id`
     HTTP/1.1 200 OK
     Content-Type: application/octet-stream
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Status codes**:
 
@@ -622,79 +612,79 @@ This endpoint returns a live stream of a container's resource usage statistics.
 
 **Example request**:
 
-    GET /containers/redis1/stats HTTP/1.1
+        GET /containers/redis1/stats HTTP/1.1
 
 **Example response**:
 
-      HTTP/1.1 200 OK
-      Content-Type: application/json
+        HTTP/1.1 200 OK
+        Content-Type: application/json
 
-      {
-         "read" : "2015-01-08T22:57:31.547920715Z",
-         "network" : {
-            "rx_dropped" : 0,
-            "rx_bytes" : 648,
-            "rx_errors" : 0,
-            "tx_packets" : 8,
-            "tx_dropped" : 0,
-            "rx_packets" : 8,
-            "tx_errors" : 0,
-            "tx_bytes" : 648
-         },
-         "memory_stats" : {
-            "stats" : {
-               "total_pgmajfault" : 0,
-               "cache" : 0,
-               "mapped_file" : 0,
-               "total_inactive_file" : 0,
-               "pgpgout" : 414,
-               "rss" : 6537216,
-               "total_mapped_file" : 0,
-               "writeback" : 0,
-               "unevictable" : 0,
-               "pgpgin" : 477,
-               "total_unevictable" : 0,
-               "pgmajfault" : 0,
-               "total_rss" : 6537216,
-               "total_rss_huge" : 6291456,
-               "total_writeback" : 0,
-               "total_inactive_anon" : 0,
-               "rss_huge" : 6291456,
-               "hierarchical_memory_limit" : 67108864,
-               "total_pgfault" : 964,
-               "total_active_file" : 0,
-               "active_anon" : 6537216,
-               "total_active_anon" : 6537216,
-               "total_pgpgout" : 414,
-               "total_cache" : 0,
-               "inactive_anon" : 0,
-               "active_file" : 0,
-               "pgfault" : 964,
-               "inactive_file" : 0,
-               "total_pgpgin" : 477
-            },
-            "max_usage" : 6651904,
-            "usage" : 6537216,
-            "failcnt" : 0,
-            "limit" : 67108864
-         },
-         "blkio_stats" : {},
-         "cpu_stats" : {
-            "cpu_usage" : {
-               "percpu_usage" : [
-                  16970827,
-                  1839451,
-                  7107380,
-                  10571290
-               ],
-               "usage_in_usermode" : 10000000,
-               "total_usage" : 36488948,
-               "usage_in_kernelmode" : 20000000
-            },
-            "system_cpu_usage" : 20091722000000000,
-            "throttling_data" : {}
-         }
-      }
+        {
+           "read" : "2015-01-08T22:57:31.547920715Z",
+           "network" : {
+              "rx_dropped" : 0,
+              "rx_bytes" : 648,
+              "rx_errors" : 0,
+              "tx_packets" : 8,
+              "tx_dropped" : 0,
+              "rx_packets" : 8,
+              "tx_errors" : 0,
+              "tx_bytes" : 648
+           },
+           "memory_stats" : {
+              "stats" : {
+                 "total_pgmajfault" : 0,
+                 "cache" : 0,
+                 "mapped_file" : 0,
+                 "total_inactive_file" : 0,
+                 "pgpgout" : 414,
+                 "rss" : 6537216,
+                 "total_mapped_file" : 0,
+                 "writeback" : 0,
+                 "unevictable" : 0,
+                 "pgpgin" : 477,
+                 "total_unevictable" : 0,
+                 "pgmajfault" : 0,
+                 "total_rss" : 6537216,
+                 "total_rss_huge" : 6291456,
+                 "total_writeback" : 0,
+                 "total_inactive_anon" : 0,
+                 "rss_huge" : 6291456,
+                 "hierarchical_memory_limit" : 67108864,
+                 "total_pgfault" : 964,
+                 "total_active_file" : 0,
+                 "active_anon" : 6537216,
+                 "total_active_anon" : 6537216,
+                 "total_pgpgout" : 414,
+                 "total_cache" : 0,
+                 "inactive_anon" : 0,
+                 "active_file" : 0,
+                 "pgfault" : 964,
+                 "inactive_file" : 0,
+                 "total_pgpgin" : 477
+              },
+              "max_usage" : 6651904,
+              "usage" : 6537216,
+              "failcnt" : 0,
+              "limit" : 67108864
+           },
+           "blkio_stats" : {},
+           "cpu_stats" : {
+              "cpu_usage" : {
+                 "percpu_usage" : [
+                    16970827,
+                    1839451,
+                    7107380,
+                    10571290
+                 ],
+                 "usage_in_usermode" : 10000000,
+                 "total_usage" : 36488948,
+                 "usage_in_kernelmode" : 20000000
+              },
+              "system_cpu_usage" : 20091722000000000,
+              "throttling_data" : {}
+           }
+        }
 
 **Status codes**:
 
@@ -910,9 +900,7 @@ Attach to the container `id`
     Connection: Upgrade
     Upgrade: tcp
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **Query parameters**:
 
@@ -934,43 +922,43 @@ Attach to the container `id`
 -   **404** – no such container
 -   **500** – server error
 
-**Stream details**:
+    **Stream details**:
 
-When using the TTY setting is enabled in
-[`POST /containers/create`
-](#create-a-container),
-the stream is the raw data from the process PTY and client's `stdin`.
-When the TTY is disabled, then the stream is multiplexed to separate
-`stdout` and `stderr`.
+    When using the TTY setting is enabled in
+    [`POST /containers/create`
+    ](#create-a-container),
+    the stream is the raw data from the process PTY and client's `stdin`.
+    When the TTY is disabled, then the stream is multiplexed to separate
+    `stdout` and `stderr`.
 
-The format is a **Header** and a **Payload** (frame).
+    The format is a **Header** and a **Payload** (frame).
 
-**HEADER**
+    **HEADER**
 
-The header contains the information which the stream writes (`stdout` or
-`stderr`). It also contains the size of the associated frame encoded in the
-last four bytes (`uint32`).
+    The header contains the information which the stream writes (`stdout` or
+    `stderr`). It also contains the size of the associated frame encoded in the
+    last four bytes (`uint32`).
 
-It is encoded on the first eight bytes like this:
+    It is encoded on the first eight bytes like this:
 
-    header := [8]byte{STREAM_TYPE, 0, 0, 0, SIZE1, SIZE2, SIZE3, SIZE4}
+        header := [8]byte{STREAM_TYPE, 0, 0, 0, SIZE1, SIZE2, SIZE3, SIZE4}
 
-`STREAM_TYPE` can be:
+    `STREAM_TYPE` can be:
 
 -   0: `stdin` (is written on `stdout`)
 -   1: `stdout`
 -   2: `stderr`
 
-`SIZE1, SIZE2, SIZE3, SIZE4` are the four bytes of
-the `uint32` size encoded as big endian.
+    `SIZE1, SIZE2, SIZE3, SIZE4` are the four bytes of
+    the `uint32` size encoded as big endian.
 
-**PAYLOAD**
+    **PAYLOAD**
 
-The payload is the raw stream.
+    The payload is the raw stream.
 
-**IMPLEMENTATION**
+    **IMPLEMENTATION**
 
-The simplest way to implement the Attach protocol is the following:
+    The simplest way to implement the Attach protocol is the following:
 
     1.  Read eight bytes.
     2.  Choose `stdout` or `stderr` depending on the first byte.
@@ -992,9 +980,7 @@ Implements websocket protocol handshake according to [RFC 6455](http://tools.iet
 
 **Example response**
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **Query parameters**:
 
@@ -1087,9 +1073,7 @@ Copy files or folders of container `id`
     HTTP/1.1 200 OK
     Content-Type: application/x-tar
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Status codes**:
 
@@ -1195,9 +1179,7 @@ Build an image from a Dockerfile
 
     POST /build HTTP/1.1
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Example response**:
 
@@ -1220,10 +1202,6 @@ The archive may include any number of other files,
 which are accessible in the build context (See the [*ADD build
 command*](../../reference/builder.md#add)).
 
-The Docker daemon performs a preliminary validation of the `Dockerfile` before
-starting the build, and returns an error if the syntax is incorrect. After that,
-each instruction is run one-by-one until the ID of the new image is output.
-
 The build is canceled if the client drops the connection by quitting
 or being killed.
 
@@ -1231,22 +1209,22 @@ or being killed.
 
 -   **dockerfile** - Path within the build context to the Dockerfile. This is
         ignored if `remote` is specified and points to an individual filename.
--   **t** – A name and optional tag to apply to the image in the `name:tag` format.
-        If you omit the `tag` the default `latest` value is assumed.
--   **remote** – A Git repository URI or HTTP/HTTPS context URI. If the
-        URI points to a single text file, the file's contents are placed into
-        a file called `Dockerfile` and the image is built from that file.
--   **q** – Suppress verbose build output.
--   **nocache** – Do not use the cache when building the image.
--   **pull** - Attempt to pull the image even if an older image exists locally.
--   **rm** - Remove intermediate containers after a successful build (default behavior).
--   **forcerm** - Always remove intermediate containers (includes `rm`).
--   **memory** - Set memory limit for build.
+-   **t** – repository name (and optionally a tag) to be applied to
+        the resulting image in case of success
+-   **remote** – A Git repository URI or HTTP/HTTPS URI build source. If the
+        URI specifies a filename, the file's contents are placed into a file
+		called `Dockerfile`.
+-   **q** – suppress verbose build output
+-   **nocache** – do not use the cache when building the image
+-   **pull** - attempt to pull the image even if an older image exists locally
+-   **rm** - remove intermediate containers after a successful build (default behavior)
+-   **forcerm** - always remove intermediate containers (includes rm)
+-   **memory** - set memory limit for build
 -   **memswap** - Total memory (memory + swap), `-1` to enable unlimited swap.
--   **cpushares** - CPU shares (relative weight).
--   **cpusetcpus** - CPUs in which to allow execution (e.g., `0-3`, `0,1`).
+-   **cpushares** - CPU shares (relative weight)
+-   **cpusetcpus** - CPUs in which to allow execution, e.g., `0-3`, `0,1`
 
-**Request Headers**:
+    Request Headers:
 
 -   **Content-type** – Set to `"application/tar"`.
 -   **X-Registry-Config** – base64-encoded ConfigFile object
@@ -1260,11 +1238,11 @@ or being killed.
 
 `POST /images/create`
 
-Create an image either by pulling it from the registry or by importing it
+Create an image, either by pulling it from the registry or by importing it
 
 **Example request**:
 
-    POST /images/create?fromImage=busybox&tag=latest HTTP/1.1
+    POST /images/create?fromImage=ubuntu HTTP/1.1
 
 **Example response**:
 
@@ -1286,10 +1264,9 @@ a base64-encoded AuthConfig object.
 -   **fromSrc** – Source to import.  The value may be a URL from which the image
         can be retrieved or `-` to read the image from the request body.
 -   **repo** – Repository name.
--   **tag** – Tag. If empty when pulling an image, this causes all tags
-        for the given image to be pulled.
+-   **tag** – Tag.
 
-**Request Headers**:
+    Request Headers:
 
 -   **X-Registry-Auth** – base64-encoded AuthConfig object
 
@@ -1316,33 +1293,35 @@ Return low-level information on the image `name`
     Content-Type: application/json
 
     {
-       "Created": "2013-03-23T22:24:18.818426-07:00",
-       "Container": "3d67245a8d72ecf13f33dffac9f79dcdf70f75acb84d308770391510e0c23ad0",
-       "ContainerConfig": {
-          "Hostname": "",
-          "User": "",
-          "AttachStdin": false,
-          "AttachStdout": false,
-          "AttachStderr": false,
-          "Tty": true,
-          "OpenStdin": true,
-          "StdinOnce": false,
-          "Env": null,
-          "Cmd": ["/bin/bash"],
-          "Dns": null,
-          "Image": "ubuntu",
-          "Labels": {
-             "com.example.vendor": "Acme",
-             "com.example.license": "GPL",
-             "com.example.version": "1.0"
-          },
-          "Volumes": null,
-          "VolumesFrom": "",
-          "WorkingDir": ""
-       },
-       "Id": "b750fe79269d2ec9a3c593ef05b4332b1d1a02a62b4accb2c21d589ff2f5f2dc",
-       "Parent": "27cf784147099545",
-       "Size": 6824592
+         "Created": "2013-03-23T22:24:18.818426-07:00",
+         "Container": "3d67245a8d72ecf13f33dffac9f79dcdf70f75acb84d308770391510e0c23ad0",
+         "ContainerConfig":
+                 {
+                         "Hostname": "",
+                         "User": "",
+                         "AttachStdin": false,
+                         "AttachStdout": false,
+                         "AttachStderr": false,
+                         "PortSpecs": null,
+                         "Tty": true,
+                         "OpenStdin": true,
+                         "StdinOnce": false,
+                         "Env": null,
+                         "Cmd": ["/bin/bash"],
+                         "Dns": null,
+                         "Image": "ubuntu",
+                         "Labels": {
+                             "com.example.vendor": "Acme",
+                             "com.example.license": "GPL",
+                             "com.example.version": "1.0"
+                         },
+                         "Volumes": null,
+                         "VolumesFrom": "",
+                         "WorkingDir": ""
+                 },
+         "Id": "b750fe79269d2ec9a3c593ef05b4332b1d1a02a62b4accb2c21d589ff2f5f2dc",
+         "Parent": "27cf784147099545",
+         "Size": 6824592
     }
 
 **Status codes**:
@@ -1367,16 +1346,16 @@ Return the history of the image `name`
     Content-Type: application/json
 
     [
-        {
-            "Id": "b750fe79269d",
-            "Created": 1364102658,
-            "CreatedBy": "/bin/bash"
-        },
-        {
-            "Id": "27cf78414709",
-            "Created": 1364068391,
-            "CreatedBy": ""
-        }
+         {
+                 "Id": "b750fe79269d",
+                 "Created": 1364102658,
+                 "CreatedBy": "/bin/bash"
+         },
+         {
+                 "Id": "27cf78414709",
+                 "Created": 1364068391,
+                 "CreatedBy": ""
+         }
     ]
 
 **Status codes**:
@@ -1405,9 +1384,9 @@ Push the image `name` on the registry
     {"error": "Invalid..."}
     ...
 
-If you wish to push an image on to a private registry, that image must already have a tag
-into a repository which references that registry `hostname` and `port`.  This repository name should
-then be used in the URL. This duplicates the command line's flow.
+If you wish to push an image on to a private registry, that image must already have been tagged
+into a repository which references that registry host name and port.  This repository name should
+then be used in the URL. This mirrors the flow of the CLI.
 
 **Example request**:
 
@@ -1418,9 +1397,10 @@ then be used in the URL. This duplicates the command line's flow.
 
 -   **tag** – The tag to associate with the image on the registry. This is optional.
 
-**Request Headers**:
+Request Headers:
 
--   **X-Registry-Auth** – base64-encoded AuthConfig object.
+-   **X-Registry-Auth** – Include a base64-encoded AuthConfig.
+        object.
 
 **Status codes**:
 
@@ -1510,25 +1490,25 @@ Search for an image on [Docker Hub](https://hub.docker.com).
 
     [
             {
-                "star_count": 12,
+                "description": "",
                 "is_official": false,
+                "is_automated": false,
                 "name": "wma55/u1210sshd",
-                "is_automated": false,
-                "description": ""
+                "star_count": 0
             },
             {
-                "star_count": 10,
+                "description": "",
                 "is_official": false,
+                "is_automated": false,
                 "name": "jdswinbank/sshd",
-                "is_automated": false,
-                "description": ""
+                "star_count": 0
             },
             {
-                "star_count": 18,
+                "description": "",
                 "is_official": false,
-                "name": "vgauthier/sshd",
                 "is_automated": false,
-                "description": ""
+                "name": "vgauthier/sshd",
+                "star_count": 0
             }
     ...
     ]
@@ -1556,8 +1536,8 @@ Get the default username and email
     Content-Type: application/json
 
     {
-         "username": "hannibal",
-         "password": "xxxx",
+         "username":" hannibal",
+         "password: "xxxx",
          "email": "hannibal@a-team.com",
          "serveraddress": "https://index.docker.io/v1/"
     }
@@ -1755,13 +1735,14 @@ Create a new image from a container's changes
 
 `GET /events`
 
-Get container events from docker, in real time via streaming.
+Get container events from docker, either in real time via streaming, or via
+polling (using since).
 
 Docker containers report the following events:
 
     create, destroy, die, exec_create, exec_start, export, kill, oom, pause, restart, start, stop, unpause
 
-Docker images report the following events:
+and Docker images report:
 
     untag, delete
 
@@ -1781,8 +1762,8 @@ Docker images report the following events:
 
 **Query parameters**:
 
--   **since** – Timestamp. Show all events created since timestamp and then stream
--   **until** – Timestamp. Show events created until given timestamp and stop streaming
+-   **since** – Timestamp used for polling
+-   **until** – Timestamp used for polling
 -   **filters** – A json encoded value of the filters (a map[string][]string) to process on the event list. Available filters:
   -   `container=<string>`; -- container to filter
   -   `event=<string>`; -- event to filter
@@ -1823,7 +1804,7 @@ See the [image tarball format](#image-tarball-format) for more details.
 -   **200** – no error
 -   **500** – server error
 
-### Get a tarball containing all images
+### Get a tarball containing all images.
 
 `GET /images/get`
 
@@ -1907,13 +1888,15 @@ Sets up an exec instance in a running container `id`
     POST /containers/e90e34656806/exec HTTP/1.1
     Content-Type: application/json
 
-    {
-      "AttachStdin": true,
-      "AttachStdout": true,
-      "AttachStderr": true,
-      "Cmd": ["sh"],
-      "Tty": true
-    }
+      {
+       "AttachStdin": false,
+       "AttachStdout": true,
+       "AttachStderr": true,
+       "Tty": false,
+       "Cmd": [
+                     "date"
+             ]
+      }
 
 **Example response**:
 
@@ -1962,9 +1945,7 @@ interactive session with the `exec` command.
     HTTP/1.1 200 OK
     Content-Type: application/vnd.docker.raw-stream
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **JSON parameters**:
 
@@ -1976,9 +1957,8 @@ interactive session with the `exec` command.
 -   **200** – no error
 -   **404** – no such exec instance
 
-**Stream details**:
-
-Similar to the stream behavior of `POST /containers/(id or name)/attach` API
+    **Stream details**:
+    Similar to the stream behavior of `POST /containers/(id or name)/attach` API
 
 ### Exec Resize
 

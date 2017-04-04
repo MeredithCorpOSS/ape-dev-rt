@@ -2,10 +2,11 @@ package main
 
 import (
 	"io"
-	"log"
 	"net"
 	"sync"
 	"syscall"
+
+	"github.com/Sirupsen/logrus"
 )
 
 // TCPProxy is a proxy for TCP connections. It implements the Proxy interface to
@@ -34,7 +35,7 @@ func NewTCPProxy(frontendAddr, backendAddr *net.TCPAddr) (*TCPProxy, error) {
 func (proxy *TCPProxy) clientLoop(client *net.TCPConn, quit chan bool) {
 	backend, err := net.DialTCP("tcp", nil, proxy.backendAddr)
 	if err != nil {
-		log.Printf("Can't forward traffic to backend tcp/%v: %s\n", proxy.backendAddr, err)
+		logrus.Printf("Can't forward traffic to backend tcp/%v: %s\n", proxy.backendAddr, err)
 		client.Close()
 		return
 	}
@@ -78,7 +79,7 @@ func (proxy *TCPProxy) Run() {
 	for {
 		client, err := proxy.listener.Accept()
 		if err != nil {
-			log.Printf("Stopping proxy on tcp/%v for tcp/%v (%s)", proxy.frontendAddr, proxy.backendAddr, err)
+			logrus.Printf("Stopping proxy on tcp/%v for tcp/%v (%s)", proxy.frontendAddr, proxy.backendAddr, err)
 			return
 		}
 		go proxy.clientLoop(client.(*net.TCPConn), quit)

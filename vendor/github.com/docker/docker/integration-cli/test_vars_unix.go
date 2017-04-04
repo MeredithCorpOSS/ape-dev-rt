@@ -12,3 +12,5 @@ const (
 	// runs indefinitely while still being interruptible by a signal.
 	defaultSleepImage = "busybox"
 )
+
+var defaultSleepCommand = []string{"top"}

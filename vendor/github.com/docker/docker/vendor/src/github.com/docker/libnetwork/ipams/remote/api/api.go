@@ -26,7 +26,7 @@ type GetCapabilityResponse struct {
 	RequiresRequestReplay bool
 }
 
-// ToCapability converts the capability response into the internal ipam driver capability structure
+// ToCapability converts the capability response into the internal ipam driver capaility structure
 func (capRes GetCapabilityResponse) ToCapability() *ipamapi.Capability {
 	return &ipamapi.Capability{
 		RequiresMACAddress:    capRes.RequiresMACAddress,

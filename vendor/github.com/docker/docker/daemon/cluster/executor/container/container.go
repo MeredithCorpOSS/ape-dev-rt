@@ -9,13 +9,13 @@ import (
 
 	"github.com/Sirupsen/logrus"
 
-	"github.com/docker/docker/api/types"
-	enginecontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/network"
 	clustertypes "github.com/docker/docker/daemon/cluster/provider"
 	"github.com/docker/docker/reference"
+	"github.com/docker/engine-api/types"
+	enginecontainer "github.com/docker/engine-api/types/container"
+	"github.com/docker/engine-api/types/events"
+	"github.com/docker/engine-api/types/filters"
+	"github.com/docker/engine-api/types/network"
 	"github.com/docker/swarmkit/agent/exec"
 	"github.com/docker/swarmkit/api"
 )
@@ -44,19 +44,17 @@ func newContainerConfig(t *api.Task) (*containerConfig, error) {
 }
 
 func (c *containerConfig) setTask(t *api.Task) error {
-	if t.Spec.GetContainer() == nil && t.Spec.GetAttachment() == nil {
+	container := t.Spec.GetContainer()
+	if container == nil {
 		return exec.ErrRuntimeUnsupported
 	}
 
-	container := t.Spec.GetContainer()
-	if container != nil {
-		if container.Image == "" {
-			return ErrImageRequired
-		}
+	if container.Image == "" {
+		return ErrImageRequired
+	}
 
-		if err := validateMounts(container.Mounts); err != nil {
-			return err
-		}
+	if err := validateMounts(container.Mounts); err != nil {
+		return err
 	}
 
 	// index the networks by name
@@ -69,33 +67,12 @@ func (c *containerConfig) setTask(t *api.Task) error {
 	return nil
 }
 
-func (c *containerConfig) id() string {
-	attachment := c.task.Spec.GetAttachment()
-	if attachment == nil {
-		return ""
-	}
-
-	return attachment.ContainerID
-}
-
-func (c *containerConfig) taskID() string {
-	return c.task.ID
-}
-
 func (c *containerConfig) endpoint() *api.Endpoint {
 	return c.task.Endpoint
 }
 
 func (c *containerConfig) spec() *api.ContainerSpec {
 	return c.task.Spec.GetContainer()
-}
-
-func (c *containerConfig) nameOrID() string {
-	if c.task.Spec.GetContainer() != nil {
-		return c.name()
-	}
-
-	return c.id()
 }
 
 func (c *containerConfig) name() string {
@@ -143,19 +120,11 @@ func (c *containerConfig) config() *enginecontainer.Config {
 }
 
 func (c *containerConfig) labels() map[string]string {
-	taskName := c.task.Annotations.Name
-	if taskName == "" {
-		if c.task.Slot != 0 {
-			taskName = fmt.Sprintf("%v.%v.%v", c.task.ServiceAnnotations.Name, c.task.Slot, c.task.ID)
-		} else {
-			taskName = fmt.Sprintf("%v.%v.%v", c.task.ServiceAnnotations.Name, c.task.NodeID, c.task.ID)
-		}
-	}
 	var (
 		system = map[string]string{
 			"task":         "", // mark as cluster task
 			"task.id":      c.task.ID,
-			"task.name":    taskName,
+			"task.name":    fmt.Sprintf("%v.%v", c.task.ServiceAnnotations.Name, c.task.Slot),
 			"node.id":      c.task.NodeID,
 			"service.id":   c.task.ServiceID,
 			"service.name": c.task.ServiceAnnotations.Name,
@@ -307,7 +276,6 @@ func (c *containerConfig) hostConfig() *enginecontainer.HostConfig {
 		Resources: c.resources(),
 		Binds:     c.binds(),
 		Tmpfs:     c.tmpfs(),
-		GroupAdd:  c.spec().Groups,
 	}
 
 	if c.task.LogDriver != nil {
@@ -373,7 +341,7 @@ func (c *containerConfig) resources() enginecontainer.Resources {
 // Docker daemon supports just 1 network during container create.
 func (c *containerConfig) createNetworkingConfig() *network.NetworkingConfig {
 	var networks []*api.NetworkAttachment
-	if c.task.Spec.GetContainer() != nil || c.task.Spec.GetAttachment() != nil {
+	if c.task.Spec.GetContainer() != nil {
 		networks = c.task.Networks
 	}
 
@@ -423,7 +391,6 @@ func getEndpointConfig(na *api.NetworkAttachment) *network.EndpointSettings {
 	}
 
 	return &network.EndpointSettings{
-		NetworkID: na.Network.ID,
 		IPAMConfig: &network.EndpointIPAMConfig{
 			IPv4Address: ipv4,
 			IPv6Address: ipv6,
@@ -510,7 +477,7 @@ func (c *containerConfig) networkCreateRequest(name string) (clustertypes.Networ
 	options := types.NetworkCreate{
 		// ID:     na.Network.ID,
 		Driver: na.Network.DriverState.Name,
-		IPAM: &network.IPAM{
+		IPAM: network.IPAM{
 			Driver: na.Network.IPAM.Driver.Name,
 		},
 		Options:        na.Network.DriverState.Options,

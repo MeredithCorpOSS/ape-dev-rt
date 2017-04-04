@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/engine-api/types"
 )
 
 const (
@@ -22,16 +22,15 @@ const (
 
 // ConfigFile ~/.docker/config.json file info
 type ConfigFile struct {
-	AuthConfigs          map[string]types.AuthConfig `json:"auths"`
-	HTTPHeaders          map[string]string           `json:"HttpHeaders,omitempty"`
-	PsFormat             string                      `json:"psFormat,omitempty"`
-	ImagesFormat         string                      `json:"imagesFormat,omitempty"`
-	NetworksFormat       string                      `json:"networksFormat,omitempty"`
-	VolumesFormat        string                      `json:"volumesFormat,omitempty"`
-	DetachKeys           string                      `json:"detachKeys,omitempty"`
-	CredentialsStore     string                      `json:"credsStore,omitempty"`
-	Filename             string                      `json:"-"` // Note: for internal use only
-	ServiceInspectFormat string                      `json:"serviceInspectFormat,omitempty"`
+	AuthConfigs      map[string]types.AuthConfig `json:"auths"`
+	HTTPHeaders      map[string]string           `json:"HttpHeaders,omitempty"`
+	PsFormat         string                      `json:"psFormat,omitempty"`
+	ImagesFormat     string                      `json:"imagesFormat,omitempty"`
+	NetworksFormat   string                      `json:"networksFormat,omitempty"`
+	VolumesFormat    string                      `json:"volumesFormat,omitempty"`
+	DetachKeys       string                      `json:"detachKeys,omitempty"`
+	CredentialsStore string                      `json:"credsStore,omitempty"`
+	Filename         string                      `json:"-"` // Note: for internal use only
 }
 
 // LegacyLoadFromReader reads the non-nested configuration data given and sets up the

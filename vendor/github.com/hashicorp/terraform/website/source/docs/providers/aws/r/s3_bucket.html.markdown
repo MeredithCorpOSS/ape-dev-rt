@@ -323,7 +323,7 @@ The `logging` object supports the following:
 * `target_bucket` - (Required) The name of the bucket that will receive the log objects.
 * `target_prefix` - (Optional) To specify a key prefix for log objects.
 
-The 'lifecycle_rule' object supports the following:
+The `lifecycle_rule` object supports the following:
 
 * `id` - (Optional) Unique identifier for the rule.
 * `prefix` - (Required) Object key prefix identifying one or more objects to which the rule applies.
@@ -380,6 +380,7 @@ The following attributes are exported:
 
 * `id` - The name of the bucket.
 * `arn` - The ARN of the bucket. Will be of format `arn:aws:s3:::bucketname`.
+* `bucket_domain_name` - The bucket domain name. Will be of format `bucketname.s3.amazonaws.com`.
 * `hosted_zone_id` - The [Route 53 Hosted Zone ID](https://docs.aws.amazon.com/general/latest/gr/rande.html#s3_website_region_endpoints) for this bucket's region.
 * `region` - The AWS region this bucket resides in.
 * `website_endpoint` - The website endpoint, if the bucket is configured with a website. If not, this will be an empty string.

@@ -1,11 +1,6 @@
 package events
 
-import (
-	"fmt"
-	"sync"
-
-	"github.com/Sirupsen/logrus"
-)
+import "github.com/Sirupsen/logrus"
 
 // Broadcaster sends events to multiple, reliable Sinks. The goal of this
 // component is to dispatch events to configured endpoints. Reliability can be
@@ -15,10 +10,7 @@ type Broadcaster struct {
 	events  chan Event
 	adds    chan configureRequest
 	removes chan configureRequest
-
-	shutdown chan struct{}
-	closed   chan struct{}
-	once     sync.Once
+	closed  chan chan struct{}
 }
 
 // NewBroadcaster appends one or more sinks to the list of sinks. The
@@ -27,12 +19,11 @@ type Broadcaster struct {
 // its own. Use of EventQueue and RetryingSink should be used here.
 func NewBroadcaster(sinks ...Sink) *Broadcaster {
 	b := Broadcaster{
-		sinks:    sinks,
-		events:   make(chan Event),
-		adds:     make(chan configureRequest),
-		removes:  make(chan configureRequest),
-		shutdown: make(chan struct{}),
-		closed:   make(chan struct{}),
+		sinks:   sinks,
+		events:  make(chan Event),
+		adds:    make(chan configureRequest),
+		removes: make(chan configureRequest),
+		closed:  make(chan chan struct{}),
 	}
 
 	// Start the broadcaster
@@ -91,19 +82,24 @@ func (b *Broadcaster) configure(ch chan configureRequest, sink Sink) error {
 // Close the broadcaster, ensuring that all messages are flushed to the
 // underlying sink before returning.
 func (b *Broadcaster) Close() error {
-	b.once.Do(func() {
-		close(b.shutdown)
-	})
-
-	<-b.closed
-	return nil
+	select {
+	case <-b.closed:
+		// already closed
+		return ErrSinkClosed
+	default:
+		// do a little chan handoff dance to synchronize closing
+		closed := make(chan struct{})
+		b.closed <- closed
+		close(b.closed)
+		<-closed
+		return nil
+	}
 }
 
 // run is the main broadcast loop, started when the broadcaster is created.
 // Under normal conditions, it waits for events on the event channel. After
 // Close is called, this goroutine will exit.
 func (b *Broadcaster) run() {
-	defer close(b.closed)
 	remove := func(target Sink) {
 		for i, sink := range b.sinks {
 			if sink == target {
@@ -147,7 +143,7 @@ func (b *Broadcaster) run() {
 		case request := <-b.removes:
 			remove(request.sink)
 			request.response <- nil
-		case <-b.shutdown:
+		case closing := <-b.closed:
 			// close all the underlying sinks
 			for _, sink := range b.sinks {
 				if err := sink.Close(); err != nil && err != ErrSinkClosed {
@@ -155,24 +151,8 @@ func (b *Broadcaster) run() {
 						Errorf("broadcaster: closing sink failed")
 				}
 			}
+			closing <- struct{}{}
 			return
 		}
 	}
-}
-
-func (b Broadcaster) String() string {
-	// Serialize copy of this broadcaster without the sync.Once, to avoid
-	// a data race.
-
-	b2 := map[string]interface{}{
-		"sinks":   b.sinks,
-		"events":  b.events,
-		"adds":    b.adds,
-		"removes": b.removes,
-
-		"shutdown": b.shutdown,
-		"closed":   b.closed,
-	}
-
-	return fmt.Sprint(b2)
 }

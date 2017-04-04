@@ -1,6 +1,11 @@
 package columnize
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	crand "crypto/rand"
+)
 
 func TestListOfStringsInput(t *testing.T) {
 	input := []string{
@@ -70,7 +75,66 @@ func TestColumnWidthCalculator(t *testing.T) {
 	expected += "short          short          short"
 
 	if output != expected {
-		t.Fatalf("\nexpected:\n%s\n\ngot:\n%s", expected, output)
+		printableProof := fmt.Sprintf("\nGot:      %+q", output)
+		printableProof += fmt.Sprintf("\nExpected: %+q", expected)
+		t.Fatalf("\n%s", printableProof)
+	}
+}
+
+func TestColumnWidthCalculatorNonASCII(t *testing.T) {
+	input := []string{
+		"Column A | Column B | Column C",
+		"⌘⌘⌘⌘⌘⌘⌘⌘ | Longer than B | Longer than C",
+		"short | short | short",
+	}
+
+	config := DefaultConfig()
+	output := Format(input, config)
+
+	expected := "Column A  Column B       Column C\n"
+	expected += "⌘⌘⌘⌘⌘⌘⌘⌘  Longer than B  Longer than C\n"
+	expected += "short     short          short"
+
+	if output != expected {
+		printableProof := fmt.Sprintf("\nGot:      %+q", output)
+		printableProof += fmt.Sprintf("\nExpected: %+q", expected)
+		t.Fatalf("\n%s", printableProof)
+	}
+}
+
+func BenchmarkColumnWidthCalculator(b *testing.B) {
+	// Generate the input
+	input := []string{
+		"UUID A | UUID B | UUID C | Column D | Column E",
+	}
+
+	format := "%s|%s|%s|%s"
+	short := "short"
+
+	uuid := func() string {
+		buf := make([]byte, 16)
+		if _, err := crand.Read(buf); err != nil {
+			panic(fmt.Errorf("failed to read random bytes: %v", err))
+		}
+
+		return fmt.Sprintf("%08x-%04x-%04x-%04x-%12x",
+			buf[0:4],
+			buf[4:6],
+			buf[6:8],
+			buf[8:10],
+			buf[10:16])
+	}
+
+	for i := 0; i < 1000; i++ {
+		l := fmt.Sprintf(format, uuid()[:8], uuid()[:12], uuid(), short, short)
+		input = append(input, l)
+	}
+
+	config := DefaultConfig()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		Format(input, config)
 	}
 }
 

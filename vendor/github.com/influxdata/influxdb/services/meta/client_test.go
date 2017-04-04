@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,22 +31,20 @@ func TestMetaClient_CreateDatabaseOnly(t *testing.T) {
 		t.Fatalf("database name mismatch.  exp: db0, got %s", db.Name)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
 	// Make sure a default retention policy was created.
-	rp, err := c.RetentionPolicy("db0", "default")
+	rp, err := c.RetentionPolicy("db0", "autogen")
 	if err != nil {
 		t.Fatal(err)
 	} else if rp == nil {
 		t.Fatal("failed to create rp")
-	} else if exp, got := "default", rp.Name; exp != got {
+	} else if exp, got := "autogen", rp.Name; exp != got {
 		t.Fatalf("rp name wrong:\n\texp: %s\n\tgot: %s", exp, got)
 	}
 }
@@ -60,10 +60,8 @@ func TestMetaClient_CreateDatabaseIfNotExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
@@ -81,32 +79,74 @@ func TestMetaClient_CreateDatabaseWithRetentionPolicy(t *testing.T) {
 	defer os.RemoveAll(d)
 	defer c.Close()
 
-	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &meta.RetentionPolicyInfo{
-		Name:     "rp0",
-		Duration: 1 * time.Hour,
-		ReplicaN: 1,
-	}); err != nil {
+	duration := 1 * time.Hour
+	replicaN := 1
+	spec := meta.RetentionPolicySpec{
+		Name:               "rp0",
+		Duration:           &duration,
+		ReplicaN:           &replicaN,
+		ShardGroupDuration: 60 * time.Minute,
+	}
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &spec); err != nil {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
 	rp := db.RetentionPolicy("rp0")
-	if err != nil {
-		t.Fatal(err)
-	} else if rp.Name != "rp0" {
+	if rp.Name != "rp0" {
 		t.Fatalf("rp name wrong: %s", rp.Name)
 	} else if rp.Duration != time.Hour {
-		t.Fatalf("rp duration wrong: %s", rp.Duration.String())
+		t.Fatalf("rp duration wrong: %v", rp.Duration)
 	} else if rp.ReplicaN != 1 {
 		t.Fatalf("rp replication wrong: %d", rp.ReplicaN)
+	} else if rp.ShardGroupDuration != 60*time.Minute {
+		t.Fatalf("rp shard duration wrong: %v", rp.ShardGroupDuration)
+	}
+
+	// Recreating the exact same database with retention policy is not
+	// an error.
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &spec); err != nil {
+		t.Fatal(err)
+	}
+
+	// If the rp's duration is different, an error should be returned.
+	spec2 := spec
+	duration2 := *spec.Duration + time.Minute
+	spec2.Duration = &duration2
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &spec2); err != meta.ErrRetentionPolicyConflict {
+		t.Fatalf("got %v, but expected %v", err, meta.ErrRetentionPolicyConflict)
+	}
+
+	// If the rp's replica is different, an error should be returned.
+	spec2 = spec
+	replica2 := *spec.ReplicaN + 1
+	spec2.ReplicaN = &replica2
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &spec2); err != meta.ErrRetentionPolicyConflict {
+		t.Fatalf("got %v, but expected %v", err, meta.ErrRetentionPolicyConflict)
+	}
+
+	// If the rp's shard group duration is different, an error should be returned.
+	spec2 = spec
+	spec2.ShardGroupDuration = spec.ShardGroupDuration + time.Minute
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &spec2); err != meta.ErrRetentionPolicyConflict {
+		t.Fatalf("got %v, but expected %v", err, meta.ErrRetentionPolicyConflict)
+	}
+
+	// If create database is used by itself, no error should be returned and
+	// the default retention policy should not be changed.
+	if dbi, err := c.CreateDatabase("db0"); err != nil {
+		t.Fatalf("got %v, but expected %v", err, nil)
+	} else if dbi.DefaultRetentionPolicy != "rp0" {
+		t.Fatalf("got %v, but expected %v", dbi.DefaultRetentionPolicy, "rp0")
+	} else if got, exp := len(dbi.RetentionPolicies), 1; got != exp {
+		// Ensure no additional retention policies were created.
+		t.Fatalf("got %v, but expected %v", got, exp)
 	}
 }
 
@@ -134,7 +174,7 @@ func TestMetaClient_Databases(t *testing.T) {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
-	dbs, err := c.Databases()
+	dbs := c.Databases()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,10 +198,8 @@ func TestMetaClient_DropDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatalf("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
@@ -171,7 +209,7 @@ func TestMetaClient_DropDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if db, _ = c.Database("db0"); db != nil {
+	if db = c.Database("db0"); db != nil {
 		t.Fatalf("expected database to not return: %v", db)
 	}
 
@@ -192,74 +230,131 @@ func TestMetaClient_CreateRetentionPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
-	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicyInfo{
-		Name:     "rp0",
-		Duration: 1 * time.Hour,
-		ReplicaN: 1,
-	}); err != nil {
+	rp0 := meta.RetentionPolicyInfo{
+		Name:               "rp0",
+		ReplicaN:           1,
+		Duration:           2 * time.Hour,
+		ShardGroupDuration: 2 * time.Hour,
+	}
+
+	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp0.Name,
+		ReplicaN:           &rp0.ReplicaN,
+		Duration:           &rp0.Duration,
+		ShardGroupDuration: rp0.ShardGroupDuration,
+	}, true); err != nil {
 		t.Fatal(err)
 	}
 
-	rp, err := c.RetentionPolicy("db0", "rp0")
+	actual, err := c.RetentionPolicy("db0", "rp0")
 	if err != nil {
 		t.Fatal(err)
-	} else if rp.Name != "rp0" {
-		t.Fatalf("rp name wrong: %s", rp.Name)
-	} else if rp.Duration != time.Hour {
-		t.Fatalf("rp duration wrong: %s", rp.Duration.String())
-	} else if rp.ReplicaN != 1 {
-		t.Fatalf("rp replication wrong: %d", rp.ReplicaN)
+	} else if got, exp := actual, &rp0; !reflect.DeepEqual(got, exp) {
+		t.Fatalf("got %#v, expected %#v", got, exp)
 	}
 
 	// Create the same policy.  Should not error.
-	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicyInfo{
-		Name:     "rp0",
-		Duration: 1 * time.Hour,
-		ReplicaN: 1,
-	}); err != nil {
+	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp0.Name,
+		ReplicaN:           &rp0.ReplicaN,
+		Duration:           &rp0.Duration,
+		ShardGroupDuration: rp0.ShardGroupDuration,
+	}, true); err != nil {
 		t.Fatal(err)
+	} else if actual, err = c.RetentionPolicy("db0", "rp0"); err != nil {
+		t.Fatal(err)
+	} else if got, exp := actual, &rp0; !reflect.DeepEqual(got, exp) {
+		t.Fatalf("got %#v, expected %#v", got, exp)
 	}
 
-	rp, err = c.RetentionPolicy("db0", "rp0")
-	if err != nil {
-		t.Fatal(err)
-	} else if rp.Name != "rp0" {
-		t.Fatalf("rp name wrong: %s", rp.Name)
-	} else if rp.Duration != time.Hour {
-		t.Fatalf("rp duration wrong: %s", rp.Duration.String())
-	} else if rp.ReplicaN != 1 {
-		t.Fatalf("rp replication wrong: %d", rp.ReplicaN)
+	// Creating the same policy, but with a different duration should
+	// result in an error.
+	rp1 := rp0
+	rp1.Duration = 2 * rp0.Duration
+
+	_, got := c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp1.Name,
+		ReplicaN:           &rp1.ReplicaN,
+		Duration:           &rp1.Duration,
+		ShardGroupDuration: rp1.ShardGroupDuration,
+	}, true)
+	if exp := meta.ErrRetentionPolicyExists; got != exp {
+		t.Fatalf("got error %v, expected error %v", got, exp)
+	}
+
+	// Creating the same policy, but with a different replica factor
+	// should also result in an error.
+	rp1 = rp0
+	rp1.ReplicaN = rp0.ReplicaN + 1
+
+	_, got = c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp1.Name,
+		ReplicaN:           &rp1.ReplicaN,
+		Duration:           &rp1.Duration,
+		ShardGroupDuration: rp1.ShardGroupDuration,
+	}, true)
+	if exp := meta.ErrRetentionPolicyExists; got != exp {
+		t.Fatalf("got error %v, expected error %v", got, exp)
+	}
+
+	// Creating the same policy, but with a different shard group
+	// duration should also result in an error.
+	rp1 = rp0
+	rp1.ShardGroupDuration = rp0.ShardGroupDuration / 2
+
+	_, got = c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp1.Name,
+		ReplicaN:           &rp1.ReplicaN,
+		Duration:           &rp1.Duration,
+		ShardGroupDuration: rp1.ShardGroupDuration,
+	}, true)
+	if exp := meta.ErrRetentionPolicyExists; got != exp {
+		t.Fatalf("got error %v, expected error %v", got, exp)
+	}
+
+	// Creating a policy with the shard duration being greater than the
+	// duration should also be an error.
+	rp1 = rp0
+	rp1.Duration = 1 * time.Hour
+	rp1.ShardGroupDuration = 2 * time.Hour
+
+	_, got = c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               rp1.Name,
+		ReplicaN:           &rp1.ReplicaN,
+		Duration:           &rp1.Duration,
+		ShardGroupDuration: rp1.ShardGroupDuration,
+	}, true)
+	if exp := meta.ErrIncompatibleDurations; got != exp {
+		t.Fatalf("got error %v, expected error %v", got, exp)
 	}
 }
 
-func TestMetaClient_SetDefaultRetentionPolicy(t *testing.T) {
+func TestMetaClient_DefaultRetentionPolicy(t *testing.T) {
 	t.Parallel()
 
 	d, c := newClient()
 	defer os.RemoveAll(d)
 	defer c.Close()
 
-	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &meta.RetentionPolicyInfo{
+	duration := 1 * time.Hour
+	replicaN := 1
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &meta.RetentionPolicySpec{
 		Name:     "rp0",
-		Duration: 1 * time.Hour,
-		ReplicaN: 1,
+		Duration: &duration,
+		ReplicaN: &replicaN,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("datbase not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
@@ -282,6 +377,87 @@ func TestMetaClient_SetDefaultRetentionPolicy(t *testing.T) {
 	}
 }
 
+func TestMetaClient_UpdateRetentionPolicy(t *testing.T) {
+	t.Parallel()
+
+	d, c := newClient()
+	defer os.RemoveAll(d)
+	defer c.Close()
+
+	if _, err := c.CreateDatabaseWithRetentionPolicy("db0", &meta.RetentionPolicySpec{
+		Name:               "rp0",
+		ShardGroupDuration: 4 * time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rpi, err := c.RetentionPolicy("db0", "rp0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set the duration to another value and ensure that the shard group duration
+	// doesn't change.
+	duration := 2 * rpi.ShardGroupDuration
+	replicaN := 1
+	if err := c.UpdateRetentionPolicy("db0", "rp0", &meta.RetentionPolicyUpdate{
+		Duration: &duration,
+		ReplicaN: &replicaN,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	rpi, err = c.RetentionPolicy("db0", "rp0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp, got := 4*time.Hour, rpi.ShardGroupDuration; exp != got {
+		t.Fatalf("shard group duration wrong: \n\texp: %s\n\tgot: %s", exp, got)
+	}
+
+	// Set the duration to below the shard group duration. This should return an error.
+	duration = rpi.ShardGroupDuration / 2
+	if err := c.UpdateRetentionPolicy("db0", "rp0", &meta.RetentionPolicyUpdate{
+		Duration: &duration,
+	}, true); err == nil {
+		t.Fatal("expected error")
+	} else if err != meta.ErrIncompatibleDurations {
+		t.Fatalf("expected error '%s', got '%s'", meta.ErrIncompatibleDurations, err)
+	}
+
+	// Set the shard duration longer than the overall duration. This should also return an error.
+	sgDuration := rpi.Duration * 2
+	if err := c.UpdateRetentionPolicy("db0", "rp0", &meta.RetentionPolicyUpdate{
+		ShardGroupDuration: &sgDuration,
+	}, true); err == nil {
+		t.Fatal("expected error")
+	} else if err != meta.ErrIncompatibleDurations {
+		t.Fatalf("expected error '%s', got '%s'", meta.ErrIncompatibleDurations, err)
+	}
+
+	// Set both values to incompatible values and ensure an error is returned.
+	duration = rpi.ShardGroupDuration
+	sgDuration = rpi.Duration
+	if err := c.UpdateRetentionPolicy("db0", "rp0", &meta.RetentionPolicyUpdate{
+		Duration:           &duration,
+		ShardGroupDuration: &sgDuration,
+	}, true); err == nil {
+		t.Fatal("expected error")
+	} else if err != meta.ErrIncompatibleDurations {
+		t.Fatalf("expected error '%s', got '%s'", meta.ErrIncompatibleDurations, err)
+	}
+
+	// Allow any shard duration if the duration is set to zero.
+	duration = time.Duration(0)
+	sgDuration = 168 * time.Hour
+	if err := c.UpdateRetentionPolicy("db0", "rp0", &meta.RetentionPolicyUpdate{
+		Duration:           &duration,
+		ShardGroupDuration: &sgDuration,
+	}, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestMetaClient_DropRetentionPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -293,20 +469,20 @@ func TestMetaClient_DropRetentionPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
-	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicyInfo{
+	duration := 1 * time.Hour
+	replicaN := 1
+	if _, err := c.CreateRetentionPolicy("db0", &meta.RetentionPolicySpec{
 		Name:     "rp0",
-		Duration: 1 * time.Hour,
-		ReplicaN: 1,
-	}); err != nil {
+		Duration: &duration,
+		ReplicaN: &replicaN,
+	}, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -453,10 +629,8 @@ func TestMetaClient_CreateUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db.Name != "db0" {
+	db := c.Database("db0")
+	if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
@@ -506,6 +680,19 @@ func TestMetaClient_CreateUser(t *testing.T) {
 	}
 }
 
+func TestMetaClient_UpdateUser(t *testing.T) {
+	t.Parallel()
+
+	d, c := newClient()
+	defer os.RemoveAll(d)
+	defer c.Close()
+
+	// UpdateUser that doesn't exist should return an error.
+	if err := c.UpdateUser("foo", "bar"); err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
 func TestMetaClient_ContinuousQueries(t *testing.T) {
 	t.Parallel()
 
@@ -517,10 +704,8 @@ func TestMetaClient_ContinuousQueries(t *testing.T) {
 	if _, err := c.CreateDatabase("db0"); err != nil {
 		t.Fatal(err)
 	}
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatalf("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
@@ -531,9 +716,18 @@ func TestMetaClient_ContinuousQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Recreate an existing CQ
-	if err := c.CreateContinuousQuery("db0", "cq0", `SELECT max(value) INTO foo_max FROM foo GROUP BY time(10m)`); err == nil || err.Error() != `continuous query already exists` {
-		t.Fatalf("unexpected error: %s", err)
+	// Recreating an existing CQ with the exact same query should not
+	// return an error.
+	if err := c.CreateContinuousQuery("db0", "cq0", `SELECT count(value) INTO foo_count FROM foo GROUP BY time(10m)`); err != nil {
+		t.Fatalf("got error %q, but didn't expect one", err)
+	}
+
+	// Recreating an existing CQ with a different query should return
+	// an error.
+	if err := c.CreateContinuousQuery("db0", "cq0", `SELECT min(value) INTO foo_max FROM foo GROUP BY time(20m)`); err == nil {
+		t.Fatal("didn't get and error, but expected one")
+	} else if got, exp := err, meta.ErrContinuousQueryExists; got.Error() != exp.Error() {
+		t.Fatalf("got %v, expected %v", got, exp)
 	}
 
 	// Create a few more CQ's
@@ -548,6 +742,11 @@ func TestMetaClient_ContinuousQueries(t *testing.T) {
 	if err := c.DropContinuousQuery("db0", "cq1"); err != nil {
 		t.Fatal(err)
 	}
+
+	// Dropping a nonexistent CQ should return an error.
+	if err := c.DropContinuousQuery("db0", "not-a-cq"); err == nil {
+		t.Fatal("expected an error, got nil")
+	}
 }
 
 func TestMetaClient_Subscriptions_Create(t *testing.T) {
@@ -561,27 +760,48 @@ func TestMetaClient_Subscriptions_Create(t *testing.T) {
 	if _, err := c.CreateDatabase("db0"); err != nil {
 		t.Fatal(err)
 	}
-	db, err := c.Database("db0")
-	if err != nil {
-		t.Fatal(err)
-	} else if db == nil {
+	db := c.Database("db0")
+	if db == nil {
 		t.Fatal("database not found")
 	} else if db.Name != "db0" {
 		t.Fatalf("db name wrong: %s", db.Name)
 	}
 
 	// Create a subscription
-	if err := c.CreateSubscription("db0", "default", "sub0", "ALL", []string{"udp://example.com:9090"}); err != nil {
+	if err := c.CreateSubscription("db0", "autogen", "sub0", "ALL", []string{"udp://example.com:9090"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Re-create a subscription
-	if err := c.CreateSubscription("db0", "default", "sub0", "ALL", []string{"udp://example.com:9090"}); err == nil || err.Error() != `subscription already exists` {
+	err := c.CreateSubscription("db0", "autogen", "sub0", "ALL", []string{"udp://example.com:9090"})
+	if err == nil || err.Error() != `subscription already exists` {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
 	// Create another subscription.
-	if err := c.CreateSubscription("db0", "default", "sub1", "ALL", []string{"udp://example.com:6060"}); err != nil {
+	if err := c.CreateSubscription("db0", "autogen", "sub1", "ALL", []string{"udp://example.com:6060"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subscription with invalid scheme
+	err = c.CreateSubscription("db0", "autogen", "sub2", "ALL", []string{"bad://example.com:9191"})
+	if err == nil || !strings.HasPrefix(err.Error(), "invalid subscription URL") {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Create a subscription without port number
+	err = c.CreateSubscription("db0", "autogen", "sub2", "ALL", []string{"udp://example.com"})
+	if err == nil || !strings.HasPrefix(err.Error(), "invalid subscription URL") {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Create an HTTP subscription.
+	if err := c.CreateSubscription("db0", "autogen", "sub3", "ALL", []string{"http://example.com:9092"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an HTTPS subscription.
+	if err := c.CreateSubscription("db0", "autogen", "sub4", "ALL", []string{"https://example.com:9092"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -600,19 +820,19 @@ func TestMetaClient_Subscriptions_Drop(t *testing.T) {
 
 	// DROP SUBSCRIPTION returns ErrSubscriptionNotFound when the
 	// subscription is unknown.
-	err := c.DropSubscription("db0", "default", "foo")
+	err := c.DropSubscription("db0", "autogen", "foo")
 	if got, exp := err, meta.ErrSubscriptionNotFound; got == nil || got.Error() != exp.Error() {
 		t.Fatalf("got: %s, exp: %s", got, exp)
 	}
 
 	// Create a subscription.
-	if err := c.CreateSubscription("db0", "default", "sub0", "ALL", []string{"udp://example.com:9090"}); err != nil {
+	if err := c.CreateSubscription("db0", "autogen", "sub0", "ALL", []string{"udp://example.com:9090"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// DROP SUBSCRIPTION returns an influxdb.ErrDatabaseNotFound when
 	// the database is unknown.
-	err = c.DropSubscription("foo", "default", "sub0")
+	err = c.DropSubscription("foo", "autogen", "sub0")
 	if got, exp := err, influxdb.ErrDatabaseNotFound("foo"); got.Error() != exp.Error() {
 		t.Fatalf("got: %s, exp: %s", got, exp)
 	}
@@ -625,7 +845,7 @@ func TestMetaClient_Subscriptions_Drop(t *testing.T) {
 	}
 
 	// DROP SUBSCRIPTION drops the subsciption if it can find it.
-	err = c.DropSubscription("db0", "default", "sub0")
+	err = c.DropSubscription("db0", "autogen", "sub0")
 	if got := err; got != nil {
 		t.Fatalf("got: %s, exp: %v", got, nil)
 	}
@@ -644,7 +864,7 @@ func TestMetaClient_Shards(t *testing.T) {
 
 	// Test creating a shard group.
 	tmin := time.Now()
-	sg, err := c.CreateShardGroup("db0", "default", tmin)
+	sg, err := c.CreateShardGroup("db0", "autogen", tmin)
 	if err != nil {
 		t.Fatal(err)
 	} else if sg == nil {
@@ -659,7 +879,7 @@ func TestMetaClient_Shards(t *testing.T) {
 	}
 
 	// Test finding shard groups by time range.
-	groups, err := c.ShardGroupsByTimeRange("db0", "default", tmin, tmax)
+	groups, err := c.ShardGroupsByTimeRange("db0", "autogen", tmin, tmax)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(groups) != 2 {
@@ -670,19 +890,153 @@ func TestMetaClient_Shards(t *testing.T) {
 	db, rp, owner := c.ShardOwner(groups[0].Shards[0].ID)
 	if db != "db0" {
 		t.Fatalf("wrong db name: %s", db)
-	} else if rp != "default" {
+	} else if rp != "autogen" {
 		t.Fatalf("wrong rp name: %s", rp)
 	} else if owner.ID != groups[0].ID {
 		t.Fatalf("wrong owner: exp %d got %d", groups[0].ID, owner.ID)
 	}
 
 	// Test deleting a shard group.
-	if err := c.DeleteShardGroup("db0", "default", groups[0].ID); err != nil {
+	if err := c.DeleteShardGroup("db0", "autogen", groups[0].ID); err != nil {
 		t.Fatal(err)
-	} else if groups, err = c.ShardGroupsByTimeRange("db0", "default", tmin, tmax); err != nil {
+	} else if groups, err = c.ShardGroupsByTimeRange("db0", "autogen", tmin, tmax); err != nil {
 		t.Fatal(err)
 	} else if len(groups) != 1 {
 		t.Fatalf("wrong number of shard groups after delete: %d", len(groups))
+	}
+}
+
+// Tests that calling CreateShardGroup for the same time range doesn't increment the data.Index
+func TestMetaClient_CreateShardGroupIdempotent(t *testing.T) {
+	t.Parallel()
+
+	d, c := newClient()
+	defer os.RemoveAll(d)
+	defer c.Close()
+
+	if _, err := c.CreateDatabase("db0"); err != nil {
+		t.Fatal(err)
+	}
+
+	// create a shard group.
+	tmin := time.Now()
+	sg, err := c.CreateShardGroup("db0", "autogen", tmin)
+	if err != nil {
+		t.Fatal(err)
+	} else if sg == nil {
+		t.Fatalf("expected ShardGroup")
+	}
+
+	i := c.Data().Index
+	t.Log("index: ", i)
+
+	// create the same shard group.
+	sg, err = c.CreateShardGroup("db0", "autogen", tmin)
+	if err != nil {
+		t.Fatal(err)
+	} else if sg == nil {
+		t.Fatalf("expected ShardGroup")
+	}
+
+	t.Log("index: ", i)
+	if got, exp := c.Data().Index, i; got != exp {
+		t.Fatalf("PrecreateShardGroups failed: invalid index, got %d, exp %d", got, exp)
+	}
+
+	// make sure pre-creating is also idempotent
+	// Test pre-creating shard groups.
+	dur := sg.EndTime.Sub(sg.StartTime) + time.Nanosecond
+	tmax := tmin.Add(dur)
+	if err := c.PrecreateShardGroups(tmin, tmax); err != nil {
+		t.Fatal(err)
+	}
+	i = c.Data().Index
+	t.Log("index: ", i)
+	if err := c.PrecreateShardGroups(tmin, tmax); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("index: ", i)
+	if got, exp := c.Data().Index, i; got != exp {
+		t.Fatalf("PrecreateShardGroups failed: invalid index, got %d, exp %d", got, exp)
+	}
+}
+
+func TestMetaClient_PruneShardGroups(t *testing.T) {
+	t.Parallel()
+
+	d, c := newClient()
+	defer os.RemoveAll(d)
+	defer c.Close()
+
+	if _, err := c.CreateDatabase("db0"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.CreateDatabase("db1"); err != nil {
+		t.Fatal(err)
+	}
+
+	duration := 1 * time.Hour
+	replicaN := 1
+
+	if _, err := c.CreateRetentionPolicy("db1", &meta.RetentionPolicySpec{
+		Name:     "rp0",
+		Duration: &duration,
+		ReplicaN: &replicaN,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	sg, err := c.CreateShardGroup("db1", "autogen", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	} else if sg == nil {
+		t.Fatalf("expected ShardGroup")
+	}
+
+	sg, err = c.CreateShardGroup("db1", "autogen", time.Now().Add(15*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	} else if sg == nil {
+		t.Fatalf("expected ShardGroup")
+	}
+
+	sg, err = c.CreateShardGroup("db1", "rp0", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	} else if sg == nil {
+		t.Fatalf("expected ShardGroup")
+	}
+
+	expiration := time.Now().Add(-2 * 7 * 24 * time.Hour).Add(-1 * time.Hour)
+
+	data := c.Data()
+	data.Databases[1].RetentionPolicies[0].ShardGroups[0].DeletedAt = expiration
+	data.Databases[1].RetentionPolicies[0].ShardGroups[1].DeletedAt = expiration
+
+	if err := c.SetData(&data); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.PruneShardGroups(); err != nil {
+		t.Fatal(err)
+	}
+
+	data = c.Data()
+	rp, err := data.RetentionPolicy("db1", "autogen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, exp := len(rp.ShardGroups), 0; got != exp {
+		t.Fatalf("failed to prune shard group. got: %d, exp: %d", got, exp)
+	}
+
+	rp, err = data.RetentionPolicy("db1", "rp0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, exp := len(rp.ShardGroups), 1; got != exp {
+		t.Fatalf("failed to prune shard group. got: %d, exp: %d", got, exp)
 	}
 }
 

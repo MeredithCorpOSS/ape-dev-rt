@@ -22,24 +22,21 @@ import (
 	"github.com/docker/docker/utils"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
-	rsystem "github.com/opencontainers/runc/libcontainer/system"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/grpclog"
-	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/transport"
 )
 
 const (
-	maxConnectionRetryCount      = 3
-	connectionRetryDelay         = 3 * time.Second
-	containerdHealthCheckTimeout = 3 * time.Second
-	containerdShutdownTimeout    = 15 * time.Second
-	containerdBinary             = "docker-containerd"
-	containerdPidFilename        = "docker-containerd.pid"
-	containerdSockFilename       = "docker-containerd.sock"
-	containerdStateDir           = "containerd"
-	eventTimestampFilename       = "event.ts"
+	maxConnectionRetryCount   = 3
+	connectionRetryDelay      = 3 * time.Second
+	containerdShutdownTimeout = 15 * time.Second
+	containerdBinary          = "docker-containerd"
+	containerdPidFilename     = "docker-containerd.pid"
+	containerdSockFilename    = "docker-containerd.sock"
+	containerdStateDir        = "containerd"
+	eventTimestampFilename    = "event.ts"
 )
 
 type remote struct {
@@ -137,40 +134,36 @@ func (r *remote) UpdateOptions(options ...RemoteOption) error {
 
 func (r *remote) handleConnectionChange() {
 	var transientFailureCount = 0
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	healthClient := grpc_health_v1.NewHealthClient(r.rpcConn)
-
+	state := grpc.Idle
 	for {
-		<-ticker.C
-		ctx, cancel := context.WithTimeout(context.Background(), containerdHealthCheckTimeout)
-		_, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
-		cancel()
-		if err == nil {
-			continue
+		s, err := r.rpcConn.WaitForStateChange(context.Background(), state)
+		if err != nil {
+			break
 		}
-
-		logrus.Debugf("libcontainerd: containerd health check returned error: %v", err)
+		state = s
+		logrus.Debugf("libcontainerd: containerd connection state change: %v", s)
 
 		if r.daemonPid != -1 {
-			if strings.Contains(err.Error(), "is closing") {
+			switch state {
+			case grpc.TransientFailure:
+				// Reset state to be notified of next failure
+				transientFailureCount++
+				if transientFailureCount >= maxConnectionRetryCount {
+					transientFailureCount = 0
+					if utils.IsProcessAlive(r.daemonPid) {
+						utils.KillProcess(r.daemonPid)
+					}
+					<-r.daemonWaitCh
+					if err := r.runContainerdDaemon(); err != nil { //FIXME: Handle error
+						logrus.Errorf("libcontainerd: error restarting containerd: %v", err)
+					}
+				} else {
+					state = grpc.Idle
+					time.Sleep(connectionRetryDelay)
+				}
+			case grpc.Shutdown:
 				// Well, we asked for it to stop, just return
 				return
-			}
-			// all other errors are transient
-			// Reset state to be notified of next failure
-			transientFailureCount++
-			if transientFailureCount >= maxConnectionRetryCount {
-				transientFailureCount = 0
-				if utils.IsProcessAlive(r.daemonPid) {
-					utils.KillProcess(r.daemonPid)
-				}
-				<-r.daemonWaitCh
-				if err := r.runContainerdDaemon(); err != nil { //FIXME: Handle error
-					logrus.Errorf("libcontainerd: error restarting containerd: %v", err)
-				}
-				continue
 			}
 		}
 	}
@@ -223,11 +216,11 @@ func (r *remote) Client(b Backend) (Client, error) {
 
 func (r *remote) updateEventTimestamp(t time.Time) {
 	f, err := os.OpenFile(r.eventTsPath, syscall.O_CREAT|syscall.O_WRONLY|syscall.O_TRUNC, 0600)
+	defer f.Close()
 	if err != nil {
 		logrus.Warnf("libcontainerd: failed to open event timestamp file: %v", err)
 		return
 	}
-	defer f.Close()
 
 	b, err := t.MarshalText()
 	if err != nil {
@@ -252,11 +245,11 @@ func (r *remote) getLastEventTimestamp() time.Time {
 	}
 
 	f, err := os.Open(r.eventTsPath)
+	defer f.Close()
 	if err != nil {
 		logrus.Warnf("libcontainerd: Unable to access last event ts: %v", err)
 		return t
 	}
-	defer f.Close()
 
 	b := make([]byte, fi.Size())
 	n, err := f.Read(b)
@@ -280,7 +273,7 @@ func (r *remote) startEventsMonitor() error {
 	er := &containerd.EventsRequest{
 		Timestamp: tsp,
 	}
-	events, err := r.apiClient.Events(context.Background(), er, grpc.FailFast(false))
+	events, err := r.apiClient.Events(context.Background(), er)
 	if err != nil {
 		return err
 	}
@@ -336,10 +329,10 @@ func (r *remote) handleEventStream(events containerd.API_EventsClient) {
 func (r *remote) runContainerdDaemon() error {
 	pidFilename := filepath.Join(r.stateDir, containerdPidFilename)
 	f, err := os.OpenFile(pidFilename, os.O_RDWR|os.O_CREATE, 0600)
+	defer f.Close()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	// File exist, check if the daemon is alive
 	b := make([]byte, 8)
@@ -430,23 +423,12 @@ func (r *remote) runContainerdDaemon() error {
 }
 
 func setOOMScore(pid, score int) error {
-	oomScoreAdjPath := fmt.Sprintf("/proc/%d/oom_score_adj", pid)
-	f, err := os.OpenFile(oomScoreAdjPath, os.O_WRONLY, 0)
+	f, err := os.OpenFile(fmt.Sprintf("/proc/%d/oom_score_adj", pid), os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
-	stringScore := strconv.Itoa(score)
-	_, err = f.WriteString(stringScore)
+	_, err = f.WriteString(strconv.Itoa(score))
 	f.Close()
-	if os.IsPermission(err) {
-		// Setting oom_score_adj does not work in an
-		// unprivileged container. Ignore the error, but log
-		// it if we appear not to be in that situation.
-		if !rsystem.RunningInUserNS() {
-			logrus.Debugf("Permission denied writing %q to %s", stringScore, oomScoreAdjPath)
-		}
-		return nil
-	}
 	return err
 }
 

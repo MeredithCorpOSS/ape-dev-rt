@@ -17,6 +17,7 @@ limitations under the License.
 package find
 
 import (
+	"context"
 	"errors"
 	"path"
 
@@ -25,7 +26,7 @@ import (
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
-	"golang.org/x/net/context"
+	"github.com/vmware/govmomi/vim25/types"
 )
 
 type Finder struct {
@@ -107,6 +108,35 @@ func (f *Finder) datacenter() (*object.Datacenter, error) {
 	}
 
 	return f.dc, nil
+}
+
+// datacenterPath returns the absolute path to the Datacenter containing the given ref
+func (f *Finder) datacenterPath(ctx context.Context, ref types.ManagedObjectReference) (string, error) {
+	mes, err := mo.Ancestors(ctx, f.client, f.client.ServiceContent.PropertyCollector, ref)
+	if err != nil {
+		return "", err
+	}
+
+	// Chop leaves under the Datacenter
+	for i := len(mes) - 1; i > 0; i-- {
+		if mes[i].Self.Type == "Datacenter" {
+			break
+		}
+		mes = mes[:i]
+	}
+
+	var p string
+
+	for _, me := range mes {
+		// Skip root entity in building inventory path.
+		if me.Parent == nil {
+			continue
+		}
+
+		p = p + "/" + me.Name
+	}
+
+	return p, nil
 }
 
 func (f *Finder) dcFolders(ctx context.Context) (*object.DatacenterFolders, error) {
@@ -192,6 +222,54 @@ func (f *Finder) managedObjectList(ctx context.Context, path string, tl bool) ([
 	return f.find(ctx, fn, tl, path)
 }
 
+// Element returns an Element for the given ManagedObjectReference
+// This method is only useful for looking up the InventoryPath of a ManagedObjectReference.
+func (f *Finder) Element(ctx context.Context, ref types.ManagedObjectReference) (*list.Element, error) {
+	rl := func(_ context.Context) (object.Reference, error) {
+		return ref, nil
+	}
+
+	e, err := f.find(ctx, rl, false, ".")
+	if err != nil {
+		return nil, err
+	}
+
+	if len(e) == 0 {
+		return nil, &NotFoundError{ref.Type, ref.Value}
+	}
+
+	if len(e) > 1 {
+		panic("ManagedObjectReference must be unique")
+	}
+
+	return &e[0], nil
+}
+
+// ObjectReference converts the given ManagedObjectReference to a type from the object package via object.NewReference
+// with the object.Common.InventoryPath field set.
+func (f *Finder) ObjectReference(ctx context.Context, ref types.ManagedObjectReference) (object.Reference, error) {
+	e, err := f.Element(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	r := object.NewReference(f.client, ref)
+
+	type common interface {
+		SetInventoryPath(string)
+	}
+
+	r.(common).SetInventoryPath(e.Path)
+
+	if f.dc != nil {
+		if ds, ok := r.(*object.Datastore); ok {
+			ds.DatacenterPath = f.dc.InventoryPath
+		}
+	}
+
+	return r, nil
+}
+
 func (f *Finder) ManagedObjectList(ctx context.Context, path string) ([]list.Element, error) {
 	return f.managedObjectList(ctx, path, false)
 }
@@ -210,7 +288,9 @@ func (f *Finder) DatacenterList(ctx context.Context, path string) ([]*object.Dat
 	for _, e := range es {
 		ref := e.Object.Reference()
 		if ref.Type == "Datacenter" {
-			dcs = append(dcs, object.NewDatacenter(f.client, ref))
+			dc := object.NewDatacenter(f.client, ref)
+			dc.InventoryPath = e.Path
+			dcs = append(dcs, dc)
 		}
 	}
 
@@ -267,6 +347,16 @@ func (f *Finder) DatastoreList(ctx context.Context, path string) ([]*object.Data
 		if ref.Type == "Datastore" {
 			ds := object.NewDatastore(f.client, ref)
 			ds.InventoryPath = e.Path
+
+			if f.dc == nil {
+				// In this case SetDatacenter was not called and path is absolute
+				ds.DatacenterPath, err = f.datacenterPath(ctx, ref)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				ds.DatacenterPath = f.dc.InventoryPath
+			}
 
 			dss = append(dss, ds)
 		}
@@ -554,7 +644,7 @@ func (f *Finder) NetworkList(ctx context.Context, path string) ([]object.Network
 	for _, e := range es {
 		ref := e.Object.Reference()
 		switch ref.Type {
-		case "Network":
+		case "Network", "OpaqueNetwork":
 			r := object.NewNetwork(f.client, ref)
 			r.InventoryPath = e.Path
 			ns = append(ns, r)
@@ -669,6 +759,29 @@ func (f *Finder) ResourcePoolOrDefault(ctx context.Context, path string) (*objec
 	return f.DefaultResourcePool(ctx)
 }
 
+// ResourcePoolListAll combines ResourcePoolList and VirtualAppList
+// VirtualAppList is only called if ResourcePoolList does not find any pools with the given path.
+func (f *Finder) ResourcePoolListAll(ctx context.Context, path string) ([]*object.ResourcePool, error) {
+	pools, err := f.ResourcePoolList(ctx, path)
+	if err != nil {
+		if _, ok := err.(*NotFoundError); !ok {
+			return nil, err
+		}
+
+		vapps, _ := f.VirtualAppList(ctx, path)
+
+		if len(vapps) == 0 {
+			return nil, err
+		}
+
+		for _, vapp := range vapps {
+			pools = append(pools, vapp.ResourcePool)
+		}
+	}
+
+	return pools, nil
+}
+
 func (f *Finder) DefaultFolder(ctx context.Context) (*object.Folder, error) {
 	ref, err := f.vmFolder(ctx)
 	if err != nil {
@@ -772,7 +885,7 @@ func (f *Finder) FolderList(ctx context.Context, path string) ([]*object.Folder,
 
 	for _, e := range es {
 		switch o := e.Object.(type) {
-		case mo.Folder:
+		case mo.Folder, mo.StoragePod:
 			folder := object.NewFolder(f.client, o.Reference())
 			folder.InventoryPath = e.Path
 			folders = append(folders, folder)

@@ -3,6 +3,7 @@ package udnssdk
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -72,7 +73,8 @@ func Test_RRSets_Select(t *testing.T) {
 			t.Logf("Found Profile %s for %s\n", rr.Profile.Context(), rr.OwnerName)
 			st, er := json.Marshal(rr.Profile)
 			t.Logf("Marshal the profile to JSON: %s / %+v", string(st), er)
-			t.Logf("Check the Magic Profile: %+v\n", rr.Profile.GetProfileObject())
+			p, _ := rr.Profile.GetProfileObject()
+			t.Logf("Check the Magic Profile: %+v\n", p)
 		}
 	}
 }
@@ -103,15 +105,20 @@ func Test_RRSets_Create(t *testing.T) {
 		RRType:    r.Type,
 		TTL:       300,
 		RData:     []string{testIP1},
-		Profile:   &StringProfile{Profile: testProfile},
 	}
+	p := RDPoolProfile{
+		Context:     RDPoolSchema,
+		Order:       "ROUND_ROBIN",
+		Description: "T. migratorius",
+	}
+	val.Profile = p.RawProfile()
 	t.Logf("Create(%v, %v)", r, val)
 	resp, err := testClient.RRSets.Create(r, val)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 // Another Get Test if it matchs the Ip in IP1
@@ -174,15 +181,20 @@ func Test_RRSets_Update(t *testing.T) {
 		RRType:    r.Type,
 		TTL:       300,
 		RData:     []string{testIP2},
-		Profile:   &StringProfile{Profile: testProfile2},
 	}
+	p := RDPoolProfile{
+		Context:     RDPoolSchema,
+		Order:       "RANDOM",
+		Description: "T. migratorius",
+	}
+	val.Profile = p.RawProfile()
 	t.Logf("Update(%v, %v)", r, val)
 	resp, err := testClient.RRSets.Update(r, val)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 // Another Get Test if it matches the Ip in IP2
@@ -215,7 +227,8 @@ func Test_RRSets_SelectMid(t *testing.T) {
 	if rrsets[0].RData[0] != testIP2 {
 		t.Fatalf("RData[0]\"%s\" != testIP2\"%s\"", rrsets[0].RData[0], testIP2)
 	}
-	t.Logf("Profile Check: %+v", rrsets[0].Profile.GetProfileObject())
+	p, _ := rrsets[0].Profile.GetProfileObject()
+	t.Logf("Check the Magic Profile: %+v\n", p)
 }
 
 func Test_RRSet_Delete(t *testing.T) {
@@ -266,7 +279,7 @@ func Test_RRSet_Delete(t *testing.T) {
 		}
 		t.Logf("Delete(%v)", r)
 		resp, err := testClient.RRSets.Delete(r)
-		t.Logf("Response: %+v\n", resp.Response)
+		t.Logf("Response: %+v\n", resp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,4 +311,130 @@ func Test_RRSet_SelectPost(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("RRSets: %+v\n", rrsets)
+}
+
+func Test_DirPoolProfile_RawProfile(t *testing.T) {
+	p := DirPoolProfile{}
+	expected := RawProfile{
+		"@context":    ProfileSchema(""),
+		"description": "",
+		"rdataInfo":   []DPRDataInfo(nil),
+	}
+
+	actual := p.RawProfile()
+
+	if !reflect.DeepEqual(actual, expected) {
+		for k := range expected {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		for k := range actual {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		t.Fatalf("want %#v got %#v", expected, actual)
+	}
+}
+
+func Test_RDPoolProfile_RawProfile(t *testing.T) {
+	p := RDPoolProfile{}
+	expected := RawProfile{
+		"@context":    ProfileSchema(""),
+		"description": "",
+		"order":       "",
+	}
+
+	actual := p.RawProfile()
+
+	if !reflect.DeepEqual(actual, expected) {
+		for k := range expected {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		for k := range actual {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		t.Fatalf("want %#v got %#v", expected, actual)
+	}
+}
+
+func Test_SBPoolProfile_RawProfile(t *testing.T) {
+	p := SBPoolProfile{}
+	expected := RawProfile{
+		"@context":      ProfileSchema(""),
+		"description":   "",
+		"actOnProbes":   false,
+		"rdataInfo":     []SBRDataInfo(nil),
+		"runProbes":     false,
+		"backupRecords": []BackupRecord(nil),
+	}
+
+	actual := p.RawProfile()
+
+	if !reflect.DeepEqual(actual, expected) {
+		for k := range expected {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		for k := range actual {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		t.Fatalf("want %#v got %#v", expected, actual)
+	}
+}
+
+func Test_RawProfile_TCPoolProfile(t *testing.T) {
+	input := RawProfile{
+		"@context":    TCPoolSchema,
+		"description": "",
+		"actOnProbes": false,
+		"rdataInfo":   []SBRDataInfo{},
+		"runProbes":   false,
+	}
+	expected := TCPoolProfile{
+		Context:     TCPoolSchema,
+		Description: "",
+		ActOnProbes: false,
+		RunProbes:   false,
+		RDataInfo:   []SBRDataInfo{},
+	}
+
+	actual, err := input.TCPoolProfile()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("want %#v got %#v", expected, actual)
+	}
+}
+
+func Test_TCPoolProfile_RawProfile(t *testing.T) {
+	input := TCPoolProfile{}
+	expected := RawProfile{
+		"@context":    ProfileSchema(""),
+		"description": "",
+		"actOnProbes": false,
+		"rdataInfo":   []SBRDataInfo(nil),
+		"runProbes":   false,
+	}
+
+	actual := input.RawProfile()
+
+	if !reflect.DeepEqual(actual, expected) {
+		for k := range expected {
+			if !reflect.DeepEqual(actual[k], expected[k]) {
+				t.Fatalf("RawProfile[%v] want %#v got %#v", k, expected[k], actual[k])
+			}
+		}
+		t.Fatalf("want %#v got %#v", expected, actual)
+	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The etcd Authors
+// Copyright 2015 CoreOS, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,13 +29,7 @@ var ErrCompacted = errors.New("requested index is unavailable due to compaction"
 // index is older than the existing snapshot.
 var ErrSnapOutOfDate = errors.New("requested index is older than the existing snapshot")
 
-// ErrUnavailable is returned by Storage interface when the requested log entries
-// are unavailable.
 var ErrUnavailable = errors.New("requested entry at index is unavailable")
-
-// ErrSnapshotTemporarilyUnavailable is returned by the Storage interface when the required
-// snapshot is temporarily unavailable.
-var ErrSnapshotTemporarilyUnavailable = errors.New("snapshot is temporarily unavailable")
 
 // Storage is an interface that may be implemented by the application
 // to retrieve log entries from storage.
@@ -130,9 +124,6 @@ func (ms *MemoryStorage) Term(i uint64) (uint64, error) {
 	if i < offset {
 		return 0, ErrCompacted
 	}
-	if int(i-offset) >= len(ms.ents) {
-		return 0, ErrUnavailable
-	}
 	return ms.ents[i-offset].Term, nil
 }
 
@@ -171,13 +162,7 @@ func (ms *MemoryStorage) ApplySnapshot(snap pb.Snapshot) error {
 	ms.Lock()
 	defer ms.Unlock()
 
-	//handle check for old snapshot being applied
-	msIndex := ms.snapshot.Metadata.Index
-	snapIndex := snap.Metadata.Index
-	if msIndex >= snapIndex {
-		return ErrSnapOutOfDate
-	}
-
+	// TODO: return ErrSnapOutOfDate?
 	ms.snapshot = snap
 	ms.ents = []pb.Entry{{Term: snap.Metadata.Term, Index: snap.Metadata.Index}}
 	return nil
@@ -235,14 +220,12 @@ func (ms *MemoryStorage) Compact(compactIndex uint64) error {
 // TODO (xiangli): ensure the entries are continuous and
 // entries[0].Index > ms.entries[0].Index
 func (ms *MemoryStorage) Append(entries []pb.Entry) error {
+	ms.Lock()
+	defer ms.Unlock()
 	if len(entries) == 0 {
 		return nil
 	}
-
-	ms.Lock()
-	defer ms.Unlock()
-
-	first := ms.firstIndex()
+	first := ms.ents[0].Index + 1
 	last := entries[0].Index + uint64(len(entries)) - 1
 
 	// shortcut if there is no new entry.

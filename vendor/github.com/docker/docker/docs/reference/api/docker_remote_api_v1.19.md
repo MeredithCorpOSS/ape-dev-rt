@@ -1,17 +1,13 @@
----
-title: "Remote API v1.19"
-description: "API Documentation for Docker"
-keywords: ["API, Docker, rcli, REST,  documentation"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "Remote API v1.19"
+description = "API Documentation for Docker"
+keywords = ["API, Docker, rcli, REST,  documentation"]
+[menu.main]
+parent = "engine_remoteapi"
+weight = 2
++++
+<![end-metadata]-->
 
 # Docker Remote API v1.19
 
@@ -222,10 +218,10 @@ Create a container
 -   **AttachStdout** - Boolean value, attaches to `stdout`.
 -   **AttachStderr** - Boolean value, attaches to `stderr`.
 -   **Tty** - Boolean value, Attach standard streams to a `tty`, including `stdin` if it is not closed.
--   **OpenStdin** - Boolean value, opens `stdin`,
+-   **OpenStdin** - Boolean value, opens stdin,
 -   **StdinOnce** - Boolean value, close `stdin` after the 1 attached client disconnects.
--   **Env** - A list of environment variables in the form of `["VAR=value", ...]`
--   **Labels** - Adds a map of labels to a container. To specify a map: `{"key":"value", ... }`
+-   **Env** - A list of environment variables in the form of `["VAR=value"[,"VAR2=value2"]]`
+-   **Labels** - Adds a map of labels to a container. To specify a map: `{"key":"value"[,"key2":"value2"]}`
 -   **Cmd** - Command to run specified as a string or an array of strings.
 -   **Entrypoint** - Set the entry point for the container as a string or an array
       of strings.
@@ -239,13 +235,10 @@ Create a container
 -   **ExposedPorts** - An object mapping ports to an empty object in the form of:
       `"ExposedPorts": { "<port>/<tcp|udp>: {}" }`
 -   **HostConfig**
-    -   **Binds** – A list of bind-mounts for this container. Each item is a string in one of these forms:
-           + `host-src:container-dest` to bind-mount a host path into the
-             container. Both `host-src`, and `container-dest` must be an
-             _absolute_ path.
-           + `host-src:container-dest:ro` to make the bind-mount read-only
-             inside the container. Both `host-src`, and `container-dest` must be
-             an _absolute_ path.
+    -   **Binds** – A list of volume bindings for this container. Each volume binding is a string in one of these forms:
+           + `container_path` to create a new volume for the container
+           + `host_path:container_path` to bind-mount a host path into the container
+           + `host_path:container_path:ro` to make the bind-mount read-only inside the container.
     -   **Links** - A list of links for the container. Each link entry should be
           in the form of `container_name:alias`.
     -   **LxcConf** - LXC specific configurations. These configurations only
@@ -335,7 +328,7 @@ Return low-level information on the container `id`
     HTTP/1.1 200 OK
     Content-Type: application/json
 
-	{
+    {
 		"AppArmorProfile": "",
 		"Args": [
 			"-c",
@@ -444,7 +437,7 @@ Return low-level information on the container `id`
 			"Paused": false,
 			"Pid": 0,
 			"Restarting": false,
-			"Running": true,
+			"Running": false,
 			"StartedAt": "2015-01-06T15:47:32.072697474Z"
 		},
 		"Volumes": {},
@@ -541,9 +534,7 @@ Get `stdout` and `stderr` logs from the container ``id``
      Connection: Upgrade
      Upgrade: tcp
 
-     {% raw %}
      {{ STREAM }}
-     {% endraw %}
 
 **Query parameters**:
 
@@ -620,9 +611,7 @@ Export the contents of container `id`
     HTTP/1.1 200 OK
     Content-Type: application/octet-stream
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Status codes**:
 
@@ -947,9 +936,7 @@ Attach to the container `id`
     Connection: Upgrade
     Upgrade: tcp
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **Query parameters**:
 
@@ -971,43 +958,43 @@ Attach to the container `id`
 -   **404** – no such container
 -   **500** – server error
 
-**Stream details**:
+    **Stream details**:
 
-When using the TTY setting is enabled in
-[`POST /containers/create`
-](#create-a-container),
-the stream is the raw data from the process PTY and client's `stdin`.
-When the TTY is disabled, then the stream is multiplexed to separate
-`stdout` and `stderr`.
+    When using the TTY setting is enabled in
+    [`POST /containers/create`
+    ](#create-a-container),
+    the stream is the raw data from the process PTY and client's `stdin`.
+    When the TTY is disabled, then the stream is multiplexed to separate
+    `stdout` and `stderr`.
 
-The format is a **Header** and a **Payload** (frame).
+    The format is a **Header** and a **Payload** (frame).
 
-**HEADER**
+    **HEADER**
 
-The header contains the information which the stream writes (`stdout` or
-`stderr`). It also contains the size of the associated frame encoded in the
-last four bytes (`uint32`).
+    The header contains the information which the stream writes (`stdout` or
+    `stderr`). It also contains the size of the associated frame encoded in the
+    last four bytes (`uint32`).
 
-It is encoded on the first eight bytes like this:
+    It is encoded on the first eight bytes like this:
 
-    header := [8]byte{STREAM_TYPE, 0, 0, 0, SIZE1, SIZE2, SIZE3, SIZE4}
+        header := [8]byte{STREAM_TYPE, 0, 0, 0, SIZE1, SIZE2, SIZE3, SIZE4}
 
-`STREAM_TYPE` can be:
+    `STREAM_TYPE` can be:
 
 -   0: `stdin` (is written on `stdout`)
 -   1: `stdout`
 -   2: `stderr`
 
-`SIZE1, SIZE2, SIZE3, SIZE4` are the four bytes of
-the `uint32` size encoded as big endian.
+    `SIZE1, SIZE2, SIZE3, SIZE4` are the four bytes of
+    the `uint32` size encoded as big endian.
 
-**PAYLOAD**
+    **PAYLOAD**
 
-The payload is the raw stream.
+    The payload is the raw stream.
 
-**IMPLEMENTATION**
+    **IMPLEMENTATION**
 
-The simplest way to implement the Attach protocol is the following:
+    The simplest way to implement the Attach protocol is the following:
 
     1.  Read eight bytes.
     2.  Choose `stdout` or `stderr` depending on the first byte.
@@ -1029,9 +1016,7 @@ Implements websocket protocol handshake according to [RFC 6455](http://tools.iet
 
 **Example response**
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **Query parameters**:
 
@@ -1124,9 +1109,7 @@ Copy files or folders of container `id`
     HTTP/1.1 200 OK
     Content-Type: application/x-tar
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Status codes**:
 
@@ -1237,9 +1220,7 @@ Build an image from a Dockerfile
 
     POST /build HTTP/1.1
 
-    {% raw %}
     {{ TAR STREAM }}
-    {% endraw %}
 
 **Example response**:
 
@@ -1262,10 +1243,6 @@ The archive may include any number of other files,
 which are accessible in the build context (See the [*ADD build
 command*](../../reference/builder.md#add)).
 
-The Docker daemon performs a preliminary validation of the `Dockerfile` before
-starting the build, and returns an error if the syntax is incorrect. After that,
-each instruction is run one-by-one until the ID of the new image is output.
-
 The build is canceled if the client drops the connection by quitting
 or being killed.
 
@@ -1273,11 +1250,15 @@ or being killed.
 
 -   **dockerfile** - Path within the build context to the Dockerfile. This is
         ignored if `remote` is specified and points to an individual filename.
--   **t** – A name and optional tag to apply to the image in the `name:tag` format.
-        If you omit the `tag` the default `latest` value is assumed.
--   **remote** – A Git repository URI or HTTP/HTTPS URI build source. If the
-        URI specifies a filename, the file's contents are placed into a file
-        called `Dockerfile`.
+-   **t** – Repository name (and optionally a tag) to be applied to
+        the resulting image in case of success.
+-   **remote** – A Git repository URI or HTTP/HTTPS context URI. If the
+        URI points to a single text file, the file's contents are placed into
+        a file called `Dockerfile` and the image is built from that file. If
+        the URI points to a tarball, the file is downloaded by the daemon and
+        the contents therein used as the context for the build. If the URI
+        points to a tarball and the `dockerfile` parameter is also specified,
+        there must be a file with the corresponding path inside the tarball.
 -   **q** – Suppress verbose build output.
 -   **nocache** – Do not use the cache when building the image.
 -   **pull** - Attempt to pull the image even if an older image exists locally.
@@ -1290,7 +1271,7 @@ or being killed.
 -   **cpuperiod** - The length of a CPU period in microseconds.
 -   **cpuquota** - Microseconds of CPU time that the container can get in a CPU period.
 
-**Request Headers**:
+    Request Headers:
 
 -   **Content-type** – Set to `"application/tar"`.
 -   **X-Registry-Config** – base64-encoded ConfigFile object
@@ -1308,7 +1289,7 @@ Create an image either by pulling it from the registry or by importing it
 
 **Example request**:
 
-    POST /images/create?fromImage=busybox&tag=latest HTTP/1.1
+    POST /images/create?fromImage=ubuntu HTTP/1.1
 
 **Example response**:
 
@@ -1330,10 +1311,9 @@ a base64-encoded AuthConfig object.
 -   **fromSrc** – Source to import.  The value may be a URL from which the image
         can be retrieved or `-` to read the image from the request body.
 -   **repo** – Repository name.
--   **tag** – Tag. If empty when pulling an image, this causes all tags
-        for the given image to be pulled.
+-   **tag** – Tag.
 
-**Request Headers**:
+    Request Headers:
 
 -   **X-Registry-Auth** – base64-encoded AuthConfig object
 
@@ -1360,33 +1340,35 @@ Return low-level information on the image `name`
     Content-Type: application/json
 
     {
-       "Created": "2013-03-23T22:24:18.818426-07:00",
-       "Container": "3d67245a8d72ecf13f33dffac9f79dcdf70f75acb84d308770391510e0c23ad0",
-       "ContainerConfig": {
-          "Hostname": "",
-          "User": "",
-          "AttachStdin": false,
-          "AttachStdout": false,
-          "AttachStderr": false,
-          "Tty": true,
-          "OpenStdin": true,
-          "StdinOnce": false,
-          "Env": null,
-          "Cmd": ["/bin/bash"],
-          "Dns": null,
-          "Image": "ubuntu",
-          "Labels": {
-             "com.example.vendor": "Acme",
-             "com.example.license": "GPL",
-             "com.example.version": "1.0"
-          },
-          "Volumes": null,
-          "VolumesFrom": "",
-          "WorkingDir": ""
-       },
-       "Id": "b750fe79269d2ec9a3c593ef05b4332b1d1a02a62b4accb2c21d589ff2f5f2dc",
-       "Parent": "27cf784147099545",
-       "Size": 6824592
+         "Created": "2013-03-23T22:24:18.818426-07:00",
+         "Container": "3d67245a8d72ecf13f33dffac9f79dcdf70f75acb84d308770391510e0c23ad0",
+         "ContainerConfig":
+                 {
+                         "Hostname": "",
+                         "User": "",
+                         "AttachStdin": false,
+                         "AttachStdout": false,
+                         "AttachStderr": false,
+                         "PortSpecs": null,
+                         "Tty": true,
+                         "OpenStdin": true,
+                         "StdinOnce": false,
+                         "Env": null,
+                         "Cmd": ["/bin/bash"],
+                         "Dns": null,
+                         "Image": "ubuntu",
+                         "Labels": {
+                             "com.example.vendor": "Acme",
+                             "com.example.license": "GPL",
+                             "com.example.version": "1.0"
+                         },
+                         "Volumes": null,
+                         "VolumesFrom": "",
+                         "WorkingDir": ""
+                 },
+         "Id": "b750fe79269d2ec9a3c593ef05b4332b1d1a02a62b4accb2c21d589ff2f5f2dc",
+         "Parent": "27cf784147099545",
+         "Size": 6824592
     }
 
 **Status codes**:
@@ -1482,9 +1464,10 @@ then be used in the URL. This duplicates the command line's flow.
 
 -   **tag** – The tag to associate with the image on the registry. This is optional.
 
-**Request Headers**:
+Request Headers:
 
--   **X-Registry-Auth** – base64-encoded AuthConfig object.
+-   **X-Registry-Auth** – Include a base64-encoded AuthConfig.
+        object.
 
 **Status codes**:
 
@@ -1582,7 +1565,7 @@ be deprecated and replaced by the `is_automated` property.
                 "name": "wma55/u1210sshd",
                 "is_trusted": false,
                 "is_automated": false,
-                "description": ""
+                "description": "",
             },
             {
                 "star_count": 10,
@@ -1590,7 +1573,7 @@ be deprecated and replaced by the `is_automated` property.
                 "name": "jdswinbank/sshd",
                 "is_trusted": false,
                 "is_automated": false,
-                "description": ""
+                "description": "",
             },
             {
                 "star_count": 18,
@@ -1598,7 +1581,7 @@ be deprecated and replaced by the `is_automated` property.
                 "name": "vgauthier/sshd",
                 "is_trusted": false,
                 "is_automated": false,
-                "description": ""
+                "description": "",
             }
     ...
     ]
@@ -1626,8 +1609,8 @@ Get the default username and email
     Content-Type: application/json
 
     {
-         "username": "hannibal",
-         "password": "xxxx",
+         "username":" hannibal",
+         "password: "xxxx",
          "email": "hannibal@a-team.com",
          "serveraddress": "https://index.docker.io/v1/"
     }
@@ -1833,13 +1816,14 @@ Create a new image from a container's changes
 
 `GET /events`
 
-Get container events from docker, in real time via streaming.
+Get container events from docker, either in real time via streaming, or via
+polling (using since).
 
 Docker containers report the following events:
 
     attach, commit, copy, create, destroy, die, exec_create, exec_start, export, kill, oom, pause, rename, resize, restart, start, stop, top, unpause
 
-Docker images report the following events:
+and Docker images report:
 
     untag, delete
 
@@ -1859,8 +1843,8 @@ Docker images report the following events:
 
 **Query parameters**:
 
--   **since** – Timestamp. Show all events created since timestamp and then stream
--   **until** – Timestamp. Show events created until given timestamp and stop streaming
+-   **since** – Timestamp used for polling
+-   **until** – Timestamp used for polling
 -   **filters** – A json encoded value of the filters (a map[string][]string) to process on the event list. Available filters:
   -   `container=<string>`; -- container to filter
   -   `event=<string>`; -- event to filter
@@ -1901,7 +1885,7 @@ See the [image tarball format](#image-tarball-format) for more details.
 -   **200** – no error
 -   **500** – server error
 
-### Get a tarball containing all images
+### Get a tarball containing all images.
 
 `GET /images/get`
 
@@ -1985,14 +1969,15 @@ Sets up an exec instance in a running container `id`
     POST /containers/e90e34656806/exec HTTP/1.1
     Content-Type: application/json
 
-    {
-      "AttachStdin": true,
-      "AttachStdout": true,
-      "AttachStderr": true,
-      "Cmd": ["sh"],
-      "Tty": true,
-      "User": "123:456"
-    }
+      {
+       "AttachStdin": false,
+       "AttachStdout": true,
+       "AttachStderr": true,
+       "Tty": false,
+       "Cmd": [
+                     "date"
+             ]
+      }
 
 **Example response**:
 
@@ -2011,9 +1996,7 @@ Sets up an exec instance in a running container `id`
 -   **AttachStderr** - Boolean value, attaches to `stderr` of the `exec` command.
 -   **Tty** - Boolean value to allocate a pseudo-TTY.
 -   **Cmd** - Command to run specified as a string or an array of strings.
--   **User** - A string value specifying the user, and optionally, group to run
-        the exec process inside the container. Format is one of: `"user"`,
-        `"user:group"`, `"uid"`, or `"uid:gid"`.
+
 
 **Status codes**:
 
@@ -2043,9 +2026,7 @@ interactive session with the `exec` command.
     HTTP/1.1 200 OK
     Content-Type: application/vnd.docker.raw-stream
 
-    {% raw %}
     {{ STREAM }}
-    {% endraw %}
 
 **JSON parameters**:
 
@@ -2057,9 +2038,8 @@ interactive session with the `exec` command.
 -   **200** – no error
 -   **404** – no such exec instance
 
-**Stream details**:
-
-Similar to the stream behavior of `POST /containers/(id or name)/attach` API
+    **Stream details**:
+    Similar to the stream behavior of `POST /containers/(id or name)/attach` API
 
 ### Exec Resize
 

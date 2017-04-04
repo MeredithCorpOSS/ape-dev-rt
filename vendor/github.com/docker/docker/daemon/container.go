@@ -6,15 +6,15 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/docker/docker/api/errors"
-	containertypes "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/network"
+	"github.com/docker/docker/errors"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/truncindex"
+	containertypes "github.com/docker/engine-api/types/container"
+	"github.com/docker/engine-api/types/strslice"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -253,23 +253,6 @@ func (daemon *Daemon) verifyContainerSettings(hostConfig *containertypes.HostCon
 				return nil, fmt.Errorf("invalid port specification: %q", pb.HostPort)
 			}
 		}
-	}
-
-	p := hostConfig.RestartPolicy
-
-	switch p.Name {
-	case "always", "unless-stopped", "no":
-		if p.MaximumRetryCount != 0 {
-			return nil, fmt.Errorf("maximum restart count not valid with restart policy of '%s'", p.Name)
-		}
-	case "on-failure":
-		if p.MaximumRetryCount < 1 {
-			return nil, fmt.Errorf("maximum restart count must be a positive integer")
-		}
-	case "":
-	// do nothing
-	default:
-		return nil, fmt.Errorf("invalid restart policy '%s'", p.Name)
 	}
 
 	// Now do platform-specific verification

@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/errors"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/container"
+	"github.com/docker/docker/errors"
 	"github.com/docker/docker/layer"
 	volumestore "github.com/docker/docker/volume/store"
+	"github.com/docker/engine-api/types"
 )
 
 // ContainerRm removes the container id from the filesystem. An error
@@ -26,8 +26,7 @@ func (daemon *Daemon) ContainerRm(name string, config *types.ContainerRmConfig) 
 
 	// Container state RemovalInProgress should be used to avoid races.
 	if inProgress := container.SetRemovalInProgress(); inProgress {
-		err := fmt.Errorf("removal of container %s is already in progress", name)
-		return errors.NewBadRequestError(err)
+		return nil
 	}
 	defer container.ResetRemovalInProgress()
 
@@ -40,7 +39,14 @@ func (daemon *Daemon) ContainerRm(name string, config *types.ContainerRmConfig) 
 		return daemon.rmLink(container, name)
 	}
 
-	return daemon.cleanupContainer(container, config.ForceRemove, config.RemoveVolume)
+	err = daemon.cleanupContainer(container, config.ForceRemove)
+	if err == nil || config.ForceRemove {
+		if e := daemon.removeMountPoints(container, config.RemoveVolume); e != nil {
+			logrus.Error(e)
+		}
+	}
+
+	return err
 }
 
 func (daemon *Daemon) rmLink(container *container.Container, name string) error {
@@ -71,7 +77,7 @@ func (daemon *Daemon) rmLink(container *container.Container, name string) error 
 
 // cleanupContainer unregisters a container from the daemon, stops stats
 // collection and cleanly removes contents and metadata from the filesystem.
-func (daemon *Daemon) cleanupContainer(container *container.Container, forceRemove, removeVolume bool) (err error) {
+func (daemon *Daemon) cleanupContainer(container *container.Container, forceRemove bool) (err error) {
 	if container.IsRunning() {
 		if !forceRemove {
 			err := fmt.Errorf("You cannot remove a running container %s. Stop the container before attempting removal or use -f", container.ID)
@@ -109,9 +115,6 @@ func (daemon *Daemon) cleanupContainer(container *container.Container, forceRemo
 			selinuxFreeLxcContexts(container.ProcessLabel)
 			daemon.idIndex.Delete(container.ID)
 			daemon.containers.Delete(container.ID)
-			if e := daemon.removeMountPoints(container, removeVolume); e != nil {
-				logrus.Error(e)
-			}
 			daemon.LogContainerEvent(container, "destroy")
 		}
 	}()
@@ -136,16 +139,7 @@ func (daemon *Daemon) cleanupContainer(container *container.Container, forceRemo
 // VolumeRm removes the volume with the given name.
 // If the volume is referenced by a container it is not removed
 // This is called directly from the remote API
-func (daemon *Daemon) VolumeRm(name string, force bool) error {
-	err := daemon.volumeRm(name)
-	if err == nil || force {
-		daemon.volumes.Purge(name)
-		return nil
-	}
-	return err
-}
-
-func (daemon *Daemon) volumeRm(name string) error {
+func (daemon *Daemon) VolumeRm(name string) error {
 	v, err := daemon.volumes.Get(name)
 	if err != nil {
 		return err

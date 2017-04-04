@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
-	"regexp"
 	"testing"
 	"time"
 
@@ -39,9 +38,12 @@ func TestMergeIterator_Float(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -84,10 +86,13 @@ func TestMergeIterator_Integer(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -130,10 +135,13 @@ func TestMergeIterator_String(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: "a"}},
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: "c"}},
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: "g"}},
@@ -176,10 +184,13 @@ func TestMergeIterator_Boolean(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: true}},
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: true}},
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: true}},
@@ -201,11 +212,10 @@ func TestMergeIterator_Boolean(t *testing.T) {
 }
 
 func TestMergeIterator_Nil(t *testing.T) {
-	itr := influxql.NewMergeIterator([]influxql.Iterator{nil}, influxql.IteratorOptions{}).(influxql.FloatIterator)
-	if p := itr.Next(); p != nil {
-		t.Fatalf("unexpected point: %#v", p)
+	itr := influxql.NewMergeIterator([]influxql.Iterator{nil}, influxql.IteratorOptions{})
+	if itr != nil {
+		t.Fatalf("unexpected iterator: %#v", itr)
 	}
-	itr.Close()
 }
 
 func TestMergeIterator_Cast_Float(t *testing.T) {
@@ -229,9 +239,12 @@ func TestMergeIterator_Cast_Float(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -281,9 +294,12 @@ func TestSortedMergeIterator_Float(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -326,9 +342,12 @@ func TestSortedMergeIterator_Integer(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.IntegerPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -371,9 +390,12 @@ func TestSortedMergeIterator_String(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: "a"}},
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: "c"}},
 		{&influxql.StringPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: "g"}},
@@ -416,9 +438,12 @@ func TestSortedMergeIterator_Boolean(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: true}},
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: true}},
 		{&influxql.BooleanPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: true}},
@@ -440,11 +465,10 @@ func TestSortedMergeIterator_Boolean(t *testing.T) {
 }
 
 func TestSortedMergeIterator_Nil(t *testing.T) {
-	itr := influxql.NewSortedMergeIterator([]influxql.Iterator{nil}, influxql.IteratorOptions{}).(influxql.FloatIterator)
-	if p := itr.Next(); p != nil {
-		t.Fatalf("unexpected point: %#v", p)
+	itr := influxql.NewSortedMergeIterator([]influxql.Iterator{nil}, influxql.IteratorOptions{})
+	if itr != nil {
+		t.Fatalf("unexpected iterator: %#v", itr)
 	}
-	itr.Close()
 }
 
 func TestSortedMergeIterator_Cast_Float(t *testing.T) {
@@ -468,9 +492,12 @@ func TestSortedMergeIterator_Cast_Float(t *testing.T) {
 		Interval: influxql.Interval{
 			Duration: 10 * time.Nanosecond,
 		},
-		Ascending: true,
+		Dimensions: []string{"host"},
+		Ascending:  true,
 	})
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 1}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 12, Value: 3}},
 		{&influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 20, Value: 7}},
@@ -513,7 +540,9 @@ func TestLimitIterator_Float(t *testing.T) {
 		Offset: 1,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Name: "cpu", Time: 5, Value: 3}},
 		{&influxql.FloatPoint{Name: "mem", Time: 7, Value: 8}},
 	}) {
@@ -540,7 +569,9 @@ func TestLimitIterator_Integer(t *testing.T) {
 		Offset: 1,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.IntegerPoint{Name: "cpu", Time: 5, Value: 3}},
 		{&influxql.IntegerPoint{Name: "mem", Time: 7, Value: 8}},
 	}) {
@@ -567,7 +598,9 @@ func TestLimitIterator_String(t *testing.T) {
 		Offset: 1,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.StringPoint{Name: "cpu", Time: 5, Value: "b"}},
 		{&influxql.StringPoint{Name: "mem", Time: 7, Value: "e"}},
 	}) {
@@ -594,7 +627,9 @@ func TestLimitIterator_Boolean(t *testing.T) {
 		Offset: 1,
 	})
 
-	if a := Iterators([]influxql.Iterator{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators([]influxql.Iterator{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.BooleanPoint{Name: "cpu", Time: 5, Value: false}},
 		{&influxql.BooleanPoint{Name: "mem", Time: 7, Value: true}},
 	}) {
@@ -613,21 +648,20 @@ func TestFloatAuxIterator(t *testing.T) {
 			{Time: 0, Value: 1, Aux: []interface{}{float64(100), float64(200)}},
 			{Time: 1, Value: 2, Aux: []interface{}{float64(500), math.NaN()}},
 		}},
-		[]influxql.Series{
-			{Aux: []influxql.DataType{influxql.Float, influxql.Float}},
-		},
-		influxql.IteratorOptions{Aux: []string{"f0", "f1"}},
+		influxql.IteratorOptions{Aux: []influxql.VarRef{{Val: "f0", Type: influxql.Float}, {Val: "f1", Type: influxql.Float}}},
 	)
 
 	itrs := []influxql.Iterator{
 		itr,
-		itr.Iterator("f0"),
-		itr.Iterator("f1"),
-		itr.Iterator("f0"),
+		itr.Iterator("f0", influxql.Unknown),
+		itr.Iterator("f1", influxql.Unknown),
+		itr.Iterator("f0", influxql.Unknown),
 	}
 	itr.Start()
 
-	if a := Iterators(itrs).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := Iterators(itrs).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{
 			&influxql.FloatPoint{Time: 0, Value: 1, Aux: []interface{}{float64(100), float64(200)}},
 			&influxql.FloatPoint{Time: 0, Value: float64(100)},
@@ -662,7 +696,9 @@ func TestLimitIterator(t *testing.T) {
 		},
 	)
 
-	if a := (Iterators{itr}).ReadAll(); !deep.Equal(a, [][]influxql.Point{
+	if a, err := (Iterators{itr}).ReadAll(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	} else if !deep.Equal(a, [][]influxql.Point{
 		{&influxql.FloatPoint{Time: 1, Value: 1}},
 		{&influxql.FloatPoint{Time: 2, Value: 2}},
 	}) {
@@ -675,58 +711,60 @@ type Iterators []influxql.Iterator
 
 // Next returns the next value from each iterator.
 // Returns nil if any iterator returns a nil.
-func (itrs Iterators) Next() []influxql.Point {
+func (itrs Iterators) Next() ([]influxql.Point, error) {
 	a := make([]influxql.Point, len(itrs))
 	for i, itr := range itrs {
 		switch itr := itr.(type) {
 		case influxql.FloatIterator:
-			fp := itr.Next()
-			if fp == nil {
-				return nil
+			fp, err := itr.Next()
+			if fp == nil || err != nil {
+				return nil, err
 			}
 			a[i] = fp
 		case influxql.IntegerIterator:
-			ip := itr.Next()
-			if ip == nil {
-				return nil
+			ip, err := itr.Next()
+			if ip == nil || err != nil {
+				return nil, err
 			}
 			a[i] = ip
 		case influxql.StringIterator:
-			sp := itr.Next()
-			if sp == nil {
-				return nil
+			sp, err := itr.Next()
+			if sp == nil || err != nil {
+				return nil, err
 			}
 			a[i] = sp
 		case influxql.BooleanIterator:
-			bp := itr.Next()
-			if bp == nil {
-				return nil
+			bp, err := itr.Next()
+			if bp == nil || err != nil {
+				return nil, err
 			}
 			a[i] = bp
 		default:
 			panic(fmt.Sprintf("iterator type not supported: %T", itr))
 		}
 	}
-	return a
+	return a, nil
 }
 
 // ReadAll reads all points from all iterators.
-func (itrs Iterators) ReadAll() [][]influxql.Point {
+func (itrs Iterators) ReadAll() ([][]influxql.Point, error) {
 	var a [][]influxql.Point
 
 	// Read from every iterator until a nil is encountered.
 	for {
-		points := itrs.Next()
-		if points == nil {
+		points, err := itrs.Next()
+		if err != nil {
+			return nil, err
+		} else if points == nil {
 			break
 		}
-		a = append(a, points)
+		a = append(a, influxql.Points(points).Clone())
 	}
 
 	// Close all iterators.
 	influxql.Iterators(itrs).Close()
 
-	return a
+	return a, nil
 }
 
 func TestIteratorOptions_Window_Interval(t *testing.T) {
@@ -772,8 +810,8 @@ func TestIteratorOptions_Window_Default(t *testing.T) {
 	if start != 0 {
 		t.Errorf("expected start to be 0, got %d", start)
 	}
-	if end != 60 {
-		t.Errorf("expected end to be 60, got %d", end)
+	if end != 61 {
+		t.Errorf("expected end to be 61, got %d", end)
 	}
 }
 
@@ -800,26 +838,6 @@ func TestIteratorOptions_SeekTime_Descending(t *testing.T) {
 	time := opt.SeekTime()
 	if time != 60 {
 		t.Errorf("expected time to be 60, got %d", time)
-	}
-}
-
-func TestIteratorOptions_MergeSorted(t *testing.T) {
-	opt := influxql.IteratorOptions{}
-	sorted := opt.MergeSorted()
-	if !sorted {
-		t.Error("expected no expression to be sorted, got unsorted")
-	}
-
-	opt.Expr = &influxql.VarRef{}
-	sorted = opt.MergeSorted()
-	if !sorted {
-		t.Error("expected expression with varref to be sorted, got unsorted")
-	}
-
-	opt.Expr = &influxql.Call{}
-	sorted = opt.MergeSorted()
-	if sorted {
-		t.Error("expected expression without varref to be unsorted, got sorted")
 	}
 }
 
@@ -867,14 +885,55 @@ func TestIteratorOptions_DerivativeInterval_Call(t *testing.T) {
 	}
 }
 
+func TestIteratorOptions_ElapsedInterval_Default(t *testing.T) {
+	opt := influxql.IteratorOptions{}
+	expected := influxql.Interval{Duration: time.Nanosecond}
+	actual := opt.ElapsedInterval()
+	if actual != expected {
+		t.Errorf("expected elapsed interval to be %v, got %v", expected, actual)
+	}
+}
+
+func TestIteratorOptions_ElapsedInterval_GroupBy(t *testing.T) {
+	opt := influxql.IteratorOptions{
+		Interval: influxql.Interval{
+			Duration: 10,
+			Offset:   2,
+		},
+	}
+	expected := influxql.Interval{Duration: time.Nanosecond}
+	actual := opt.ElapsedInterval()
+	if actual != expected {
+		t.Errorf("expected elapsed interval to be %v, got %v", expected, actual)
+	}
+}
+
+func TestIteratorOptions_ElapsedInterval_Call(t *testing.T) {
+	opt := influxql.IteratorOptions{
+		Expr: &influxql.Call{
+			Name: "mean",
+			Args: []influxql.Expr{
+				&influxql.VarRef{Val: "value"},
+				&influxql.DurationLiteral{Val: 2 * time.Second},
+			},
+		},
+		Interval: influxql.Interval{
+			Duration: 10,
+			Offset:   2,
+		},
+	}
+	expected := influxql.Interval{Duration: 2 * time.Second}
+	actual := opt.ElapsedInterval()
+	if actual != expected {
+		t.Errorf("expected elapsed interval to be %v, got %v", expected, actual)
+	}
+}
+
 // Ensure iterator options can be marshaled to and from a binary format.
 func TestIteratorOptions_MarshalBinary(t *testing.T) {
 	opt := &influxql.IteratorOptions{
 		Expr: MustParseExpr("count(value)"),
-		Aux:  []string{"a", "b", "c"},
-		Sources: []influxql.Source{
-			&influxql.Measurement{Database: "db0", RetentionPolicy: "rp0", Name: "mm0"},
-		},
+		Aux:  []influxql.VarRef{{Val: "a"}, {Val: "b"}, {Val: "c"}},
 		Interval: influxql.Interval{
 			Duration: 1 * time.Hour,
 			Offset:   20 * time.Minute,
@@ -908,53 +967,6 @@ func TestIteratorOptions_MarshalBinary(t *testing.T) {
 	}
 }
 
-// Ensure iterator options with a regex measurement can be marshaled.
-func TestIteratorOptions_MarshalBinary_Measurement_Regex(t *testing.T) {
-	opt := &influxql.IteratorOptions{
-		Sources: []influxql.Source{
-			&influxql.Measurement{Database: "db1", RetentionPolicy: "rp2", Regex: &influxql.RegexLiteral{Val: regexp.MustCompile(`series.+`)}},
-		},
-	}
-
-	// Marshal to binary.
-	buf, err := opt.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Unmarshal back to an object.
-	var other influxql.IteratorOptions
-	if err := other.UnmarshalBinary(buf); err != nil {
-		t.Fatal(err)
-	} else if v := other.Sources[0].(*influxql.Measurement).Regex.Val.String(); v != `/series.+/` {
-		t.Fatalf("unexpected measurement regex: %s", v)
-	}
-}
-
-// Ensure series list can be marshaled into and out of a binary format.
-func TestSeriesList_MarshalBinary(t *testing.T) {
-	a := []influxql.Series{
-		{Name: "cpu", Tags: ParseTags("foo=bar"), Aux: []influxql.DataType{influxql.Float, influxql.String}},
-		{Name: "mem", Aux: []influxql.DataType{influxql.Integer}},
-		{Name: "disk"},
-		{},
-	}
-
-	// Marshal to binary.
-	buf, err := influxql.SeriesList(a).MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Unmarshal back to an object.
-	var other influxql.SeriesList
-	if err := other.UnmarshalBinary(buf); err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(other, influxql.SeriesList(a)) {
-		t.Fatalf("unexpected series list: %s", spew.Sdump(other))
-	}
-}
-
 // Ensure iterator can be encoded and decoded over a byte stream.
 func TestIterator_EncodeDecode(t *testing.T) {
 	var buf bytes.Buffer
@@ -979,10 +991,7 @@ func TestIterator_EncodeDecode(t *testing.T) {
 	}
 
 	// Decode from the buffer.
-	dec, err := influxql.NewReaderIterator(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dec := influxql.NewReaderIterator(&buf, influxql.Float, itr.Stats())
 
 	// Initial stats should exist immediately.
 	fdec := dec.(influxql.FloatIterator)
@@ -991,86 +1000,50 @@ func TestIterator_EncodeDecode(t *testing.T) {
 	}
 
 	// Read both points.
-	if p := fdec.Next(); !reflect.DeepEqual(p, &influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 0}) {
+	if p, err := fdec.Next(); err != nil {
+		t.Fatalf("unexpected error(0): %#v", err)
+	} else if !reflect.DeepEqual(p, &influxql.FloatPoint{Name: "cpu", Tags: ParseTags("host=A"), Time: 0, Value: 0}) {
 		t.Fatalf("unexpected point(0); %#v", p)
-	} else if p := fdec.Next(); !reflect.DeepEqual(p, &influxql.FloatPoint{Name: "mem", Tags: ParseTags("host=B"), Time: 1, Value: 10}) {
+	}
+	if p, err := fdec.Next(); err != nil {
+		t.Fatalf("unexpected error(1): %#v", err)
+	} else if !reflect.DeepEqual(p, &influxql.FloatPoint{Name: "mem", Tags: ParseTags("host=B"), Time: 1, Value: 10}) {
 		t.Fatalf("unexpected point(1); %#v", p)
-	} else if p := fdec.Next(); p != nil {
+	}
+	if p, err := fdec.Next(); err != nil {
+		t.Fatalf("unexpected error(eof): %#v", err)
+	} else if p != nil {
 		t.Fatalf("unexpected point(eof); %#v", p)
 	}
 }
 
 // IteratorCreator is a mockable implementation of SelectStatementExecutor.IteratorCreator.
 type IteratorCreator struct {
-	CreateIteratorFn  func(opt influxql.IteratorOptions) (influxql.Iterator, error)
-	FieldDimensionsFn func(sources influxql.Sources) (fields, dimensions map[string]struct{}, err error)
-	SeriesKeysFn      func(opt influxql.IteratorOptions) (influxql.SeriesList, error)
-	ExpandSourcesFn   func(sources influxql.Sources) (influxql.Sources, error)
+	CreateIteratorFn  func(m *influxql.Measurement, opt influxql.IteratorOptions) (influxql.Iterator, error)
+	FieldDimensionsFn func(m *influxql.Measurement) (fields map[string]influxql.DataType, dimensions map[string]struct{}, err error)
 }
 
-func (ic *IteratorCreator) CreateIterator(opt influxql.IteratorOptions) (influxql.Iterator, error) {
-	return ic.CreateIteratorFn(opt)
+func (ic *IteratorCreator) CreateIterator(m *influxql.Measurement, opt influxql.IteratorOptions) (influxql.Iterator, error) {
+	return ic.CreateIteratorFn(m, opt)
 }
 
-func (ic *IteratorCreator) FieldDimensions(sources influxql.Sources) (fields, dimensions map[string]struct{}, err error) {
-	return ic.FieldDimensionsFn(sources)
+func (ic *IteratorCreator) FieldDimensions(m *influxql.Measurement) (fields map[string]influxql.DataType, dimensions map[string]struct{}, err error) {
+	return ic.FieldDimensionsFn(m)
 }
 
-func (ic *IteratorCreator) SeriesKeys(opt influxql.IteratorOptions) (influxql.SeriesList, error) {
-	if ic.SeriesKeysFn != nil {
-		return ic.SeriesKeysFn(opt)
-	}
-
-	itr, err := ic.CreateIterator(opt)
+func (ic *IteratorCreator) MapType(m *influxql.Measurement, field string) influxql.DataType {
+	f, d, err := ic.FieldDimensions(m)
 	if err != nil {
-		return nil, err
+		return influxql.Unknown
 	}
 
-	seriesMap := make(map[string]influxql.Series)
-	switch itr := itr.(type) {
-	case influxql.FloatIterator:
-		for p := itr.Next(); p != nil; p = itr.Next() {
-			s := influxql.Series{Name: p.Name, Tags: p.Tags, Aux: influxql.InspectDataTypes(p.Aux)}
-			if series, ok := seriesMap[s.ID()]; ok {
-				s.Combine(&series)
-			}
-			seriesMap[s.ID()] = s
-		}
-	case influxql.IntegerIterator:
-		for p := itr.Next(); p != nil; p = itr.Next() {
-			s := influxql.Series{Name: p.Name, Tags: p.Tags, Aux: influxql.InspectDataTypes(p.Aux)}
-			if series, ok := seriesMap[s.ID()]; ok {
-				s.Combine(&series)
-			}
-			seriesMap[s.ID()] = s
-		}
-	case influxql.StringIterator:
-		for p := itr.Next(); p != nil; p = itr.Next() {
-			s := influxql.Series{Name: p.Name, Tags: p.Tags, Aux: influxql.InspectDataTypes(p.Aux)}
-			if series, ok := seriesMap[s.ID()]; ok {
-				s.Combine(&series)
-			}
-			seriesMap[s.ID()] = s
-		}
-	case influxql.BooleanIterator:
-		for p := itr.Next(); p != nil; p = itr.Next() {
-			s := influxql.Series{Name: p.Name, Tags: p.Tags, Aux: influxql.InspectDataTypes(p.Aux)}
-			if series, ok := seriesMap[s.ID()]; ok {
-				s.Combine(&series)
-			}
-			seriesMap[s.ID()] = s
-		}
+	if typ, ok := f[field]; ok {
+		return typ
 	}
-
-	seriesList := make([]influxql.Series, 0, len(seriesMap))
-	for _, s := range seriesMap {
-		seriesList = append(seriesList, s)
+	if _, ok := d[field]; ok {
+		return influxql.Tag
 	}
-	return influxql.SeriesList(seriesList), nil
-}
-
-func (ic *IteratorCreator) ExpandSources(sources influxql.Sources) (influxql.Sources, error) {
-	return ic.ExpandSourcesFn(sources)
+	return influxql.Unknown
 }
 
 // Test implementation of influxql.FloatIterator
@@ -1084,14 +1057,14 @@ func (itr *FloatIterator) Stats() influxql.IteratorStats { return itr.stats }
 func (itr *FloatIterator) Close() error                  { itr.Closed = true; return nil }
 
 // Next returns the next value and shifts it off the beginning of the points slice.
-func (itr *FloatIterator) Next() *influxql.FloatPoint {
+func (itr *FloatIterator) Next() (*influxql.FloatPoint, error) {
 	if len(itr.Points) == 0 || itr.Closed {
-		return nil
+		return nil, nil
 	}
 
 	v := &itr.Points[0]
 	itr.Points = itr.Points[1:]
-	return v
+	return v, nil
 }
 
 func FloatIterators(inputs []*FloatIterator) []influxql.Iterator {
@@ -1116,6 +1089,7 @@ func GenerateFloatIterator(rand *rand.Rand, valueN int) *FloatIterator {
 		timestamp := int64(i)*int64(10*time.Second) + jitter
 
 		itr.Points[i] = influxql.FloatPoint{
+			Name:  "cpu",
 			Time:  timestamp,
 			Value: rand.Float64(),
 		}
@@ -1135,14 +1109,14 @@ func (itr *IntegerIterator) Stats() influxql.IteratorStats { return itr.stats }
 func (itr *IntegerIterator) Close() error                  { itr.Closed = true; return nil }
 
 // Next returns the next value and shifts it off the beginning of the points slice.
-func (itr *IntegerIterator) Next() *influxql.IntegerPoint {
+func (itr *IntegerIterator) Next() (*influxql.IntegerPoint, error) {
 	if len(itr.Points) == 0 || itr.Closed {
-		return nil
+		return nil, nil
 	}
 
 	v := &itr.Points[0]
 	itr.Points = itr.Points[1:]
-	return v
+	return v, nil
 }
 
 func IntegerIterators(inputs []*IntegerIterator) []influxql.Iterator {
@@ -1164,14 +1138,14 @@ func (itr *StringIterator) Stats() influxql.IteratorStats { return itr.stats }
 func (itr *StringIterator) Close() error                  { itr.Closed = true; return nil }
 
 // Next returns the next value and shifts it off the beginning of the points slice.
-func (itr *StringIterator) Next() *influxql.StringPoint {
+func (itr *StringIterator) Next() (*influxql.StringPoint, error) {
 	if len(itr.Points) == 0 || itr.Closed {
-		return nil
+		return nil, nil
 	}
 
 	v := &itr.Points[0]
 	itr.Points = itr.Points[1:]
-	return v
+	return v, nil
 }
 
 func StringIterators(inputs []*StringIterator) []influxql.Iterator {
@@ -1193,14 +1167,14 @@ func (itr *BooleanIterator) Stats() influxql.IteratorStats { return itr.stats }
 func (itr *BooleanIterator) Close() error                  { itr.Closed = true; return nil }
 
 // Next returns the next value and shifts it off the beginning of the points slice.
-func (itr *BooleanIterator) Next() *influxql.BooleanPoint {
+func (itr *BooleanIterator) Next() (*influxql.BooleanPoint, error) {
 	if len(itr.Points) == 0 || itr.Closed {
-		return nil
+		return nil, nil
 	}
 
 	v := &itr.Points[0]
 	itr.Points = itr.Points[1:]
-	return v
+	return v, nil
 }
 
 func BooleanIterators(inputs []*BooleanIterator) []influxql.Iterator {

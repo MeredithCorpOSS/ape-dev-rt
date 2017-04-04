@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/notary/client/changelist"
-	store "github.com/docker/notary/storage"
-	"github.com/docker/notary/tuf"
+	tuf "github.com/docker/notary/tuf"
 	"github.com/docker/notary/tuf/data"
+	"github.com/docker/notary/tuf/store"
 	"github.com/docker/notary/tuf/utils"
 )
 
@@ -29,7 +30,7 @@ func getRemoteStore(baseURL, gun string, rt http.RoundTripper) (store.RemoteStor
 	return s, err
 }
 
-func applyChangelist(repo *tuf.Repo, invalid *tuf.Repo, cl changelist.Changelist) error {
+func applyChangelist(repo *tuf.Repo, cl changelist.Changelist) error {
 	it, err := cl.NewIterator()
 	if err != nil {
 		return err
@@ -40,33 +41,30 @@ func applyChangelist(repo *tuf.Repo, invalid *tuf.Repo, cl changelist.Changelist
 		if err != nil {
 			return err
 		}
-		isDel := data.IsDelegation(c.Scope()) || data.IsWildDelegation(c.Scope())
+		isDel := data.IsDelegation(c.Scope())
 		switch {
 		case c.Scope() == changelist.ScopeTargets || isDel:
-			err = applyTargetsChange(repo, invalid, c)
+			err = applyTargetsChange(repo, c)
 		case c.Scope() == changelist.ScopeRoot:
 			err = applyRootChange(repo, c)
 		default:
-			return fmt.Errorf("scope not supported: %s", c.Scope())
-		}
-		if err != nil {
-			logrus.Debugf("error attempting to apply change #%d: %s, on scope: %s path: %s type: %s", index, c.Action(), c.Scope(), c.Path(), c.Type())
-			return err
+			logrus.Debug("scope not supported: ", c.Scope())
 		}
 		index++
+		if err != nil {
+			return err
+		}
 	}
 	logrus.Debugf("applied %d change(s)", index)
 	return nil
 }
 
-func applyTargetsChange(repo *tuf.Repo, invalid *tuf.Repo, c changelist.Change) error {
+func applyTargetsChange(repo *tuf.Repo, c changelist.Change) error {
 	switch c.Type() {
 	case changelist.TypeTargetsTarget:
 		return changeTargetMeta(repo, c)
 	case changelist.TypeTargetsDelegation:
 		return changeTargetsDelegation(repo, c)
-	case changelist.TypeWitness:
-		return witnessTargets(repo, invalid, c.Scope())
 	default:
 		return fmt.Errorf("only target meta and delegations changes supported")
 	}
@@ -75,7 +73,7 @@ func applyTargetsChange(repo *tuf.Repo, invalid *tuf.Repo, c changelist.Change) 
 func changeTargetsDelegation(repo *tuf.Repo, c changelist.Change) error {
 	switch c.Action() {
 	case changelist.ActionCreate:
-		td := changelist.TUFDelegation{}
+		td := changelist.TufDelegation{}
 		err := json.Unmarshal(c.Content(), &td)
 		if err != nil {
 			return err
@@ -89,15 +87,11 @@ func changeTargetsDelegation(repo *tuf.Repo, c changelist.Change) error {
 		}
 		return repo.UpdateDelegationPaths(c.Scope(), td.AddPaths, []string{}, false)
 	case changelist.ActionUpdate:
-		td := changelist.TUFDelegation{}
+		td := changelist.TufDelegation{}
 		err := json.Unmarshal(c.Content(), &td)
 		if err != nil {
 			return err
 		}
-		if data.IsWildDelegation(c.Scope()) {
-			return repo.PurgeDelegationKeys(c.Scope(), td.RemoveKeys)
-		}
-
 		delgRole, err := repo.GetDelegationRole(c.Scope())
 		if err != nil {
 			return err
@@ -118,6 +112,10 @@ func changeTargetsDelegation(repo *tuf.Repo, c changelist.Change) error {
 			removeTUFKeyIDs = append(removeTUFKeyIDs, canonicalToTUFID[canonID])
 		}
 
+		// If we specify the only keys left delete the role, else just delete specified keys
+		if strings.Join(delgRole.ListKeyIDs(), ";") == strings.Join(removeTUFKeyIDs, ";") && len(td.AddKeys) == 0 {
+			return repo.DeleteDelegation(c.Scope())
+		}
 		err = repo.UpdateDelegationKeys(c.Scope(), td.AddKeys, removeTUFKeyIDs, td.NewThreshold)
 		if err != nil {
 			return err
@@ -157,7 +155,7 @@ func changeTargetMeta(repo *tuf.Repo, c changelist.Change) error {
 		}
 
 	default:
-		err = fmt.Errorf("action not yet supported: %s", c.Action())
+		logrus.Debug("action not yet supported: ", c.Action())
 	}
 	return err
 }
@@ -168,7 +166,7 @@ func applyRootChange(repo *tuf.Repo, c changelist.Change) error {
 	case changelist.TypeRootRole:
 		err = applyRootRoleChange(repo, c)
 	default:
-		err = fmt.Errorf("type of root change not yet supported: %s", c.Type())
+		logrus.Debug("type of root change not yet supported: ", c.Type())
 	}
 	return err // might be nil
 }
@@ -177,7 +175,7 @@ func applyRootRoleChange(repo *tuf.Repo, c changelist.Change) error {
 	switch c.Action() {
 	case changelist.ActionCreate:
 		// replaces all keys for a role
-		d := &changelist.TUFRootData{}
+		d := &changelist.TufRootData{}
 		err := json.Unmarshal(c.Content(), d)
 		if err != nil {
 			return err
@@ -187,34 +185,14 @@ func applyRootRoleChange(repo *tuf.Repo, c changelist.Change) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("action not yet supported for root: %s", c.Action())
+		logrus.Debug("action not yet supported for root: ", c.Action())
 	}
 	return nil
 }
 
-func nearExpiry(r data.SignedCommon) bool {
+func nearExpiry(r *data.SignedRoot) bool {
 	plus6mo := time.Now().AddDate(0, 6, 0)
-	return r.Expires.Before(plus6mo)
-}
-
-func warnRolesNearExpiry(r *tuf.Repo) {
-	//get every role and its respective signed common and call nearExpiry on it
-	//Root check
-	if nearExpiry(r.Root.Signed.SignedCommon) {
-		logrus.Warn("root is nearing expiry, you should re-sign the role metadata")
-	}
-	//Targets and delegations check
-	for role, signedTOrD := range r.Targets {
-		//signedTOrD is of type *data.SignedTargets
-		if nearExpiry(signedTOrD.Signed.SignedCommon) {
-			logrus.Warn(role, " metadata is nearing expiry, you should re-sign the role metadata")
-		}
-	}
-	//Snapshot check
-	if nearExpiry(r.Snapshot.Signed.SignedCommon) {
-		logrus.Warn("snapshot is nearing expiry, you should re-sign the role metadata")
-	}
-	//do not need to worry about Timestamp, notary signer will re-sign with the timestamp key
+	return r.Signed.Expires.Before(plus6mo)
 }
 
 // Fetches a public key from a remote store, given a gun and role
@@ -236,26 +214,7 @@ func getRemoteKey(url, gun, role string, rt http.RoundTripper) (data.PublicKey, 
 	return pubKey, nil
 }
 
-// Rotates a private key in a remote store and returns the public key component
-func rotateRemoteKey(url, gun, role string, rt http.RoundTripper) (data.PublicKey, error) {
-	remote, err := getRemoteStore(url, gun, rt)
-	if err != nil {
-		return nil, err
-	}
-	rawPubKey, err := remote.RotateKey(role)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKey, err := data.UnmarshalPublicKey(rawPubKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return pubKey, nil
-}
-
-// signs and serializes the metadata for a canonical role in a TUF repo to JSON
+// signs and serializes the metadata for a canonical role in a tuf repo to JSON
 func serializeCanonicalRole(tufRepo *tuf.Repo, role string) (out []byte, err error) {
 	var s *data.Signed
 	switch {

@@ -41,7 +41,7 @@ func TestACLEndpoint_Apply(t *testing.T) {
 
 	// Verify
 	state := s1.fsm.State()
-	_, s, err := state.ACLGet(out)
+	_, s, err := state.ACLGet(nil, out)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestACLEndpoint_Apply(t *testing.T) {
 	}
 
 	// Verify
-	_, s, err = state.ACLGet(id)
+	_, s, err = state.ACLGet(nil, id)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestACLEndpoint_Apply_CustomID(t *testing.T) {
 
 	// Verify
 	state := s1.fsm.State()
-	_, s, err := state.ACLGet(out)
+	_, s, err := state.ACLGet(nil, out)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -464,5 +464,31 @@ func TestACLEndpoint_List_Denied(t *testing.T) {
 	err := msgpackrpc.CallWithCodec(codec, "ACL.List", &getR, &acls)
 	if err == nil || !strings.Contains(err.Error(), permissionDenied) {
 		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestACLEndpoint_ReplicationStatus(t *testing.T) {
+	dir1, s1 := testServerWithConfig(t, func(c *Config) {
+		c.ACLDatacenter = "dc2"
+		c.ACLReplicationToken = "secret"
+		c.ACLReplicationInterval = 0
+	})
+	defer os.RemoveAll(dir1)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	defer codec.Close()
+
+	testutil.WaitForLeader(t, s1.RPC, "dc1")
+
+	getR := structs.DCSpecificRequest{
+		Datacenter: "dc1",
+	}
+	var status structs.ACLReplicationStatus
+	err := msgpackrpc.CallWithCodec(codec, "ACL.ReplicationStatus", &getR, &status)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !status.Enabled || !status.Running || status.SourceDatacenter != "dc2" {
+		t.Fatalf("bad: %#v", status)
 	}
 }

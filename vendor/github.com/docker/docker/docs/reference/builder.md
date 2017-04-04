@@ -1,17 +1,13 @@
----
-title: "Dockerfile reference"
-description: "Dockerfiles use a simple DSL which allows you to automate the steps you would normally manually take to create an image."
-keywords: ["builder, docker, Dockerfile, automation,  image creation"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "Dockerfile reference"
+description = "Dockerfiles use a simple DSL which allows you to automate the steps you would normally manually take to create an image."
+keywords = ["builder, docker, Dockerfile, automation,  image creation"]
+[menu.main]
+parent = "engine_ref"
+weight=-90
++++
+<![end-metadata]-->
 
 # Dockerfile reference
 
@@ -30,7 +26,7 @@ Practices](../userguide/eng-image/dockerfile_best-practices.md) for a tip-orient
 The [`docker build`](commandline/build.md) command builds an image from
 a `Dockerfile` and a *context*. The build's context is the files at a specified
 location `PATH` or `URL`. The `PATH` is a directory on your local filesystem.
-The `URL` is a Git repository location.
+The `URL` is a the location of a Git repository.
 
 A context is processed recursively. So, a `PATH` includes any subdirectories and
 the `URL` includes the repository and its submodules. A simple build command
@@ -72,13 +68,6 @@ add multiple `-t` parameters when you run the `build` command:
 
     $ docker build -t shykes/myapp:1.0.2 -t shykes/myapp:latest .
 
-Before the Docker daemon runs the instructions in the `Dockerfile`, it performs
-a preliminary validation of the `Dockerfile` and returns an error if the syntax is incorrect:
-
-    $ docker build -t test/myapp .
-    Sending build context to Docker daemon 2.048 kB
-    Error response from daemon: Unknown instruction: RUNCMD
-
 The Docker daemon runs the instructions in the `Dockerfile` one-by-one,
 committing the result of each instruction
 to a new image if necessary, before finally outputting the ID of your
@@ -97,25 +86,18 @@ the `Using cache` message in the console output.
 
     $ docker build -t svendowideit/ambassador .
     Sending build context to Docker daemon 15.36 kB
-    Step 1 : FROM alpine:3.2
+    Step 0 : FROM alpine:3.2
      ---> 31f630c65071
-    Step 2 : MAINTAINER SvenDowideit@home.org.au
+    Step 1 : MAINTAINER SvenDowideit@home.org.au
      ---> Using cache
      ---> 2a1c91448f5f
-    Step 3 : RUN apk update &&      apk add socat &&        rm -r /var/cache/
+    Step 2 : RUN apk update &&      apk add socat &&        rm -r /var/cache/
      ---> Using cache
      ---> 21ed6e7fbb73
-    Step 4 : CMD env | grep _TCP= | (sed 's/.*_PORT_\([0-9]*\)_TCP=tcp:\/\/\(.*\):\(.*\)/socat -t 100000000 TCP4-LISTEN:\1,fork,reuseaddr TCP4:\2:\3 \&/' && echo wait) | sh
+    Step 3 : CMD env | grep _TCP= | (sed 's/.*_PORT_\([0-9]*\)_TCP=tcp:\/\/\(.*\):\(.*\)/socat -t 100000000 TCP4-LISTEN:\1,fork,reuseaddr TCP4:\2:\3 \&/' && echo wait) | sh
      ---> Using cache
      ---> 7ea8aef582cc
     Successfully built 7ea8aef582cc
-
-Build cache is only used from images that have a local parent chain. This means
-that these images were created by previous builds or the whole chain of images
-was loaded with `docker load`. If you wish to use build cache of a specific
-image you can specify it with `--cache-from` option. Images specified with
-`--cache-from` do not need to have a parent chain and may be pulled from other
-registries.
 
 When you're done with your build, you're ready to look into [*Pushing a
 repository to its registry*](../tutorials/dockerrepos.md#contributing-to-docker-hub).
@@ -138,7 +120,7 @@ instruction must be \`FROM\`** in order to specify the [*Base
 Image*](glossary.md#base-image) from which you are building.
 
 Docker treats lines that *begin* with `#` as a comment, unless the line is
-a valid [parser directive](#parser-directives). A `#` marker anywhere
+a valid [parser directive](builder.md#parser directives). A `#` marker anywhere
 else in a line is treated as an argument. This allows statements like:
 
 ```Dockerfile
@@ -504,6 +486,13 @@ before each new `FROM` command.
 assumes a `latest` by default. The builder returns an error if it cannot match
 the `tag` value.
 
+## MAINTAINER
+
+    MAINTAINER <name>
+
+The `MAINTAINER` instruction allows you to set the *Author* field of the
+generated images.
+
 ## RUN
 
 RUN has 2 forms:
@@ -513,7 +502,7 @@ default is `/bin/sh -c` on Linux or `cmd /S /C` on Windows)
 - `RUN ["executable", "param1", "param2"]` (*exec* form)
 
 The `RUN` instruction will execute any commands in a new layer on top of the
-current image and commit the results. The resulting committed image will be
+current image and commit the results. The resulting comitted image will be
 used for the next step in the `Dockerfile`.
 
 Layering `RUN` instructions and generating commits conforms to the core
@@ -528,15 +517,13 @@ command.
 
 In the *shell* form you can use a `\` (backslash) to continue a single
 RUN instruction onto the next line. For example, consider these two lines:
-
 ```
-RUN /bin/bash -c 'source $HOME/.bashrc; \
+RUN /bin/bash -c 'source $HOME/.bashrc ;\
 echo $HOME'
 ```
 Together they are equivalent to this single line:
-
 ```
-RUN /bin/bash -c 'source $HOME/.bashrc; echo $HOME'
+RUN /bin/bash -c 'source $HOME/.bashrc ; echo $HOME'
 ```
 
 > **Note**:
@@ -554,9 +541,6 @@ RUN /bin/bash -c 'source $HOME/.bashrc; echo $HOME'
 > `RUN [ "echo", "$HOME" ]` will not do variable substitution on `$HOME`.
 > If you want shell processing then either use the *shell* form or execute
 > a shell directly, for example: `RUN [ "sh", "-c", "echo $HOME" ]`.
-> When using the exec form and executing a shell directly, as in the case for
-> the shell form, it is the shell that is doing the environment variable
-> expansion, not docker.
 >
 > **Note**:
 > In the *JSON* form, it is necessary to escape backslashes. This is
@@ -623,9 +607,6 @@ instruction as well.
 > `CMD [ "echo", "$HOME" ]` will not do variable substitution on `$HOME`.
 > If you want shell processing then either use the *shell* form or execute
 > a shell directly, for example: `CMD [ "sh", "-c", "echo $HOME" ]`.
-> When using the exec form and executing a shell directly, as in the case for
-> the shell form, it is the shell that is doing the environment variable
-> expansion, not docker.
 
 When used in the shell or exec formats, the `CMD` instruction sets the command
 to be executed when running the image.
@@ -652,7 +633,7 @@ If the user specifies arguments to `docker run` then they will override the
 default specified in `CMD`.
 
 > **Note**:
-> Don't confuse `RUN` with `CMD`. `RUN` actually runs a command and commits
+> don't confuse `RUN` with `CMD`. `RUN` actually runs a command and commits
 > the result; `CMD` does not execute anything at build time, but specifies
 > the intended command for the image.
 
@@ -699,20 +680,6 @@ To view an image's labels, use the `docker inspect` command.
         "multi.label2": "value2",
         "other": "value3"
     },
-
-## MAINTAINER (deprecated)
-
-    MAINTAINER <name>
-
-The `MAINTAINER` instruction sets the *Author* field of the generated images.
-The `LABEL` instruction is a much more flexible version of this and you should use
-it instead, as it enables setting any metadata you require, and can be viewed
-easily, for example with `docker inspect`. To set a label corresponding to the
-`MAINTAINER` field you could use:
-
-    LABEL maintainer "SvenDowideit@home.org.au"
-
-This will then be visible from `docker inspect` with the other labels.
 
 ## EXPOSE
 
@@ -762,7 +729,7 @@ and
     ENV myDog Rex The Dog
     ENV myCat fluffy
 
-will yield the same net results in the final image, but the first form
+will yield the same net results in the final container, but the first form
 is preferred because it produces a single cache layer.
 
 The environment variables set using `ENV` will persist when a container is run
@@ -784,7 +751,7 @@ ADD has two forms:
 whitespace)
 
 The `ADD` instruction copies new files, directories or remote file URLs from `<src>`
-and adds them to the filesystem of the image at the path `<dest>`.
+and adds them to the filesystem of the container at the path `<dest>`.
 
 Multiple `<src>` resource may be specified but if they are files or
 directories then they must be relative to the source directory that is
@@ -817,7 +784,7 @@ of whether or not the file has changed and the cache should be updated.
 > can only contain a URL based `ADD` instruction. You can also pass a
 > compressed archive through STDIN: (`docker build - < archive.tar.gz`),
 > the `Dockerfile` at the root of the archive and the rest of the
-> archive will be used as the context of the build.
+> archive will get used at the context of the build.
 
 > **Note**:
 > If your URL files are protected using authentication, you
@@ -859,7 +826,7 @@ guide](../userguide/eng-image/dockerfile_best-practices.md#build-cache) for more
 - If `<src>` is a *local* tar archive in a recognized compression format
   (identity, gzip, bzip2 or xz) then it is unpacked as a directory. Resources
   from *remote* URLs are **not** decompressed. When a directory is copied or
-  unpacked, it has the same behavior as `tar -x`, the result is the union of:
+  unpacked, it has the same behavior as `tar -x`: the result is the union of:
 
     1. Whatever existed at the destination path and
     2. The contents of the source tree, with conflicts resolved in favor
@@ -1095,7 +1062,7 @@ user	0m 0.03s
 sys	0m 0.03s
 ```
 
-> **Note:** you can override the `ENTRYPOINT` setting using `--entrypoint`,
+> **Note:** you can over ride the `ENTRYPOINT` setting using `--entrypoint`,
 > but this can only set the binary to *exec* (no `sh -c` will be used).
 
 > **Note**:
@@ -1108,9 +1075,8 @@ sys	0m 0.03s
 > `ENTRYPOINT [ "echo", "$HOME" ]` will not do variable substitution on `$HOME`.
 > If you want shell processing then either use the *shell* form or execute
 > a shell directly, for example: `ENTRYPOINT [ "sh", "-c", "echo $HOME" ]`.
-> When using the exec form and executing a shell directly, as in the case for
-> the shell form, it is the shell that is doing the environment variable
-> expansion, not docker.
+> Variables that are defined in the `Dockerfile`using `ENV`, will be substituted by
+> the `Dockerfile` parser.
 
 ### Shell form ENTRYPOINT example
 
@@ -1188,12 +1154,12 @@ or for executing an ad-hoc command in a container.
 
 The table below shows what command is executed for different `ENTRYPOINT` / `CMD` combinations:
 
-|                                | No ENTRYPOINT              | ENTRYPOINT exec_entry p1_entry | ENTRYPOINT ["exec_entry", "p1_entry"]          |
-|--------------------------------|----------------------------|--------------------------------|------------------------------------------------|
-| **No CMD**                     | *error, not allowed*       | /bin/sh -c exec_entry p1_entry | exec_entry p1_entry                            |
-| **CMD ["exec_cmd", "p1_cmd"]** | exec_cmd p1_cmd            | /bin/sh -c exec_entry p1_entry | exec_entry p1_entry exec_cmd p1_cmd            |
-| **CMD ["p1_cmd", "p2_cmd"]**   | p1_cmd p2_cmd              | /bin/sh -c exec_entry p1_entry | exec_entry p1_entry p1_cmd p2_cmd              |
-| **CMD exec_cmd p1_cmd**        | /bin/sh -c exec_cmd p1_cmd | /bin/sh -c exec_entry p1_entry | exec_entry p1_entry /bin/sh -c exec_cmd p1_cmd |
+|                                | No ENTRYPOINT              | ENTRYPOINT exec_entry p1_entry                            | ENTRYPOINT ["exec_entry", "p1_entry"]          |
+|--------------------------------|----------------------------|-----------------------------------------------------------|------------------------------------------------|
+| **No CMD**                     | *error, not allowed*       | /bin/sh -c exec_entry p1_entry                            | exec_entry p1_entry                            |
+| **CMD ["exec_cmd", "p1_cmd"]** | exec_cmd p1_cmd            | /bin/sh -c exec_entry p1_entry exec_cmd p1_cmd            | exec_entry p1_entry exec_cmd p1_cmd            |
+| **CMD ["p1_cmd", "p2_cmd"]**   | p1_cmd p2_cmd              | /bin/sh -c exec_entry p1_entry p1_cmd p2_cmd              | exec_entry p1_entry p1_cmd p2_cmd              |
+| **CMD exec_cmd p1_cmd**        | /bin/sh -c exec_cmd p1_cmd | /bin/sh -c exec_entry p1_entry /bin/sh -c exec_cmd p1_cmd | exec_entry p1_entry /bin/sh -c exec_cmd p1_cmd |
 
 ## VOLUME
 
@@ -1274,9 +1240,9 @@ The output of the final `pwd` command in this `Dockerfile` would be
     ARG <name>[=<default value>]
 
 The `ARG` instruction defines a variable that users can pass at build-time to
-the builder with the `docker build` command using the
-`--build-arg <varname>=<value>` flag. If a user specifies a build argument
-that was not defined in the Dockerfile, the build outputs an error.
+the builder with the `docker build` command using the `--build-arg
+<varname>=<value>` flag. If a user specifies a build argument that was not
+defined in the Dockerfile, the build outputs an error.
 
 ```
 One or more build-args were not consumed, failing build.
@@ -1389,11 +1355,8 @@ corresponding `ARG` instruction in the Dockerfile.
 * `NO_PROXY`
 * `no_proxy`
 
-To use these, simply pass them on the command line using the flag:
-
-```
---build-arg <varname>=<value>
-```
+To use these, simply pass them on the command line using the `--build-arg
+<varname>=<value>` flag.
 
 ### Impact on build caching
 
@@ -1691,7 +1654,7 @@ a shell operates. For example, using `SHELL cmd /S /C /V:ON|OFF` on Windows, del
 environment variable expansion semantics could be modified.
 
 The `SHELL` instruction can also be used on Linux should an alternate shell be
-required such as `zsh`, `csh`, `tcsh` and others.
+required such `zsh`, `csh`, `tcsh` and others.
 
 The `SHELL` feature was added in Docker 1.12.
 
@@ -1706,6 +1669,8 @@ something more realistic, take a look at the list of [Dockerization examples](..
 # VERSION               0.0.1
 
 FROM      ubuntu
+MAINTAINER Victor Vieux <victor@docker.com>
+
 LABEL Description="This image is used to start the foobar executable" Vendor="ACME Products" Version="1.0"
 RUN apt-get update && apt-get install -y inotify-tools nginx apache2 openssh-server
 ```

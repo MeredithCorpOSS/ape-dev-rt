@@ -17,13 +17,9 @@ type Worker interface {
 	// Init prepares the worker for task assignment.
 	Init(ctx context.Context) error
 
-	// Assign assigns a complete set of tasks and secrets to a worker. Any task or secrets not included in
-	// this set will be removed.
-	Assign(ctx context.Context, assignments []*api.AssignmentChange) error
-
-	// Updates updates an incremental set of tasks or secrets of the worker. Any task/secret not included
-	// either in added or removed will remain untouched.
-	Update(ctx context.Context, assignments []*api.AssignmentChange) error
+	// Assign the set of tasks to the worker. Tasks outside of this set will be
+	// removed.
+	Assign(ctx context.Context, tasks []*api.Task) error
 
 	// Listen to updates about tasks controlled by the worker. When first
 	// called, the reporter will receive all updates for all tasks controlled
@@ -42,7 +38,6 @@ type worker struct {
 	db        *bolt.DB
 	executor  exec.Executor
 	listeners map[*statusReporterKey]struct{}
-	secrets   *secrets
 
 	taskManagers map[string]*taskManager
 	mu           sync.RWMutex
@@ -54,7 +49,6 @@ func newWorker(db *bolt.DB, executor exec.Executor) *worker {
 		executor:     executor,
 		listeners:    make(map[*statusReporterKey]struct{}),
 		taskManagers: make(map[string]*taskManager),
-		secrets:      newSecrets(),
 	}
 }
 
@@ -63,7 +57,7 @@ func (w *worker) Init(ctx context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	ctx = log.WithModule(ctx, "worker")
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("module", "worker"))
 
 	// TODO(stevvooe): Start task cleanup process.
 
@@ -92,69 +86,13 @@ func (w *worker) Init(ctx context.Context) error {
 	})
 }
 
-// Assign assigns a full set of tasks and secrets to the worker.
-// Any tasks not previously known will be started. Any tasks that are in the task set
-// and already running will be updated, if possible. Any tasks currently running on
-// the worker outside the task set will be terminated.
-// Any secrets not in the set of assignments will be removed.
-func (w *worker) Assign(ctx context.Context, assignments []*api.AssignmentChange) error {
+// Assign the set of tasks to the worker. Any tasks not previously known will
+// be started. Any tasks that are in the task set and already running will be
+// updated, if possible. Any tasks currently running on the
+// worker outside the task set will be terminated.
+func (w *worker) Assign(ctx context.Context, tasks []*api.Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	log.G(ctx).WithFields(logrus.Fields{
-		"len(assignments)": len(assignments),
-	}).Debug("(*worker).Assign")
-
-	// Need to update secrets before tasks, because tasks might depend on new secrets
-	err := reconcileSecrets(ctx, w, assignments, true)
-	if err != nil {
-		return err
-	}
-
-	return reconcileTaskState(ctx, w, assignments, true)
-}
-
-// Update updates the set of tasks and secret for the worker.
-// Tasks in the added set will be added to the worker, and tasks in the removed set
-// will be removed from the worker
-// Serets in the added set will be added to the worker, and secrets in the removed set
-// will be removed from the worker.
-func (w *worker) Update(ctx context.Context, assignments []*api.AssignmentChange) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	log.G(ctx).WithFields(logrus.Fields{
-		"len(assignments)": len(assignments),
-	}).Debug("(*worker).Update")
-
-	err := reconcileSecrets(ctx, w, assignments, false)
-	if err != nil {
-		return err
-	}
-
-	return reconcileTaskState(ctx, w, assignments, false)
-}
-
-func reconcileTaskState(ctx context.Context, w *worker, assignments []*api.AssignmentChange, fullSnapshot bool) error {
-	var (
-		updatedTasks []*api.Task
-		removedTasks []*api.Task
-	)
-	for _, a := range assignments {
-		if t := a.Assignment.GetTask(); t != nil {
-			switch a.Action {
-			case api.AssignmentChange_AssignmentActionUpdate:
-				updatedTasks = append(updatedTasks, t)
-			case api.AssignmentChange_AssignmentActionRemove:
-				removedTasks = append(removedTasks, t)
-			}
-		}
-	}
-
-	log.G(ctx).WithFields(logrus.Fields{
-		"len(updatedTasks)": len(updatedTasks),
-		"len(removedTasks)": len(removedTasks),
-	}).Debug("(*worker).reconcileTaskState")
 
 	tx, err := w.db.Begin(true)
 	if err != nil {
@@ -163,9 +101,10 @@ func reconcileTaskState(ctx context.Context, w *worker, assignments []*api.Assig
 	}
 	defer tx.Rollback()
 
+	log.G(ctx).WithField("len(tasks)", len(tasks)).Debug("(*worker).Assign")
 	assigned := map[string]struct{}{}
 
-	for _, task := range updatedTasks {
+	for _, task := range tasks {
 		log.G(ctx).WithFields(
 			logrus.Fields{
 				"task.id":           task.ID,
@@ -195,96 +134,41 @@ func reconcileTaskState(ctx context.Context, w *worker, assignments []*api.Assig
 				if err := PutTaskStatus(tx, task.ID, &task.Status); err != nil {
 					return err
 				}
+
+				status = &task.Status
 			} else {
-				task.Status = *status
+				task.Status = *status // overwrite the stale manager status with ours.
 			}
+
 			w.startTask(ctx, tx, task)
 		}
 
 		assigned[task.ID] = struct{}{}
 	}
 
-	closeManager := func(tm *taskManager) {
-		// when a task is no longer assigned, we shutdown the task manager for
-		// it and leave cleanup to the sweeper.
-		if err := tm.Close(); err != nil {
-			log.G(ctx).WithError(err).Error("error closing task manager")
+	for id, tm := range w.taskManagers {
+		if _, ok := assigned[id]; ok {
+			continue
 		}
-	}
 
-	removeTaskAssignment := func(taskID string) error {
-		ctx := log.WithLogger(ctx, log.G(ctx).WithField("task.id", taskID))
-		if err := SetTaskAssignment(tx, taskID, false); err != nil {
+		ctx := log.WithLogger(ctx, log.G(ctx).WithField("task.id", id))
+		if err := SetTaskAssignment(tx, id, false); err != nil {
 			log.G(ctx).WithError(err).Error("error setting task assignment in database")
+			continue
 		}
-		return err
-	}
 
-	// If this was a complete set of assignments, we're going to remove all the remaining
-	// tasks.
-	if fullSnapshot {
-		for id, tm := range w.taskManagers {
-			if _, ok := assigned[id]; ok {
-				continue
-			}
+		delete(w.taskManagers, id)
 
-			err := removeTaskAssignment(id)
-			if err == nil {
-				delete(w.taskManagers, id)
-				go closeManager(tm)
+		go func(tm *taskManager) {
+			// when a task is no longer assigned, we shutdown the task manager for
+			// it and leave cleanup to the sweeper.
+			if err := tm.Close(); err != nil {
+				log.G(ctx).WithError(err).Error("error closing task manager")
 			}
-		}
-	} else {
-		// If this was an incremental set of assignments, we're going to remove only the tasks
-		// in the removed set
-		for _, task := range removedTasks {
-			err := removeTaskAssignment(task.ID)
-			if err != nil {
-				continue
-			}
-
-			tm, ok := w.taskManagers[task.ID]
-			if ok {
-				delete(w.taskManagers, task.ID)
-				go closeManager(tm)
-			}
-		}
+		}(tm)
 	}
 
 	return tx.Commit()
-}
-
-func reconcileSecrets(ctx context.Context, w *worker, assignments []*api.AssignmentChange, fullSnapshot bool) error {
-	var (
-		updatedSecrets []api.Secret
-		removedSecrets []string
-	)
-	for _, a := range assignments {
-		if s := a.Assignment.GetSecret(); s != nil {
-			switch a.Action {
-			case api.AssignmentChange_AssignmentActionUpdate:
-				updatedSecrets = append(updatedSecrets, *s)
-			case api.AssignmentChange_AssignmentActionRemove:
-				removedSecrets = append(removedSecrets, s.ID)
-			}
-
-		}
-	}
-
-	log.G(ctx).WithFields(logrus.Fields{
-		"len(updatedSecrets)": len(updatedSecrets),
-		"len(removedSecrets)": len(removedSecrets),
-	}).Debug("(*worker).reconcileSecrets")
-
-	// If this was a complete set of secrets, we're going to clear the secrets map and add all of them
-	if fullSnapshot {
-		w.secrets.Reset()
-	} else {
-		w.secrets.Remove(removedSecrets)
-	}
-	w.secrets.Add(updatedSecrets...)
-
-	return nil
 }
 
 func (w *worker) Listen(ctx context.Context, reporter StatusReporter) {
@@ -297,7 +181,7 @@ func (w *worker) Listen(ctx context.Context, reporter StatusReporter) {
 	go func() {
 		<-ctx.Done()
 		w.mu.Lock()
-		defer w.mu.Unlock()
+		defer w.mu.Lock()
 		delete(w.listeners, key) // remove the listener if the context is closed.
 	}()
 

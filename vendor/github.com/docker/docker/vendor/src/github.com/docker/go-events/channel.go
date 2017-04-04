@@ -1,10 +1,5 @@
 package events
 
-import (
-	"fmt"
-	"sync"
-)
-
 // Channel provides a sink that can be listened on. The writer and channel
 // listener must operate in separate goroutines.
 //
@@ -13,7 +8,6 @@ type Channel struct {
 	C chan Event
 
 	closed chan struct{}
-	once   sync.Once
 }
 
 // NewChannel returns a channel. If buffer is zero, the channel is
@@ -43,19 +37,11 @@ func (ch *Channel) Write(event Event) error {
 
 // Close the channel sink.
 func (ch *Channel) Close() error {
-	ch.once.Do(func() {
+	select {
+	case <-ch.closed:
+		return ErrSinkClosed
+	default:
 		close(ch.closed)
-	})
-
-	return nil
-}
-
-func (ch Channel) String() string {
-	// Serialize a copy of the Channel that doesn't contain the sync.Once,
-	// to avoid a data race.
-	ch2 := map[string]interface{}{
-		"C":      ch.C,
-		"closed": ch.closed,
+		return nil
 	}
-	return fmt.Sprint(ch2)
 }

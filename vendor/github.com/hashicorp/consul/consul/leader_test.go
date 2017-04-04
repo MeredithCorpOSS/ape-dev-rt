@@ -44,7 +44,7 @@ func TestLeader_RegisterMember(t *testing.T) {
 	})
 
 	// Should have a check
-	_, checks, err := state.NodeChecks(c1.config.NodeName)
+	_, checks, err := state.NodeChecks(nil, c1.config.NodeName)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestLeader_RegisterMember(t *testing.T) {
 	}
 
 	// Service should be registered
-	_, services, err := state.NodeServices(s1.config.NodeName)
+	_, services, err := state.NodeServices(nil, s1.config.NodeName)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestLeader_FailedMember(t *testing.T) {
 	})
 
 	// Should have a check
-	_, checks, err := state.NodeChecks(c1.config.NodeName)
+	_, checks, err := state.NodeChecks(nil, c1.config.NodeName)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestLeader_FailedMember(t *testing.T) {
 	}
 
 	testutil.WaitForResult(func() (bool, error) {
-		_, checks, err = state.NodeChecks(c1.config.NodeName)
+		_, checks, err = state.NodeChecks(nil, c1.config.NodeName)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -225,16 +225,22 @@ func TestLeader_ReapMember(t *testing.T) {
 	}
 	s1.reconcileCh <- c1mem
 
-	// Should be deregistered
-	testutil.WaitForResult(func() (bool, error) {
+	// Should be deregistered; we have to poll quickly here because
+	// anti-entropy will put it back.
+	reaped := false
+	for start := time.Now(); time.Since(start) < 5*time.Second; {
 		_, node, err := state.GetNode(c1.config.NodeName)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		return node == nil, nil
-	}, func(err error) {
+		if node == nil {
+			reaped = true
+			break
+		}
+	}
+	if !reaped {
 		t.Fatalf("client should not be registered")
-	})
+	}
 }
 
 func TestLeader_Reconcile_ReapMember(t *testing.T) {
@@ -341,8 +347,8 @@ func TestLeader_LeftServer(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -358,8 +364,8 @@ func TestLeader_LeftServer(t *testing.T) {
 		}
 
 		for _, s := range servers[1:] {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 2, errors.New(fmt.Sprintf("%v", peers))
+			peers, _ := s.numPeers()
+			return peers == 2, errors.New(fmt.Sprintf("%d", peers))
 		}
 
 		return true, nil
@@ -394,8 +400,8 @@ func TestLeader_LeftLeader(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -423,8 +429,8 @@ func TestLeader_LeftLeader(t *testing.T) {
 		}
 		remain = s
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 2, errors.New(fmt.Sprintf("%v", peers))
+			peers, _ := s.numPeers()
+			return peers == 2, errors.New(fmt.Sprintf("%d", peers))
 		}, func(err error) {
 			t.Fatalf("should have 2 peers: %v", err)
 		})
@@ -472,8 +478,8 @@ func TestLeader_MultiBootstrap(t *testing.T) {
 
 	// Ensure we don't have multiple raft peers
 	for _, s := range servers {
-		peers, _ := s.raftPeers.Peers()
-		if len(peers) != 1 {
+		peers, _ := s.numPeers()
+		if peers != 1 {
 			t.Fatalf("should only have 1 raft peer!")
 		}
 	}
@@ -505,8 +511,8 @@ func TestLeader_TombstoneGC_Reset(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})

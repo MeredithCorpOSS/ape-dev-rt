@@ -9,8 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/codegangsta/cli"
-	"github.com/opencontainers/specs/specs-go"
+	"github.com/opencontainers/runc/libcontainer/utils"
+	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/urfave/cli"
 )
 
 var execCommand = cli.Command{
@@ -21,6 +22,7 @@ var execCommand = cli.Command{
 Where "<container-id>" is the name for the instance of the container and
 "<container command>" is the command to be executed in the container.
 
+EXAMPLE:
 For example, if the container is configured to run the linux ps command the
 following will output a list of processes running in the container:
 	 
@@ -81,15 +83,15 @@ following will output a list of processes running in the container:
 			Usage: "disable the use of the subreaper used to reap reparented processes",
 		},
 	},
-	Action: func(context *cli.Context) {
+	Action: func(context *cli.Context) error {
 		if os.Geteuid() != 0 {
-			fatalf("runc should be run as root")
+			return fmt.Errorf("runc should be run as root")
 		}
 		status, err := execProcess(context)
-		if err != nil {
-			fatalf("exec failed: %v", err)
+		if err == nil {
+			os.Exit(status)
 		}
-		os.Exit(status)
+		return fmt.Errorf("exec failed: %v", err)
 	},
 }
 
@@ -98,12 +100,16 @@ func execProcess(context *cli.Context) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	path := context.String("process")
+	if path == "" && len(context.Args()) == 1 {
+		return -1, fmt.Errorf("process args cannot be empty")
+	}
 	detach := context.Bool("detach")
 	state, err := container.State()
 	if err != nil {
 		return -1, err
 	}
-	bundle := searchLabels(state.Config.Labels, "bundle")
+	bundle := utils.SearchLabels(state.Config.Labels, "bundle")
 	p, err := getProcess(context, bundle)
 	if err != nil {
 		return -1, err

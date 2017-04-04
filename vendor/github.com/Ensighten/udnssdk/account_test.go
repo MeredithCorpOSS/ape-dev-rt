@@ -24,13 +24,13 @@ func Test_Accounts_Select_Live(t *testing.T) {
 	accounts, resp, err := testClient.Accounts.Select()
 
 	if err != nil {
-		if resp.Response.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == 404 {
 			t.SkipNow()
 		}
 		t.Fatal(err)
 	}
 	t.Logf("Accounts: %+v \n", accounts)
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 func Test_Accounts_Select(t *testing.T) {

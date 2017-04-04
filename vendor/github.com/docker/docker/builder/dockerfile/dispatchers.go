@@ -18,11 +18,11 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/builder"
 	"github.com/docker/docker/pkg/signal"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
+	"github.com/docker/engine-api/types/container"
+	"github.com/docker/engine-api/types/strslice"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -68,7 +68,7 @@ func env(b *Builder, args []string, attributes map[string]bool, original string)
 		// value ==> args[j+1]
 
 		if len(args[j]) == 0 {
-			return errBlankCommandNames("ENV")
+			return fmt.Errorf("ENV names can not be blank")
 		}
 
 		newVar := args[j] + "=" + args[j+1] + ""
@@ -136,7 +136,7 @@ func label(b *Builder, args []string, attributes map[string]bool, original strin
 		// value ==> args[j+1]
 
 		if len(args[j]) == 0 {
-			return errBlankCommandNames("LABEL")
+			return fmt.Errorf("LABEL names can not be blank")
 		}
 
 		newVar := args[j] + "=" + args[j+1] + ""
@@ -455,7 +455,7 @@ func parseOptInterval(f *Flag) (time.Duration, error) {
 //
 func healthcheck(b *Builder, args []string, attributes map[string]bool, original string) error {
 	if len(args) == 0 {
-		return errAtLeastOneArgument("HEALTHCHECK")
+		return fmt.Errorf("HEALTHCHECK requires an argument")
 	}
 	typ := strings.ToUpper(args[0])
 	args = args[1:]
@@ -529,7 +529,11 @@ func healthcheck(b *Builder, args []string, attributes map[string]bool, original
 		b.runConfig.Healthcheck = &healthcheck
 	}
 
-	return b.commit("", b.runConfig.Cmd, fmt.Sprintf("HEALTHCHECK %q", b.runConfig.Healthcheck))
+	if err := b.commit("", b.runConfig.Cmd, fmt.Sprintf("HEALTHCHECK %q", b.runConfig.Healthcheck)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ENTRYPOINT /usr/sbin/nginx
@@ -650,7 +654,7 @@ func volume(b *Builder, args []string, attributes map[string]bool, original stri
 	for _, v := range args {
 		v = strings.TrimSpace(v)
 		if v == "" {
-			return fmt.Errorf("VOLUME specified can not be an empty string")
+			return fmt.Errorf("Volume specified can not be an empty string")
 		}
 		b.runConfig.Volumes[v] = struct{}{}
 	}
@@ -665,7 +669,7 @@ func volume(b *Builder, args []string, attributes map[string]bool, original stri
 // Set the signal that will be used to kill the container.
 func stopSignal(b *Builder, args []string, attributes map[string]bool, original string) error {
 	if len(args) != 1 {
-		return errExactlyOneArgument("STOPSIGNAL")
+		return fmt.Errorf("STOPSIGNAL requires exactly one argument")
 	}
 
 	sig := args[0]
@@ -685,7 +689,7 @@ func stopSignal(b *Builder, args []string, attributes map[string]bool, original 
 // Dockerfile author may optionally set a default value of this variable.
 func arg(b *Builder, args []string, attributes map[string]bool, original string) error {
 	if len(args) != 1 {
-		return errExactlyOneArgument("ARG")
+		return fmt.Errorf("ARG requires exactly one argument definition")
 	}
 
 	var (
@@ -703,7 +707,7 @@ func arg(b *Builder, args []string, attributes map[string]bool, original string)
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)
 		if len(parts[0]) == 0 {
-			return errBlankCommandNames("ARG")
+			return fmt.Errorf("ARG names can not be blank")
 		}
 
 		name = parts[0]
@@ -758,10 +762,6 @@ func errExactlyOneArgument(command string) error {
 
 func errAtLeastTwoArguments(command string) error {
 	return fmt.Errorf("%s requires at least two arguments", command)
-}
-
-func errBlankCommandNames(command string) error {
-	return fmt.Errorf("%s names can not be blank", command)
 }
 
 func errTooManyArguments(command string) error {

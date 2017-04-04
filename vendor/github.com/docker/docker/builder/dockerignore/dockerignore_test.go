@@ -35,8 +35,6 @@ func TestReadAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer diFd.Close()
-
 	di, err = ReadAll(diFd)
 	if err != nil {
 		t.Fatal(err)

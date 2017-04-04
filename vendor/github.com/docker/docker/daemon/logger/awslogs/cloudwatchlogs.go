@@ -64,11 +64,7 @@ type regionFinder interface {
 	Region() (string, error)
 }
 
-type wrappedEvent struct {
-	inputLogEvent *cloudwatchlogs.InputLogEvent
-	insertOrder   int
-}
-type byTimestamp []wrappedEvent
+type byTimestamp []*cloudwatchlogs.InputLogEvent
 
 // init registers the awslogs driver
 func init() {
@@ -233,7 +229,7 @@ var newTicker = func(freq time.Duration) *time.Ticker {
 // calculations.
 func (l *logStream) collectBatch() {
 	timer := newTicker(batchPublishFrequency)
-	var events []wrappedEvent
+	var events []*cloudwatchlogs.InputLogEvent
 	bytes := 0
 	for {
 		select {
@@ -262,12 +258,9 @@ func (l *logStream) collectBatch() {
 					events = events[:0]
 					bytes = 0
 				}
-				events = append(events, wrappedEvent{
-					inputLogEvent: &cloudwatchlogs.InputLogEvent{
-						Message:   aws.String(string(line)),
-						Timestamp: aws.Int64(msg.Timestamp.UnixNano() / int64(time.Millisecond)),
-					},
-					insertOrder: len(events),
+				events = append(events, &cloudwatchlogs.InputLogEvent{
+					Message:   aws.String(string(line)),
+					Timestamp: aws.Int64(msg.Timestamp.UnixNano() / int64(time.Millisecond)),
 				})
 				bytes += (lineBytes + perEventBytes)
 			}
@@ -278,17 +271,14 @@ func (l *logStream) collectBatch() {
 // publishBatch calls PutLogEvents for a given set of InputLogEvents,
 // accounting for sequencing requirements (each request must reference the
 // sequence token returned by the previous request).
-func (l *logStream) publishBatch(events []wrappedEvent) {
+func (l *logStream) publishBatch(events []*cloudwatchlogs.InputLogEvent) {
 	if len(events) == 0 {
 		return
 	}
 
-	// events in a batch must be sorted by timestamp
-	// see http://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutLogEvents.html
 	sort.Sort(byTimestamp(events))
-	cwEvents := unwrapEvents(events)
 
-	nextSequenceToken, err := l.putLogEvents(cwEvents, l.sequenceToken)
+	nextSequenceToken, err := l.putLogEvents(events, l.sequenceToken)
 
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
@@ -307,7 +297,7 @@ func (l *logStream) publishBatch(events []wrappedEvent) {
 				// sequence code is bad, grab the correct one and retry
 				parts := strings.Split(awsErr.Message(), " ")
 				token := parts[len(parts)-1]
-				nextSequenceToken, err = l.putLogEvents(cwEvents, &token)
+				nextSequenceToken, err = l.putLogEvents(events, &token)
 			}
 		}
 	}
@@ -370,14 +360,11 @@ func (slice byTimestamp) Len() int {
 // required by the sort.Interface interface.
 func (slice byTimestamp) Less(i, j int) bool {
 	iTimestamp, jTimestamp := int64(0), int64(0)
-	if slice != nil && slice[i].inputLogEvent.Timestamp != nil {
-		iTimestamp = *slice[i].inputLogEvent.Timestamp
+	if slice != nil && slice[i].Timestamp != nil {
+		iTimestamp = *slice[i].Timestamp
 	}
-	if slice != nil && slice[j].inputLogEvent.Timestamp != nil {
-		jTimestamp = *slice[j].inputLogEvent.Timestamp
-	}
-	if iTimestamp == jTimestamp {
-		return slice[i].insertOrder < slice[j].insertOrder
+	if slice != nil && slice[j].Timestamp != nil {
+		jTimestamp = *slice[j].Timestamp
 	}
 	return iTimestamp < jTimestamp
 }
@@ -386,12 +373,4 @@ func (slice byTimestamp) Less(i, j int) bool {
 // required by the sort.Interface interface.
 func (slice byTimestamp) Swap(i, j int) {
 	slice[i], slice[j] = slice[j], slice[i]
-}
-
-func unwrapEvents(events []wrappedEvent) []*cloudwatchlogs.InputLogEvent {
-	cwEvents := []*cloudwatchlogs.InputLogEvent{}
-	for _, input := range events {
-		cwEvents = append(cwEvents, input.inputLogEvent)
-	}
-	return cwEvents
 }

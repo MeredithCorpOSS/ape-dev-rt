@@ -23,6 +23,12 @@ import (
 	"github.com/cloudflare/cfssl/info"
 )
 
+// MaxPathLen is the default path length for a new CA certificate.
+var MaxPathLen = 2
+
+// MaxPathLenZero indicates whether a new CA certificate has pathlen=0
+var MaxPathLenZero = false
+
 // Subject contains the information that should be used to override the
 // subject information when signing a certificate.
 type Subject struct {
@@ -288,15 +294,7 @@ func FillTemplate(template *x509.Certificate, defaultProfile, profile *config.Si
 	template.KeyUsage = ku
 	template.ExtKeyUsage = eku
 	template.BasicConstraintsValid = true
-	template.IsCA = profile.CAConstraint.IsCA
-	if template.IsCA {
-		template.MaxPathLen = profile.CAConstraint.MaxPathLen
-		if template.MaxPathLen == 0 {
-			template.MaxPathLenZero = profile.CAConstraint.MaxPathLenZero
-		}
-		template.DNSNames = nil
-		template.EmailAddresses = nil
-	}
+	template.IsCA = profile.CA
 	template.SubjectKeyId = ski
 
 	if ocspURL != "" {

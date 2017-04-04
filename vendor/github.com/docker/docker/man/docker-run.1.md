@@ -70,7 +70,6 @@ docker-run - Run a command in a new container
 [**--security-opt**[=*[]*]]
 [**--storage-opt**[=*[]*]]
 [**--stop-signal**[=*SIGNAL*]]
-[**--stop-timeout**[=*TIMEOUT*]]
 [**--shm-size**[=*[]*]]
 [**--sig-proxy**[=*true*]]
 [**--sysctl**[=*[]*]]
@@ -494,17 +493,11 @@ incompatible with any restart policy other than `none`.
 
    $ docker run -it --storage-opt size=120G fedora /bin/bash
 
-   This (size) will allow to set the container rootfs size to 120G at creation time.
-   This option is only available for the `devicemapper`, `btrfs`, `overlay2`  and `zfs` graph drivers.
-   For the `devicemapper`, `btrfs` and `zfs` storage drivers, user cannot pass a size less than the Default BaseFS Size.
-   For the `overlay2` storage driver, the size option is only available if the backing fs is `xfs` and mounted with the `pquota` mount option.
-   Under these conditions, user can pass any size less then the backing fs size.
+   This (size) will allow to set the container rootfs size to 120G at creation time. User cannot pass a size less than the Default BaseFS Size.
+   This option is only available for the `devicemapper`, `btrfs`, and `zfs` graph drivers.
 
 **--stop-signal**=*SIGTERM*
   Signal to stop a container. Default is SIGTERM.
-
-**--stop-timeout**=*10*
-  Timeout (in seconds) to stop a container. Default is 10.
 
 **--shm-size**=""
    Size of `/dev/shm`. The format is `<number><unit>`.
@@ -999,7 +992,7 @@ network namespace, run this command:
 
 Note:
 
-Not all sysctls are namespaced. Docker does not support changing sysctls
+Not all sysctls are namespaced. docker does not support changing sysctls
 inside of a container that also modify the host system. As the kernel 
 evolves we expect to see more sysctls become namespaced.
 

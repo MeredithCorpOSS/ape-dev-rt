@@ -1,4 +1,4 @@
-// Copyright 2015 The etcd Authors
+// Copyright 2015 CoreOS, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package snap
 import (
 	"io"
 
-	"github.com/coreos/etcd/pkg/ioutil"
 	"github.com/coreos/etcd/raft/raftpb"
 )
 
@@ -32,15 +31,13 @@ import (
 type Message struct {
 	raftpb.Message
 	ReadCloser io.ReadCloser
-	TotalSize  int64
 	closeC     chan bool
 }
 
-func NewMessage(rs raftpb.Message, rc io.ReadCloser, rcSize int64) *Message {
+func NewMessage(rs raftpb.Message, rc io.ReadCloser) *Message {
 	return &Message{
 		Message:    rs,
-		ReadCloser: ioutil.NewExactReadCloser(rc, rcSize),
-		TotalSize:  int64(rs.Size()) + rcSize,
+		ReadCloser: rc,
 		closeC:     make(chan bool, 1),
 	}
 }
@@ -53,9 +50,7 @@ func (m Message) CloseNotify() <-chan bool {
 }
 
 func (m Message) CloseWithError(err error) {
-	if cerr := m.ReadCloser.Close(); cerr != nil {
-		err = cerr
-	}
+	m.ReadCloser.Close()
 	if err == nil {
 		m.closeC <- true
 	} else {

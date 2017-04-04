@@ -2,12 +2,8 @@
 
 package main
 
-import (
-	"github.com/docker/docker/api/server/httputils"
-	"github.com/docker/docker/api/server/router"
-	"github.com/docker/docker/daemon"
-)
+import "github.com/docker/docker/api/server/router"
 
-func addExperimentalRouters(routers []router.Router, d *daemon.Daemon, decoder httputils.ContainerDecoder) []router.Router {
+func addExperimentalRouters(routers []router.Router) []router.Router {
 	return routers
 }

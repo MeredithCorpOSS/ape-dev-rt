@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/integration/checker"
-	icmd "github.com/docker/docker/pkg/integration/cmd"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/go-check/check"
 )
@@ -402,11 +401,10 @@ func (s *DockerSuite) TestDockerNetworkMacVlanBridgeInternalMode(c *check.C) {
 	c.Assert(waitRun("second"), check.IsNil)
 
 	// access outside of the network should fail
-	result := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
-	c.Assert(result, icmd.Matches, icmd.Expected{Timeout: true})
-
+	_, _, err := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
+	c.Assert(err, check.NotNil)
 	// intra-network communications should succeed
-	_, _, err := dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
+	_, _, err = dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
 	c.Assert(err, check.IsNil)
 }
 
@@ -442,10 +440,10 @@ func (s *DockerSuite) TestDockerNetworkIpvlanL2InternalMode(c *check.C) {
 	c.Assert(waitRun("second"), check.IsNil)
 
 	// access outside of the network should fail
-	result := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
-	c.Assert(result, icmd.Matches, icmd.Expected{Timeout: true})
+	_, _, err := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
+	c.Assert(err, check.NotNil)
 	// intra-network communications should succeed
-	_, _, err := dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
+	_, _, err = dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
 	c.Assert(err, check.IsNil)
 }
 
@@ -483,10 +481,10 @@ func (s *DockerSuite) TestDockerNetworkIpvlanL3InternalMode(c *check.C) {
 	c.Assert(waitRun("second"), check.IsNil)
 
 	// access outside of the network should fail
-	result := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
-	c.Assert(result, icmd.Matches, icmd.Expected{Timeout: true})
+	_, _, err := dockerCmdWithTimeout(time.Second, "exec", "first", "ping", "-c", "1", "-w", "1", "8.8.8.8")
+	c.Assert(err, check.NotNil)
 	// intra-network communications should succeed
-	_, _, err := dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
+	_, _, err = dockerCmdWithError("exec", "second", "ping", "-c", "1", "first")
 	c.Assert(err, check.IsNil)
 }
 

@@ -352,6 +352,7 @@ type Response struct {
 	IsTemplate  bool   `json:"isTemplate"`
 	LocationID  string `json:"locationId"`
 	OStype      string `json:"osType"`
+	OS          string `json:"os"`
 	Status      string `json:"status"`
 	Details     struct {
 		IPaddresses []struct {

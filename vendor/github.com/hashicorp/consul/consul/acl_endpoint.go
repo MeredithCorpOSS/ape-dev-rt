@@ -6,7 +6,9 @@ import (
 
 	"github.com/armon/go-metrics"
 	"github.com/hashicorp/consul/acl"
+	"github.com/hashicorp/consul/consul/state"
 	"github.com/hashicorp/consul/consul/structs"
+	"github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/go-uuid"
 )
 
@@ -15,24 +17,15 @@ type ACL struct {
 	srv *Server
 }
 
-// Apply is used to apply a modifying request to the data store. This should
-// only be used for operations that modify the data
-func (a *ACL) Apply(args *structs.ACLRequest, reply *string) error {
-	if done, err := a.srv.forward("ACL.Apply", args, args, reply); done {
-		return err
-	}
-	defer metrics.MeasureSince([]string{"consul", "acl", "apply"}, time.Now())
-
-	// Verify we are allowed to serve this request
-	if a.srv.config.ACLDatacenter != a.srv.config.Datacenter {
-		return fmt.Errorf(aclDisabled)
-	}
-
-	// Verify token is permitted to modify ACLs
-	if acl, err := a.srv.resolveToken(args.Token); err != nil {
-		return err
-	} else if acl == nil || !acl.ACLModify() {
-		return permissionDeniedErr
+// aclApplyInternal is used to apply an ACL request after it has been vetted that
+// this is a valid operation. It is used when users are updating ACLs, in which
+// case we check their token to make sure they have management privileges. It is
+// also used for ACL replication. We want to run the replicated ACLs through the
+// same checks on the change itself.
+func aclApplyInternal(srv *Server, args *structs.ACLRequest, reply *string) error {
+	// All ACLs must have an ID by this point.
+	if args.ACL.ID == "" {
+		return fmt.Errorf("Missing ACL ID")
 	}
 
 	switch args.Op {
@@ -56,33 +49,8 @@ func (a *ACL) Apply(args *structs.ACLRequest, reply *string) error {
 			return fmt.Errorf("ACL rule compilation failed: %v", err)
 		}
 
-		// If no ID is provided, generate a new ID. This must
-		// be done prior to appending to the raft log, because the ID is not
-		// deterministic. Once the entry is in the log, the state update MUST
-		// be deterministic or the followers will not converge.
-		if args.ACL.ID == "" {
-			state := a.srv.fsm.State()
-			for {
-				if args.ACL.ID, err = uuid.GenerateUUID(); err != nil {
-					a.srv.logger.Printf("[ERR] consul.acl: UUID generation failed: %v", err)
-					return err
-				}
-
-				_, acl, err := state.ACLGet(args.ACL.ID)
-				if err != nil {
-					a.srv.logger.Printf("[ERR] consul.acl: ACL lookup failed: %v", err)
-					return err
-				}
-				if acl == nil {
-					break
-				}
-			}
-		}
-
 	case structs.ACLDelete:
-		if args.ACL.ID == "" {
-			return fmt.Errorf("Missing ACL ID")
-		} else if args.ACL.ID == anonymousToken {
+		if args.ACL.ID == anonymousToken {
 			return fmt.Errorf("%s: Cannot delete anonymous token", permissionDenied)
 		}
 
@@ -91,13 +59,71 @@ func (a *ACL) Apply(args *structs.ACLRequest, reply *string) error {
 	}
 
 	// Apply the update
-	resp, err := a.srv.raftApply(structs.ACLRequestType, args)
+	resp, err := srv.raftApply(structs.ACLRequestType, args)
 	if err != nil {
-		a.srv.logger.Printf("[ERR] consul.acl: Apply failed: %v", err)
+		srv.logger.Printf("[ERR] consul.acl: Apply failed: %v", err)
 		return err
 	}
 	if respErr, ok := resp.(error); ok {
 		return respErr
+	}
+
+	// Check if the return type is a string
+	if respString, ok := resp.(string); ok {
+		*reply = respString
+	}
+
+	return nil
+}
+
+// Apply is used to apply a modifying request to the data store. This should
+// only be used for operations that modify the data
+func (a *ACL) Apply(args *structs.ACLRequest, reply *string) error {
+	if done, err := a.srv.forward("ACL.Apply", args, args, reply); done {
+		return err
+	}
+	defer metrics.MeasureSince([]string{"consul", "acl", "apply"}, time.Now())
+
+	// Verify we are allowed to serve this request
+	if a.srv.config.ACLDatacenter != a.srv.config.Datacenter {
+		return fmt.Errorf(aclDisabled)
+	}
+
+	// Verify token is permitted to modify ACLs
+	if acl, err := a.srv.resolveToken(args.Token); err != nil {
+		return err
+	} else if acl == nil || !acl.ACLModify() {
+		return permissionDeniedErr
+	}
+
+	// If no ID is provided, generate a new ID. This must be done prior to
+	// appending to the Raft log, because the ID is not deterministic. Once
+	// the entry is in the log, the state update MUST be deterministic or
+	// the followers will not converge.
+	if args.Op == structs.ACLSet && args.ACL.ID == "" {
+		state := a.srv.fsm.State()
+		for {
+			var err error
+			args.ACL.ID, err = uuid.GenerateUUID()
+			if err != nil {
+				a.srv.logger.Printf("[ERR] consul.acl: UUID generation failed: %v", err)
+				return err
+			}
+
+			_, acl, err := state.ACLGet(nil, args.ACL.ID)
+			if err != nil {
+				a.srv.logger.Printf("[ERR] consul.acl: ACL lookup failed: %v", err)
+				return err
+			}
+			if acl == nil {
+				break
+			}
+		}
+	}
+
+	// Do the apply now that this update is vetted.
+	if err := aclApplyInternal(a.srv, args, reply); err != nil {
+		return err
 	}
 
 	// Clear the cache if applicable
@@ -105,10 +131,6 @@ func (a *ACL) Apply(args *structs.ACLRequest, reply *string) error {
 		a.srv.aclAuthCache.ClearACL(args.ACL.ID)
 	}
 
-	// Check if the return type is a string
-	if respString, ok := resp.(string); ok {
-		*reply = respString
-	}
 	return nil
 }
 
@@ -124,13 +146,10 @@ func (a *ACL) Get(args *structs.ACLSpecificRequest,
 		return fmt.Errorf(aclDisabled)
 	}
 
-	// Get the local state
-	state := a.srv.fsm.State()
-	return a.srv.blockingRPC(&args.QueryOptions,
+	return a.srv.blockingQuery(&args.QueryOptions,
 		&reply.QueryMeta,
-		state.GetQueryWatch("ACLGet"),
-		func() error {
-			index, acl, err := state.ACLGet(args.ACL)
+		func(ws memdb.WatchSet, state *state.StateStore) error {
+			index, acl, err := state.ACLGet(ws, args.ACL)
 			if err != nil {
 				return err
 			}
@@ -143,6 +162,11 @@ func (a *ACL) Get(args *structs.ACLSpecificRequest,
 			}
 			return nil
 		})
+}
+
+// makeACLETag returns an ETag for the given parent and policy.
+func makeACLETag(parent string, policy *acl.Policy) string {
+	return fmt.Sprintf("%s:%s", parent, policy.ID)
 }
 
 // GetPolicy is used to retrieve a compiled policy object with a TTL. Does not
@@ -165,7 +189,7 @@ func (a *ACL) GetPolicy(args *structs.ACLPolicyRequest, reply *structs.ACLPolicy
 
 	// Generate an ETag
 	conf := a.srv.config
-	etag := fmt.Sprintf("%s:%s", parent, policy.ID)
+	etag := makeACLETag(parent, policy)
 
 	// Setup the response
 	reply.ETag = etag
@@ -199,13 +223,10 @@ func (a *ACL) List(args *structs.DCSpecificRequest,
 		return permissionDeniedErr
 	}
 
-	// Get the local state
-	state := a.srv.fsm.State()
-	return a.srv.blockingRPC(&args.QueryOptions,
+	return a.srv.blockingQuery(&args.QueryOptions,
 		&reply.QueryMeta,
-		state.GetQueryWatch("ACLList"),
-		func() error {
-			index, acls, err := state.ACLList()
+		func(ws memdb.WatchSet, state *state.StateStore) error {
+			index, acls, err := state.ACLList(ws)
 			if err != nil {
 				return err
 			}
@@ -213,4 +234,26 @@ func (a *ACL) List(args *structs.DCSpecificRequest,
 			reply.Index, reply.ACLs = index, acls
 			return nil
 		})
+}
+
+// ReplicationStatus is used to retrieve the current ACL replication status.
+func (a *ACL) ReplicationStatus(args *structs.DCSpecificRequest,
+	reply *structs.ACLReplicationStatus) error {
+	// This must be sent to the leader, so we fix the args since we are
+	// re-using a structure where we don't support all the options.
+	args.RequireConsistent = true
+	args.AllowStale = false
+	if done, err := a.srv.forward("ACL.ReplicationStatus", args, args, reply); done {
+		return err
+	}
+
+	// There's no ACL token required here since this doesn't leak any
+	// sensitive information, and we don't want people to have to use
+	// management tokens if they are querying this via a health check.
+
+	// Poll the latest status.
+	a.srv.aclReplicationStatusLock.RLock()
+	*reply = a.srv.aclReplicationStatus
+	a.srv.aclReplicationStatusLock.RUnlock()
+	return nil
 }

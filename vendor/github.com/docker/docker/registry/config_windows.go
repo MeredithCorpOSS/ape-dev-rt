@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/pflag"
+	flag "github.com/docker/docker/pkg/mflag"
 )
 
 // CertsDir is the directory where certificates are stored
@@ -20,6 +20,6 @@ func cleanPath(s string) string {
 }
 
 // installCliPlatformFlags handles any platform specific flags for the service.
-func (options *ServiceOptions) installCliPlatformFlags(flags *pflag.FlagSet) {
+func (options *ServiceOptions) installCliPlatformFlags(cmd *flag.FlagSet, usageFn func(string) string) {
 	// No Windows specific flags.
 }

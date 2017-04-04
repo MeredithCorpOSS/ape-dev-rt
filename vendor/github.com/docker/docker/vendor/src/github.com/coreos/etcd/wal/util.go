@@ -1,4 +1,4 @@
-// Copyright 2015 The etcd Authors
+// Copyright 2015 CoreOS, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,26 +67,12 @@ func isValidSeq(names []string) bool {
 	}
 	return true
 }
-func readWalNames(dirpath string) ([]string, error) {
-	names, err := fileutil.ReadDir(dirpath)
-	if err != nil {
-		return nil, err
-	}
-	wnames := checkWalNames(names)
-	if len(wnames) == 0 {
-		return nil, ErrFileNotFound
-	}
-	return wnames, nil
-}
 
 func checkWalNames(names []string) []string {
 	wnames := make([]string, 0)
 	for _, name := range names {
 		if _, _, err := parseWalName(name); err != nil {
-			// don't complain about left over tmp files
-			if !strings.HasSuffix(name, ".tmp") {
-				plog.Warningf("ignored file %v in wal", name)
-			}
+			plog.Warningf("ignored file %v in wal", name)
 			continue
 		}
 		wnames = append(wnames, name)

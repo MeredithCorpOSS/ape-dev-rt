@@ -77,10 +77,9 @@ func resourceAwsLambdaFunction() *schema.Resource {
 				Required: true,
 			},
 			"runtime": {
-				Type:     schema.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  "nodejs",
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validateRuntime,
 			},
 			"timeout": {
 				Type:     schema.TypeInt,
@@ -485,6 +484,21 @@ func resourceAwsLambdaFunctionUpdate(d *schema.ResourceData, meta interface{}) e
 		configReq.KMSKeyArn = aws.String(d.Get("kms_key_arn").(string))
 		configUpdate = true
 	}
+
+	if d.HasChange("dead_letter_config") {
+		dlcMaps := d.Get("dead_letter_config").([]interface{})
+		if len(dlcMaps) == 1 { // Schema guarantees either 0 or 1
+			dlcMap := dlcMaps[0].(map[string]interface{})
+			configReq.DeadLetterConfig = &lambda.DeadLetterConfig{
+				TargetArn: aws.String(dlcMap["target_arn"].(string)),
+			}
+			configUpdate = true
+		}
+	}
+	if d.HasChange("runtime") {
+		configReq.Runtime = aws.String(d.Get("runtime").(string))
+		configUpdate = true
+	}
 	if d.HasChange("environment") {
 		if v, ok := d.GetOk("environment"); ok {
 			environments := v.([]interface{})
@@ -574,4 +588,15 @@ func validateVPCConfig(v interface{}) (map[string]interface{}, error) {
 	}
 
 	return config, nil
+}
+
+func validateRuntime(v interface{}, k string) (ws []string, errors []error) {
+	runtime := v.(string)
+
+	if runtime == lambda.RuntimeNodejs {
+		errors = append(errors, fmt.Errorf(
+			"%s has reached end of life since October 2016 and has been deprecated in favor of %s.",
+			runtime, lambda.RuntimeNodejs43))
+	}
+	return
 }

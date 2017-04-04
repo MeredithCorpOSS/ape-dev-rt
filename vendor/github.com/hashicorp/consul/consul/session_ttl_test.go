@@ -143,6 +143,8 @@ func TestResetSessionTimerLocked(t *testing.T) {
 	defer os.RemoveAll(dir1)
 	defer s1.Shutdown()
 
+	testutil.WaitForLeader(t, s1.RPC, "dc1")
+
 	s1.sessionTimersLock.Lock()
 	s1.resetSessionTimerLocked("foo", 5*time.Millisecond)
 	s1.sessionTimersLock.Unlock()
@@ -223,7 +225,7 @@ func TestInvalidateSession(t *testing.T) {
 	s1.invalidateSession(session.ID)
 
 	// Check it is gone
-	_, sess, err := state.SessionGet(session.ID)
+	_, sess, err := state.SessionGet(nil, session.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -297,8 +299,8 @@ func TestServer_SessionTTL_Failover(t *testing.T) {
 	}
 
 	testutil.WaitForResult(func() (bool, error) {
-		peers, _ := s1.raftPeers.Peers()
-		return len(peers) == 3, nil
+		peers, _ := s1.numPeers()
+		return peers == 3, nil
 	}, func(err error) {
 		t.Fatalf("should have 3 peers")
 	})

@@ -1,18 +1,23 @@
----
-title: "Docker run reference"
-description: "Configure containers at runtime"
-keywords: ["docker, run, configure,  runtime"]
----
+<!--[metadata]>
++++
+title = "Docker run reference"
+description = "Configure containers at runtime"
+keywords = ["docker, run, configure,  runtime"]
+[menu.main]
+parent = "engine_ref"
+weight=-80
++++
+<![end-metadata]-->
 
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
-
+<!-- TODO (@thaJeztah) define more flexible table/td classes -->
+<style>
+table .no-wrap {
+    white-space: nowrap;
+}
+table code {
+    white-space: nowrap;
+}
+</style>
 # Docker run reference
 
 Docker runs processes in isolated containers. A container is a process
@@ -185,7 +190,7 @@ Images using the v2 or later image format have a content-addressable identifier
 called a digest. As long as the input used to generate the image is unchanged,
 the digest value is predictable and referenceable.
 
-The following example runs a container from the `alpine` image with the
+The following example runs a container from the `alpine` image with the 
 `sha256:9cacb71397b640eca97488cf08582ae4e4068513101088e9f96c9814bfda95e0` digest:
 
     $ docker run alpine@sha256:9cacb71397b640eca97488cf08582ae4e4068513101088e9f96c9814bfda95e0 date
@@ -424,7 +429,7 @@ running the `redis-cli` command and connecting to the Redis server over the
 You can create a network using a Docker network driver or an external network
 driver plugin. You can connect multiple containers to the same network. Once
 connected to a user-defined network, the containers can communicate easily using
-only another container's IP address or name.
+only another container's IP address or name.  
 
 For `overlay` networks or custom plugins that support multi-host connectivity,
 containers connected to the same multi-host network but launched from different
@@ -541,17 +546,13 @@ will try forever to restart the container. The number of (attempted) restarts
 for a container can be obtained via [`docker inspect`](commandline/inspect.md). For example, to get the number of restarts
 for container "my-container";
 
-    {% raw %}
     $ docker inspect -f "{{ .RestartCount }}" my-container
     # 2
-    {% endraw %}
 
 Or, to get the last time the container was (re)started;
 
-    {% raw %}
     $ docker inspect -f "{{ .State.StartedAt }}" my-container
     # 2015-03-04T23:47:07.691840179Z
-    {% endraw %}
 
 
 Combining `--restart` (restart policy) with the `--rm` (clean up) flag results
@@ -644,7 +645,7 @@ allows you to share the same content between containers.
 > **Note**: Automatic translation of MLS labels is not currently supported.
 
 To disable the security labeling for this container versus running with the
-`--privileged` flag, use the following command:
+`--permissive` flag, use the following command:
 
     $ docker run --security-opt label=disable -it fedora bash
 
@@ -1137,30 +1138,11 @@ This can be overridden using a third `:rwm` set of options to each `--device` fl
 
 In addition to `--privileged`, the operator can have fine grain control over the
 capabilities using `--cap-add` and `--cap-drop`. By default, Docker has a default
-list of capabilities that are kept. The following table lists the Linux capability
-options which are allowed by default and can be dropped.
+list of capabilities that are kept. The following table lists the Linux capability options which can be added or dropped.
 
 | Capability Key   | Capability Description                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | SETPCAP          | Modify process capabilities.                                                                                                  |
-| MKNOD            | Create special files using mknod(2).                                                                                          |
-| AUDIT_WRITE      | Write records to kernel auditing log.                                                                                         |
-| CHOWN            | Make arbitrary changes to file UIDs and GIDs (see chown(2)).                                                                  |
-| NET_RAW          | Use RAW and PACKET sockets.                                                                                                   |
-| DAC_OVERRIDE     | Bypass file read, write, and execute permission checks.                                                                       |
-| FOWNER           | Bypass permission checks on operations that normally require the file system UID of the process to match the UID of the file. |
-| FSETID           | Don't clear set-user-ID and set-group-ID permission bits when a file is modified.                                             |
-| KILL             | Bypass permission checks for sending signals.                                                                                 |
-| SETGID           | Make arbitrary manipulations of process GIDs and supplementary GID list.                                                      |
-| SETUID           | Make arbitrary manipulations of process UIDs.                                                                                 |
-| NET_BIND_SERVICE | Bind a socket to internet domain privileged ports (port numbers less than 1024).                                              |
-| SYS_CHROOT       | Use chroot(2), change root directory.                                                                                         |
-| SETFCAP          | Set file capabilities.                                                                                                        |
-
-The next table shows the capabilities which are not granted by default and may be added.
-
-| Capability Key   | Capability Description                                                                                                        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | SYS_MODULE       | Load and unload kernel modules.                                                                                               |
 | SYS_RAWIO        | Perform I/O port operations (iopl(2) and ioperm(2)).                                                                          |
 | SYS_PACCT        | Use acct(2), switch process accounting on or off.                                                                             |
@@ -1169,23 +1151,36 @@ The next table shows the capabilities which are not granted by default and may b
 | SYS_RESOURCE     | Override resource Limits.                                                                                                     |
 | SYS_TIME         | Set system clock (settimeofday(2), stime(2), adjtimex(2)); set real-time (hardware) clock.                                    |
 | SYS_TTY_CONFIG   | Use vhangup(2); employ various privileged ioctl(2) operations on virtual terminals.                                           |
+| MKNOD            | Create special files using mknod(2).                                                                                          |
+| AUDIT_WRITE      | Write records to kernel auditing log.                                                                                         |
 | AUDIT_CONTROL    | Enable and disable kernel auditing; change auditing filter rules; retrieve auditing status and filtering rules.               |
 | MAC_OVERRIDE     | Allow MAC configuration or state changes. Implemented for the Smack LSM.                                                      |
 | MAC_ADMIN        | Override Mandatory Access Control (MAC). Implemented for the Smack Linux Security Module (LSM).                               |
 | NET_ADMIN        | Perform various network-related operations.                                                                                   |
 | SYSLOG           | Perform privileged syslog(2) operations.                                                                                      |
+| CHOWN            | Make arbitrary changes to file UIDs and GIDs (see chown(2)).                                                                  |
+| NET_RAW          | Use RAW and PACKET sockets.                                                                                                   |
+| DAC_OVERRIDE     | Bypass file read, write, and execute permission checks.                                                                       |
+| FOWNER           | Bypass permission checks on operations that normally require the file system UID of the process to match the UID of the file. |
 | DAC_READ_SEARCH  | Bypass file read permission checks and directory read and execute permission checks.                                          |
+| FSETID           | Don't clear set-user-ID and set-group-ID permission bits when a file is modified.                                             |
+| KILL             | Bypass permission checks for sending signals.                                                                                 |
+| SETGID           | Make arbitrary manipulations of process GIDs and supplementary GID list.                                                      |
+| SETUID           | Make arbitrary manipulations of process UIDs.                                                                                 |
 | LINUX_IMMUTABLE  | Set the FS_APPEND_FL and FS_IMMUTABLE_FL i-node flags.                                                                        |
+| NET_BIND_SERVICE | Bind a socket to internet domain privileged ports (port numbers less than 1024).                                              |
 | NET_BROADCAST    | Make socket broadcasts, and listen to multicasts.                                                                             |
 | IPC_LOCK         | Lock memory (mlock(2), mlockall(2), mmap(2), shmctl(2)).                                                                      |
 | IPC_OWNER        | Bypass permission checks for operations on System V IPC objects.                                                              |
+| SYS_CHROOT       | Use chroot(2), change root directory.                                                                                         |
 | SYS_PTRACE       | Trace arbitrary processes using ptrace(2).                                                                                    |
 | SYS_BOOT         | Use reboot(2) and kexec_load(2), reboot and load a new kernel for later execution.                                            |
 | LEASE            | Establish leases on arbitrary files (see fcntl(2)).                                                                           |
+| SETFCAP          | Set file capabilities.                                                                                                        |
 | WAKE_ALARM       | Trigger something that will wake up the system.                                                                               |
-| BLOCK_SUSPEND    | Employ features that can block system suspend.                                                                                |
+| BLOCK_SUSPEND    | Employ features that can block system suspend.                                                                                 
 
-Further reference information is available on the [capabilities(7) - Linux man page](http://man7.org/linux/man-pages/man7/capabilities.7.html)
+Further reference information is available on the [capabilities(7) - Linux man page](http://linux.die.net/man/7/capabilities)
 
 Both flags support the value `ALL`, so if the
 operator wants to have all capabilities but `MKNOD` they could use:
@@ -1227,10 +1222,6 @@ use of facilities allowed by the capabilities, so you should not have to adjust 
 since Docker 1.12. In Docker 1.10 and 1.11 this did not happen and it may be necessary
 to use a custom seccomp profile or use `--security-opt seccomp=unconfined` when adding
 capabilities.
-
-It is only possible to grant capabilities to a container running as a user other than `root`
-on a system with a Linux kernel version of 4.3 or later, as this requires "ambient capabilities"
-to be granted. These will be added if the kernel allows it from Docker version 1.13.
 
 ## Logging drivers (--log-driver)
 
@@ -1374,7 +1365,7 @@ If the operator uses `--link` when starting a new client container in the
 default bridge network, then the client container can access the exposed
 port via a private networking interface.
 If `--link` is used when starting a container in a user-defined network as
-described in [*Docker network overview*](../userguide/networking/index.md),
+described in [*Docker network overview*](../userguide/networking/index.md)),
 it will provide a named alias for the container being linked to.
 
 ### ENV (environment variables)
@@ -1382,12 +1373,34 @@ it will provide a named alias for the container being linked to.
 When a new container is created, Docker will set the following environment
 variables automatically:
 
-| Variable | Value |
-| -------- | ----- |
-| `HOME` | Set based on the value of `USER` |
-| `HOSTNAME` | The hostname associated with the container |
-| `PATH` | Includes popular directories, such as `:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` |
-| `TERM` | `xterm` if the container is allocated a pseudo-TTY |
+<table>
+ <tr>
+  <th>Variable</th>
+  <th>Value</th>
+ </tr>
+ <tr>
+  <td><code>HOME</code></td>
+  <td>
+    Set based on the value of <code>USER</code>
+  </td>
+ </tr>
+ <tr>
+  <td><code>HOSTNAME</code></td>
+  <td>
+    The hostname associated with the container
+  </td>
+ </tr>
+ <tr>
+  <td><code>PATH</code></td>
+  <td>
+    Includes popular directories, such as :<br>
+    <code>/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin</code>
+  </td>
+ <tr>
+  <td><code>TERM</code></td>
+  <td><code>xterm</code> if the container is allocated a pseudo-TTY</td>
+ </tr>
+</table>
 
 Additionally, the operator can **set any environment variable** in the
 container by using one or more `-e` flags, even overriding those mentioned
@@ -1416,7 +1429,6 @@ Similarly the operator can set the **hostname** with `-h`.
 
 Example:
 
-    {% raw %}
     $ docker run --name=test -d \
         --health-cmd='stat /etc/passwd || exit 1' \
         --health-interval=2s \
@@ -1461,7 +1473,6 @@ Example:
         }
       ]
     }
-    {% endraw %}
 
 The health status is also displayed in the `docker ps` output.
 

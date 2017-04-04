@@ -1,4 +1,4 @@
-// Copyright 2015 The etcd Authors
+// Copyright 2015 CoreOS, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,31 +15,65 @@
 package fileutil
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"time"
 )
 
-func TryLockFile(path string, flag int, perm os.FileMode) (*LockedFile, error) {
-	if err := os.Chmod(path, syscall.DMEXCL|PrivateFileMode); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path, flag, perm)
-	if err != nil {
-		return nil, ErrLocked
-	}
-	return &LockedFile{f}, nil
+var (
+	ErrLocked = errors.New("file already locked")
+)
+
+type lock struct {
+	fname string
+	file  *os.File
 }
 
-func LockFile(path string, flag int, perm os.FileMode) (*LockedFile, error) {
-	if err := os.Chmod(path, syscall.DMEXCL|PrivateFileMode); err != nil {
-		return nil, err
+func (l *lock) Name() string {
+	return l.fname
+}
+
+func (l *lock) TryLock() error {
+	err := os.Chmod(l.fname, syscall.DMEXCL|0600)
+	if err != nil {
+		return err
 	}
+
+	f, err := os.Open(l.fname)
+	if err != nil {
+		return ErrLocked
+	}
+
+	l.file = f
+	return nil
+}
+
+func (l *lock) Lock() error {
+	err := os.Chmod(l.fname, syscall.DMEXCL|0600)
+	if err != nil {
+		return err
+	}
+
 	for {
-		f, err := os.OpenFile(path, flag, perm)
+		f, err := os.Open(l.fname)
 		if err == nil {
-			return &LockedFile{f}, nil
+			l.file = f
+			return nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func (l *lock) Unlock() error {
+	return l.file.Close()
+}
+
+func (l *lock) Destroy() error {
+	return nil
+}
+
+func NewLock(file string) (Lock, error) {
+	l := &lock{fname: file}
+	return l, nil
 }

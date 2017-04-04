@@ -281,46 +281,15 @@ message UpdateConfig {
 	enum FailureAction {
 		PAUSE = 0;
 		CONTINUE = 1;
-		// NOTE: Automated rollback triggered as a failure action is an
-		// experimental feature that is not yet exposed to the end
-		// user. Currently, rollbacks must be initiated manually
-		// through the API by setting Spec to PreviousSpec. We may
-		// decide to expose automatic rollback in the future based on
-		// user feedback, or remove this feature otherwise.
-		ROLLBACK = 2;
+		// TODO(aaronl): Add ROLLBACK as a supported failure mode.
+		// (#486)
 	}
 
 	// FailureAction is the action to take when an update failures.
+	// Currently, a failure is defined as a single updated task failing to
+	// reach the RUNNING state. In the future, there will be configuration
+	// to define what is treated as a failure (see #486 for a proposal).
 	FailureAction failure_action = 3;
-
-	// Monitor indicates how long to monitor a task for failure after it is
-	// created. If the task fails by ending up in one of the states
-	// REJECTED, COMPLETED, or FAILED, within Monitor from its creation,
-	// this counts as a failure. If it fails after Monitor, it does not
-	// count as a failure. If Monitor is unspecified, a default value will
-	// be used.
-	Duration monitor = 4;
-
-	// MaxFailureRatio is the fraction of tasks that may fail during
-	// an update before the failure action is invoked. Any task created by
-	// the current update which ends up in one of the states REJECTED,
-	// COMPLETED or FAILED within Monitor from its creation counts as a
-	// failure. The number of failures is divided by the number of tasks
-	// being updated, and if this fraction is greater than
-	// MaxFailureRatio, the failure action is invoked.
-	//
-	// If the failure action is CONTINUE, there is no effect.
-	// If the failure action is PAUSE, no more tasks will be updated until
-	// another update is started.
-	// If the failure action is ROLLBACK, the orchestrator will attempt to
-	// roll back to the previous service spec. If the MaxFailureRatio
-	// threshold is hit during the rollback, the rollback will pause.
-	//
-	// TODO(aaronl): Should there be a separate failure threshold for
-	// rollbacks? Should there be a failure action for rollbacks (to allow
-	// them to do something other than pause when the rollback encounters
-	// errors)?
-	float max_failure_ratio = 5;
 }
 
 // UpdateStatus is the status of an update in progress.
@@ -330,21 +299,18 @@ message UpdateStatus {
 		UPDATING = 1;
 		PAUSED = 2;
 		COMPLETED = 3;
-		ROLLBACK_STARTED = 4;
-		ROLLBACK_PAUSED = 5; // if a rollback fails
-		ROLLBACK_COMPLETED = 6;
+		// TODO(aaronl): add ROLLING_BACK, ROLLED_BACK as part of
+		// rollback support.
 	}
 
 	// State is the state of this update. It indicates whether the
-	// update is in progress, completed, paused, rolling back, or
-	// finished rolling back.
+	// update is in progress, completed, or is paused.
 	UpdateState state = 1;
 
 	// StartedAt is the time at which the update was started.
 	Timestamp started_at = 2;
 
-	// CompletedAt is the time at which the update completed successfully,
-	// paused, or finished rolling back.
+	// CompletedAt is the time at which the update completed.
 	Timestamp completed_at = 3;
 
 	// TODO(aaronl): Consider adding a timestamp showing when the most
@@ -439,23 +405,6 @@ message TaskStatus {
 	oneof runtime_status {
 		ContainerStatus container = 5;
 	}
-}
-
-// NetworkAttachmentConfig specifies how a service should be attached to a particular network.
-//
-// For now, this is a simple struct, but this can include future information
-// instructing Swarm on how this service should work on the particular
-// network.
-message NetworkAttachmentConfig {
-	// Target specifies the target network for attachment. This value must be a
-	// network ID.
-	string target = 1;
-	// Aliases specifies a list of discoverable alternate names for the service on this Target.
-	repeated string aliases = 2;
-	// Addresses specifies a list of ipv4 and ipv6 addresses
-	// preferred. If these addresses are not available then the
-	// attachment might fail.
-	repeated string addresses = 3;
 }
 
 // IPAMConfig specifies parameters for IP Address Management.
@@ -746,43 +695,4 @@ message ManagerStatus {
 
 	// Reachability specifies whether this node is reachable.
 	RaftMemberStatus.Reachability reachability = 4;
-}
-
-// SecretReference is the linkage between a service and a secret that it uses.
-message SecretReference {
-	// SecretID represents the ID of the specific Secret that we're
-	// referencing. This identifier exists so that SecretReferences don't leak
-	// any information about the secret contents.
-	string secret_id = 1 [(gogoproto.customname) = "SecretID"];
-
-	// Mode specifies how this secret should be exposed to the task.
-	enum Mode {
-		// SYSTEM means that it is not exposed inside to a task at all, but
-		// only available via direct access, usually at the agent-level
-		SYSTEM = 0;
-		// FILE means that it will be exposed to the task as a file
-		FILE = 1;
-		// ENV means that it will be exposed to the task as an environment variable
-		ENV = 2;
-	}
-
-	// Mode is the way the secret should be presented.
-	Mode mode = 2;
-
-	// Target is the name by which the image accesses the secret.
-	string target = 3;
-
-	// SecretName is the name of the secret that this references, but this is just provided for
-	// lookup/display purposes.  The secret in the reference will be identified by its ID.
-	string secret_name = 4;
-}
-
-// RemovedNode is a record for a node that has been removed from the swarm.
-message RemovedNode {
-	// ID is the ID of the removed node.
-	string id = 1 [(gogoproto.customname) = "ID"];
-
-	// Expiry is the latest known expiration time of a certificate that
-	// was issued to this node.
-	Timestamp expiry = 2;
 }

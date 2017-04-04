@@ -16,7 +16,6 @@ docker-build - Build a new image from the source code at PATH
 [**--label**[=*[]*]]
 [**--no-cache**]
 [**--pull**]
-[**--compress**]
 [**-q**|**--quiet**]
 [**--rm**[=*true*]]
 [**-t**|**--tag**[=*[]*]]
@@ -84,9 +83,6 @@ set as the **URL**, the repository is cloned locally and then sent as the contex
 
 **--pull**=*true*|*false*
    Always attempt to pull a newer version of the image. The default is *false*.
-
-**--compress**=*true*|*false*
-    Compress the build context using gzip. The default is *false*.
 
 **-q**, **--quiet**=*true*|*false*
    Suppress the build output and print image ID on success. The default is *false*.
@@ -203,7 +199,7 @@ Cgroups are created if they do not already exist.
   Ulimit options
 
   For more information about `ulimit` see [Setting ulimits in a 
-container](https://docs.docker.com/engine/reference/commandline/run/#set-ulimits-in-container---ulimit)
+container](https://docs.docker.com/reference/commandline/run/#setting-ulimits-in-a-container)
 
 # EXAMPLES
 

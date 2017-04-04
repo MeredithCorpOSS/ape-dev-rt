@@ -4,7 +4,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -48,7 +47,7 @@ func (s *DockerSuite) TestEventsRedirectStdout(c *check.C) {
 }
 
 func (s *DockerSuite) TestEventsOOMDisableFalse(c *check.C) {
-	testRequires(c, DaemonIsLinux, oomControl, memoryLimitSupport, swapMemorySupport)
+	testRequires(c, DaemonIsLinux, oomControl, memoryLimitSupport, NotGCCGO, swapMemorySupport)
 
 	errChan := make(chan error)
 	go func() {
@@ -78,7 +77,7 @@ func (s *DockerSuite) TestEventsOOMDisableFalse(c *check.C) {
 }
 
 func (s *DockerSuite) TestEventsOOMDisableTrue(c *check.C) {
-	testRequires(c, DaemonIsLinux, oomControl, memoryLimitSupport, NotArm, swapMemorySupport)
+	testRequires(c, DaemonIsLinux, oomControl, memoryLimitSupport, NotGCCGO, NotArm, swapMemorySupport)
 
 	errChan := make(chan error)
 	observer, err := newEventObserver(c)
@@ -141,27 +140,36 @@ func (s *DockerSuite) TestEventsContainerFilterByName(c *check.C) {
 // #18453
 func (s *DockerSuite) TestEventsContainerFilterBeforeCreate(c *check.C) {
 	testRequires(c, DaemonIsLinux)
-	buf := &bytes.Buffer{}
-	cmd := exec.Command(dockerBinary, "events", "-f", "container=foo", "--since=0")
-	cmd.Stdout = buf
-	c.Assert(cmd.Start(), check.IsNil)
-	defer cmd.Wait()
-	defer cmd.Process.Kill()
+	var (
+		out string
+		ch  chan struct{}
+	)
+	ch = make(chan struct{})
 
-	// Sleep for a second to make sure we are testing the case where events are listened before container starts.
-	time.Sleep(time.Second)
-	id, _ := dockerCmd(c, "run", "--name=foo", "-d", "busybox", "top")
+	// calculate the time it takes to create and start a container and sleep 2 seconds
+	// this is to make sure the docker event will recevie the event of container
+	since := daemonTime(c)
+	id, _ := dockerCmd(c, "run", "-d", "busybox", "top")
 	cID := strings.TrimSpace(id)
-	for i := 0; ; i++ {
-		out := buf.String()
-		if strings.Contains(out, cID) {
-			break
-		}
-		if i > 30 {
-			c.Fatalf("Missing event of container (foo, %v), got %q", cID, out)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	waitRun(cID)
+	time.Sleep(2 * time.Second)
+	duration := daemonTime(c).Sub(since)
+
+	go func() {
+		// start events and wait for future events to
+		// make sure the new container shows up even when
+		// the event stream was created before the container.
+		t := daemonTime(c).Add(2 * duration)
+		out, _ = dockerCmd(c, "events", "-f", "container=foo", "--since=0", "--until", parseEventTime(t))
+		close(ch)
+	}()
+	// Sleep 2 second to wait docker event to start
+	time.Sleep(2 * time.Second)
+	id, _ = dockerCmd(c, "run", "--name=foo", "-d", "busybox", "top")
+	cID = strings.TrimSpace(id)
+	waitRun(cID)
+	<-ch
+	c.Assert(out, checker.Contains, cID, check.Commentf("Missing event of container (foo)"))
 }
 
 func (s *DockerSuite) TestVolumeEvents(c *check.C) {
@@ -170,7 +178,7 @@ func (s *DockerSuite) TestVolumeEvents(c *check.C) {
 	since := daemonUnixTime(c)
 
 	// Observe create/mount volume actions
-	dockerCmd(c, "volume", "create", "test-event-volume-local")
+	dockerCmd(c, "volume", "create", "--name", "test-event-volume-local")
 	dockerCmd(c, "run", "--name", "test-volume-container", "--volume", "test-event-volume-local:/foo", "-d", "busybox", "true")
 	waitRun("test-volume-container")
 
@@ -347,7 +355,7 @@ func (s *DockerSuite) TestEventsFilterVolumeAndNetworkType(c *check.C) {
 	since := daemonUnixTime(c)
 
 	dockerCmd(c, "network", "create", "test-event-network-type")
-	dockerCmd(c, "volume", "create", "test-event-volume-type")
+	dockerCmd(c, "volume", "create", "--name", "test-event-volume-type")
 
 	out, _ := dockerCmd(c, "events", "--filter", "type=volume", "--filter", "type=network", "--since", since, "--until", daemonUnixTime(c))
 	events := strings.Split(strings.TrimSpace(out), "\n")
@@ -365,7 +373,7 @@ func (s *DockerSuite) TestEventsFilterVolumeID(c *check.C) {
 
 	since := daemonUnixTime(c)
 
-	dockerCmd(c, "volume", "create", "test-event-volume-id")
+	dockerCmd(c, "volume", "create", "--name", "test-event-volume-id")
 	out, _ := dockerCmd(c, "events", "--filter", "volume=test-event-volume-id", "--since", since, "--until", daemonUnixTime(c))
 	events := strings.Split(strings.TrimSpace(out), "\n")
 	c.Assert(events, checker.HasLen, 1)
@@ -418,7 +426,7 @@ func (s *DockerDaemonSuite) TestDaemonEvents(c *check.C) {
 
 	configFile, err = os.Create(configFilePath)
 	c.Assert(err, checker.IsNil)
-	daemonConfig = `{"max-concurrent-downloads":1,"labels":["bar=foo"], "shutdown-timeout": 10}`
+	daemonConfig = `{"max-concurrent-downloads":1,"labels":["bar=foo"]}`
 	fmt.Fprintf(configFile, "%s", daemonConfig)
 	configFile.Close()
 
@@ -429,7 +437,7 @@ func (s *DockerDaemonSuite) TestDaemonEvents(c *check.C) {
 	out, err = s.d.Cmd("events", "--since=0", "--until", daemonUnixTime(c))
 	c.Assert(err, checker.IsNil)
 
-	c.Assert(out, checker.Contains, fmt.Sprintf("daemon reload %s (cluster-advertise=, cluster-store=, cluster-store-opts={}, debug=true, default-runtime=runc, insecure-registries=[], labels=[\"bar=foo\"], live-restore=false, max-concurrent-downloads=1, max-concurrent-uploads=5, name=%s, runtimes=runc:{docker-runc []}, shutdown-timeout=10)", daemonID, daemonName))
+	c.Assert(out, checker.Contains, fmt.Sprintf("daemon reload %s (cluster-advertise=, cluster-store=, cluster-store-opts={}, debug=true, default-runtime=runc, labels=[\"bar=foo\"], live-restore=false, max-concurrent-downloads=1, max-concurrent-uploads=5, name=%s, runtimes=runc:{docker-runc []})", daemonID, daemonName))
 }
 
 func (s *DockerDaemonSuite) TestDaemonEventsWithFilters(c *check.C) {

@@ -213,7 +213,14 @@ func (r *Module) Id() string {
 
 // Count returns the count of this resource.
 func (r *Resource) Count() (int, error) {
-	v, err := strconv.ParseInt(r.RawCount.Value().(string), 0, 0)
+	raw := r.RawCount.Value()
+	count, ok := r.RawCount.Value().(string)
+	if !ok {
+		return 0, fmt.Errorf(
+			"expected count to be a string or int, got %T", raw)
+	}
+
+	v, err := strconv.ParseInt(count, 0, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -552,15 +559,6 @@ func (c *Config) Validate() error {
 
 		// Validate DependsOn
 		errs = append(errs, c.validateDependsOn(n, r.DependsOn, resources, modules)...)
-
-		// Verify provider points to a provider that is configured
-		if r.Provider != "" {
-			if _, ok := providerSet[r.Provider]; !ok {
-				errs = append(errs, fmt.Errorf(
-					"%s: resource depends on non-configured provider '%s'",
-					n, r.Provider))
-			}
-		}
 
 		// Verify provisioners don't contain any splats
 		for _, p := range r.Provisioners {
@@ -915,7 +913,10 @@ func (o *Output) mergerMerge(m merger) merger {
 
 	result := *o
 	result.Name = o2.Name
+	result.Description = o2.Description
 	result.RawConfig = result.RawConfig.merge(o2.RawConfig)
+	result.Sensitive = o2.Sensitive
+	result.DependsOn = o2.DependsOn
 
 	return &result
 }
@@ -942,6 +943,10 @@ func (c *ProviderConfig) mergerMerge(m merger) merger {
 	result := *c
 	result.Name = c2.Name
 	result.RawConfig = result.RawConfig.merge(c2.RawConfig)
+
+	if c2.Alias != "" {
+		result.Alias = c2.Alias
+	}
 
 	return &result
 }
@@ -978,6 +983,9 @@ func (v *Variable) Merge(v2 *Variable) *Variable {
 	// The names should be the same, but the second name always wins.
 	result.Name = v2.Name
 
+	if v2.DeclaredType != "" {
+		result.DeclaredType = v2.DeclaredType
+	}
 	if v2.Default != nil {
 		result.Default = v2.Default
 	}

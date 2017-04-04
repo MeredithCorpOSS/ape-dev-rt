@@ -4,7 +4,6 @@ package ipamapi
 import (
 	"net"
 
-	"github.com/docker/docker/pkg/plugingetter"
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/types"
 )
@@ -26,11 +25,9 @@ const (
 
 // Callback provides a Callback interface for registering an IPAM instance into LibNetwork
 type Callback interface {
-	// GetPluginGetter returns the pluginv2 getter.
-	GetPluginGetter() plugingetter.PluginGetter
 	// RegisterIpamDriver provides a way for Remote drivers to dynamically register with libnetwork
 	RegisterIpamDriver(name string, driver Ipam) error
-	// RegisterIpamDriverWithCapabilities provides a way for Remote drivers to dynamically register with libnetwork and specify capabilities
+	// RegisterIpamDriverWithCapabilities provides a way for Remote drivers to dynamically register with libnetwork and specify cpaabilities
 	RegisterIpamDriverWithCapabilities(name string, driver Ipam, capability *Capability) error
 }
 
@@ -49,7 +46,6 @@ var (
 	ErrOverlapPool         = types.ForbiddenErrorf("Address pool overlaps with existing pool on this address space")
 	ErrNoAvailablePool     = types.NoServiceErrorf("No available pool")
 	ErrNoAvailableIPs      = types.NoServiceErrorf("No available addresses on this pool")
-	ErrNoIPReturned        = types.NoServiceErrorf("No address returned")
 	ErrIPAlreadyAllocated  = types.ForbiddenErrorf("Address already in use")
 	ErrIPOutOfRange        = types.BadRequestErrorf("Requested address is out of range")
 	ErrPoolOverlap         = types.ForbiddenErrorf("Pool overlaps with other one on this address space")

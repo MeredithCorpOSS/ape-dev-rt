@@ -67,3 +67,151 @@ func MockDeleteResponse(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	})
 }
+
+func MockListResponse(t *testing.T) {
+	th.Mux.HandleFunc("/types", func(w http.ResponseWriter, r *http.Request) {
+		th.TestMethod(t, r, "GET")
+		th.TestHeader(t, r, "X-Auth-Token", fake.TokenID)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		fmt.Fprintf(w, `
+        {
+            "volume_types": [
+                {
+                    "os-share-type-access:is_public": true,
+                    "required_extra_specs": {
+                        "driver_handles_share_servers": "True"
+                    },
+                    "extra_specs": {
+                        "snapshot_support": "True",
+                        "driver_handles_share_servers": "True"
+                    },
+                    "name": "default",
+                    "id": "be27425c-f807-4500-a056-d00721db45cf"
+                },
+                {
+                    "os-share-type-access:is_public": true,
+                    "required_extra_specs": {
+                        "driver_handles_share_servers": "false"
+                    },
+                    "extra_specs": {
+                        "snapshot_support": "True",
+                        "driver_handles_share_servers": "false"
+                    },
+                    "name": "d",
+                    "id": "f015bebe-c38b-4c49-8832-00143b10253b"
+                }
+            ],
+            "share_types": [
+                {
+                    "os-share-type-access:is_public": true,
+                    "required_extra_specs": {
+                        "driver_handles_share_servers": "True"
+                    },
+                    "extra_specs": {
+                        "snapshot_support": "True",
+                        "driver_handles_share_servers": "True"
+                    },
+                    "name": "default",
+                    "id": "be27425c-f807-4500-a056-d00721db45cf"
+                },
+                {
+                    "os-share-type-access:is_public": true,
+                    "required_extra_specs": {
+                        "driver_handles_share_servers": "false"
+                    },
+                    "extra_specs": {
+                        "snapshot_support": "True",
+                        "driver_handles_share_servers": "false"
+                    },
+                    "name": "d",
+                    "id": "f015bebe-c38b-4c49-8832-00143b10253b"
+                }
+            ]
+        }`)
+	})
+}
+
+func MockGetDefaultResponse(t *testing.T) {
+	th.Mux.HandleFunc("/types/default", func(w http.ResponseWriter, r *http.Request) {
+		th.TestMethod(t, r, "GET")
+		th.TestHeader(t, r, "X-Auth-Token", fake.TokenID)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `
+        {
+            "volume_type": {
+                "required_extra_specs": null,
+                "extra_specs": {
+                    "snapshot_support": "True",
+                    "driver_handles_share_servers": "True"
+                },
+                "name": "default",
+                "id": "be27425c-f807-4500-a056-d00721db45cf"
+            },
+            "share_type": {
+                "required_extra_specs": null,
+                "extra_specs": {
+                    "snapshot_support": "True",
+                    "driver_handles_share_servers": "True"
+                },
+                "name": "default",
+                "id": "be27425c-f807-4500-a056-d00721db45cf"
+            }
+        }`)
+	})
+}
+
+func MockGetExtraSpecsResponse(t *testing.T) {
+	th.Mux.HandleFunc("/types/shareTypeID/extra_specs", func(w http.ResponseWriter, r *http.Request) {
+		th.TestMethod(t, r, "GET")
+		th.TestHeader(t, r, "X-Auth-Token", fake.TokenID)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `
+        {
+            "extra_specs": {
+                "snapshot_support": "True",
+                "driver_handles_share_servers": "True",
+                "my_custom_extra_spec": "False"
+            }
+        }`)
+	})
+}
+
+func MockSetExtraSpecsResponse(t *testing.T) {
+	th.Mux.HandleFunc("/types/shareTypeID/extra_specs", func(w http.ResponseWriter, r *http.Request) {
+		th.TestMethod(t, r, "POST")
+		th.TestHeader(t, r, "X-Auth-Token", fake.TokenID)
+		th.TestHeader(t, r, "Content-Type", "application/json")
+		th.TestHeader(t, r, "Accept", "application/json")
+		th.TestJSONRequest(t, r, `
+        {
+            "extra_specs": {
+                "my_key": "my_value"
+            }
+        }`)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+
+		fmt.Fprintf(w, `
+        {
+            "extra_specs": {
+                "my_key": "my_value"
+            }
+        }`)
+	})
+}
+
+func MockUnsetExtraSpecsResponse(t *testing.T) {
+	th.Mux.HandleFunc("/types/shareTypeID/extra_specs/my_key", func(w http.ResponseWriter, r *http.Request) {
+		th.TestMethod(t, r, "DELETE")
+		th.TestHeader(t, r, "X-Auth-Token", fake.TokenID)
+		w.WriteHeader(http.StatusAccepted)
+	})
+}

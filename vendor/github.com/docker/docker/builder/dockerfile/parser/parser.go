@@ -61,7 +61,7 @@ func SetEscapeToken(s string, d *Directive) error {
 		return fmt.Errorf("invalid ESCAPE '%s'. Must be ` or \\", s)
 	}
 	d.EscapeToken = rune(s[0])
-	d.LineContinuationRegex = regexp.MustCompile(`\` + s + `$`)
+	d.LineContinuationRegex = regexp.MustCompile(`\` + s + `[ \t]*$`)
 	return nil
 }
 
@@ -94,7 +94,7 @@ func init() {
 	}
 }
 
-// ParseLine parses a line and returns the remainder.
+// ParseLine parse a line and return the remainder.
 func ParseLine(line string, d *Directive) (string, *Node, error) {
 	// Handle the parser directive '# escape=<char>. Parser directives must precede
 	// any builder instruction or other comments, and cannot be repeated.

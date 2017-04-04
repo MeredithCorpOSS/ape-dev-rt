@@ -17,6 +17,7 @@ limitations under the License.
 package storage
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +29,6 @@ import (
 	"github.com/vmware/govmomi/units"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 var infoTypes = []string{"hba", "lun"}
@@ -67,7 +67,9 @@ type info struct {
 	*flags.HostSystemFlag
 	*flags.OutputFlag
 
-	typ infoType
+	typ       infoType
+	rescan    bool
+	unclaimed bool
 }
 
 func init() {
@@ -86,6 +88,16 @@ func (cmd *info) Register(ctx context.Context, f *flag.FlagSet) {
 	}
 
 	f.Var(&cmd.typ, "t", fmt.Sprintf("Type (%s)", strings.Join(infoTypes, ",")))
+
+	f.BoolVar(&cmd.rescan, "rescan", false, "Rescan for new storage devices")
+	f.BoolVar(&cmd.unclaimed, "unclaimed", false, "Only show disks that can be used as new VMFS datastores")
+}
+
+func (cmd *info) Description() string {
+	return `Show HOST storage system information.
+
+Examples:
+  govc ls -t HostSystem host/* | xargs -n1 govc host.storage.info -unclaimed -host`
 }
 
 func (cmd *info) Process(ctx context.Context) error {
@@ -96,14 +108,6 @@ func (cmd *info) Process(ctx context.Context) error {
 		return err
 	}
 	return nil
-}
-
-func (cmd *info) Usage() string {
-	return "[-t TYPE]"
-}
-
-func (cmd *info) Description() string {
-	return `Show information about a host's storage system.`
 }
 
 func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
@@ -117,10 +121,35 @@ func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
 		return err
 	}
 
+	if cmd.rescan {
+		err = ss.RescanAllHba(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	var hss mo.HostStorageSystem
 	err = ss.Properties(ctx, ss.Reference(), nil, &hss)
 	if err != nil {
 		return nil
+	}
+
+	if cmd.unclaimed {
+		ds, err := host.ConfigManager().DatastoreSystem(ctx)
+		if err != nil {
+			return err
+		}
+
+		disks, err := ds.QueryAvailableDisksForVmfs(ctx)
+		if err != nil {
+			return err
+		}
+
+		var luns []types.BaseScsiLun
+		for i := range disks {
+			luns = append(luns, &disks[i])
+		}
+		hss.StorageDeviceInfo.ScsiLun = luns
 	}
 
 	return cmd.WriteResult(cmd.typ.Result(hss))
@@ -164,11 +193,18 @@ func (r lunResult) Write(w io.Writer) error {
 	fmt.Fprintf(tw, "\n")
 
 	for _, e := range r.StorageDeviceInfo.ScsiLun {
+		var tags []string
 		var capacity int64
 
 		lun := e.GetScsiLun()
 		if disk, ok := e.(*types.HostScsiDisk); ok {
 			capacity = int64(disk.Capacity.Block) * int64(disk.Capacity.BlockSize)
+			if disk.LocalDisk != nil && *disk.LocalDisk {
+				tags = append(tags, "local")
+			}
+			if disk.Ssd != nil && *disk.Ssd {
+				tags = append(tags, "ssd")
+			}
 		}
 
 		fmt.Fprintf(tw, "%s\t", lun.DeviceName)
@@ -180,7 +216,10 @@ func (r lunResult) Write(w io.Writer) error {
 			fmt.Fprintf(tw, "%s\t", units.ByteSize(capacity))
 		}
 
-		fmt.Fprintf(tw, "%s\t", lun.Model)
+		fmt.Fprintf(tw, "%s", lun.Model)
+		if len(tags) > 0 {
+			fmt.Fprintf(tw, " (%s)", strings.Join(tags, ","))
+		}
 		fmt.Fprintf(tw, "\n")
 	}
 

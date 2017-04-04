@@ -9,11 +9,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/backend"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/reference"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/container"
 	"golang.org/x/net/context"
 )
 
@@ -124,7 +124,7 @@ type Backend interface {
 	// ContainerKill stops the container execution abruptly.
 	ContainerKill(containerID string, sig uint64) error
 	// ContainerStart starts a new container
-	ContainerStart(containerID string, hostConfig *container.HostConfig, validateHostname bool, checkpoint string) error
+	ContainerStart(containerID string, hostConfig *container.HostConfig, validateHostname bool) error
 	// ContainerWait stops processing until the given container is stopped.
 	ContainerWait(containerID string, timeout time.Duration) (int, error)
 	// ContainerUpdateCmdOnBuild updates container.Path and container.Args
@@ -146,16 +146,10 @@ type Image interface {
 	RunConfig() *container.Config
 }
 
-// ImageCacheBuilder represents a generator for stateful image cache.
-type ImageCacheBuilder interface {
-	// MakeImageCache creates a stateful image cache.
-	MakeImageCache(cacheFrom []string) ImageCache
-}
-
-// ImageCache abstracts an image cache.
+// ImageCache abstracts an image cache store.
 // (parent image, child runconfig) -> child image
 type ImageCache interface {
 	// GetCachedImageOnBuild returns a reference to a cached image whose parent equals `parent`
 	// and runconfig equals `cfg`. A cache miss is expected to return an empty ID and a nil error.
-	GetCache(parentID string, cfg *container.Config) (imageID string, err error)
+	GetCachedImageOnBuild(parentID string, cfg *container.Config) (imageID string, err error)
 }

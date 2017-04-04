@@ -25,14 +25,14 @@ func Test_ListNotifications(t *testing.T) {
 	events, resp, err := testClient.Notifications.Select(r, "")
 
 	if err != nil {
-		if resp.Response.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == 404 {
 			t.Logf("ERROR - %+v", err)
 			t.SkipNow()
 		}
 		t.Fatal(err)
 	}
 	t.Logf("Notifications: %+v \n", events)
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 // TODO: Write a full Notification test suite.  We do use these.

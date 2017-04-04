@@ -4,7 +4,9 @@ import (
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/go-check/check"
 
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -16,7 +18,7 @@ var (
 )
 
 func (s *DockerSuite) TestPluginBasicOps(c *check.C) {
-	testRequires(c, DaemonIsLinux, ExperimentalDaemon, Network)
+	testRequires(c, DaemonIsLinux, ExperimentalDaemon)
 	_, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", pNameWithTag)
 	c.Assert(err, checker.IsNil)
 
@@ -26,11 +28,21 @@ func (s *DockerSuite) TestPluginBasicOps(c *check.C) {
 	c.Assert(out, checker.Contains, pTag)
 	c.Assert(out, checker.Contains, "true")
 
-	id, _, err := dockerCmdWithError("plugin", "inspect", "-f", "{{.Id}}", pNameWithTag)
+	out, _, err = dockerCmdWithError("plugin", "inspect", pNameWithTag)
+	c.Assert(err, checker.IsNil)
+	tmpFile, err := ioutil.TempFile("", "inspect.json")
+	c.Assert(err, checker.IsNil)
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write([]byte(out)); err != nil {
+		c.Fatal(err)
+	}
+	// FIXME: When `docker plugin inspect` takes a format as input, jq can be replaced.
+	id, err := exec.Command("jq", ".Id", "--raw-output", tmpFile.Name()).CombinedOutput()
 	c.Assert(err, checker.IsNil)
 
 	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(out, checker.Contains, "is enabled")
+	c.Assert(out, checker.Contains, "is active")
 
 	_, _, err = dockerCmdWithError("plugin", "disable", pNameWithTag)
 	c.Assert(err, checker.IsNil)
@@ -39,54 +51,27 @@ func (s *DockerSuite) TestPluginBasicOps(c *check.C) {
 	c.Assert(err, checker.IsNil)
 	c.Assert(out, checker.Contains, pNameWithTag)
 
-	_, err = os.Stat(filepath.Join(dockerBasePath, "plugins", id))
+	_, err = os.Stat(filepath.Join(dockerBasePath, "plugins", string(id)))
 	if !os.IsNotExist(err) {
 		c.Fatal(err)
 	}
 }
 
 func (s *DockerSuite) TestPluginForceRemove(c *check.C) {
-	testRequires(c, DaemonIsLinux, ExperimentalDaemon, Network)
+	testRequires(c, DaemonIsLinux, ExperimentalDaemon)
 	out, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", pNameWithTag)
 	c.Assert(err, checker.IsNil)
 
 	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(out, checker.Contains, "is enabled")
+	c.Assert(out, checker.Contains, "is active")
 
 	out, _, err = dockerCmdWithError("plugin", "remove", "--force", pNameWithTag)
 	c.Assert(err, checker.IsNil)
 	c.Assert(out, checker.Contains, pNameWithTag)
 }
 
-func (s *DockerSuite) TestPluginActive(c *check.C) {
-	testRequires(c, DaemonIsLinux, ExperimentalDaemon, Network)
-	out, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-
-	out, _, err = dockerCmdWithError("volume", "create", "-d", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-
-	vID := strings.TrimSpace(out)
-
-	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(out, checker.Contains, "is in use")
-
-	_, _, err = dockerCmdWithError("volume", "rm", vID)
-	c.Assert(err, checker.IsNil)
-
-	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(out, checker.Contains, "is enabled")
-
-	_, _, err = dockerCmdWithError("plugin", "disable", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-
-	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-	c.Assert(out, checker.Contains, pNameWithTag)
-}
-
 func (s *DockerSuite) TestPluginInstallDisable(c *check.C) {
-	testRequires(c, DaemonIsLinux, ExperimentalDaemon, Network)
+	testRequires(c, DaemonIsLinux, ExperimentalDaemon)
 	out, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", "--disable", pName)
 	c.Assert(err, checker.IsNil)
 	c.Assert(strings.TrimSpace(out), checker.Contains, pName)
@@ -116,7 +101,7 @@ func (s *DockerSuite) TestPluginInstallImage(c *check.C) {
 }
 
 func (s *DockerSuite) TestPluginEnableDisableNegative(c *check.C) {
-	testRequires(c, DaemonIsLinux, ExperimentalDaemon, Network)
+	testRequires(c, DaemonIsLinux, ExperimentalDaemon)
 	out, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", pName)
 	c.Assert(err, checker.IsNil)
 	c.Assert(strings.TrimSpace(out), checker.Contains, pName)

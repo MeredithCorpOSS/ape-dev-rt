@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
@@ -111,6 +112,15 @@ func TestHelperProcess(*testing.T) {
 	cmd, args := args[0], args[1:]
 	switch cmd {
 	case "bad-version":
+		// If we have an arg, we write there on start
+		if len(args) > 0 {
+			path := args[0]
+			err := ioutil.WriteFile(path, []byte("foo"), 0644)
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		fmt.Printf("%d|%d1|tcp|:1234\n", CoreProtocolVersion, testHandshake.ProtocolVersion)
 		<-make(chan int)
 	case "invalid-rpc-address":
@@ -138,6 +148,24 @@ func TestHelperProcess(*testing.T) {
 		}
 
 		os.Exit(1)
+	case "cleanup":
+		// Create a defer to write the file. This tests that we get cleaned
+		// up properly versus just calling os.Exit
+		path := args[0]
+		defer func() {
+			err := ioutil.WriteFile(path, []byte("foo"), 0644)
+			if err != nil {
+				panic(err)
+			}
+		}()
+
+		Serve(&ServeConfig{
+			HandshakeConfig: testHandshake,
+			Plugins:         testPluginMap,
+		})
+
+		// Exit
+		return
 	case "test-interface":
 		Serve(&ServeConfig{
 			HandshakeConfig: testHandshake,

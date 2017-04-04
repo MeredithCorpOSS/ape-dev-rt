@@ -15,9 +15,6 @@ type Changelist interface {
 	// to save a copy of the changelist in that location
 	Clear(archive string) error
 
-	// Remove deletes the changes corresponding with the indices given
-	Remove(idxs []int) error
-
 	// Close syncronizes any pending writes to the underlying
 	// storage and closes the file/connection
 	Close() error

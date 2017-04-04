@@ -1,29 +1,23 @@
----
-title: "plugin inspect"
-description: "The plugin inspect command description and usage"
-keywords: ["plugin, inspect"]
-advisory: "experimental"
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "plugin inspect"
+description = "The plugin inspect command description and usage"
+keywords = ["plugin, inspect"]
+advisory = "experimental"
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # plugin inspect (experimental)
 
 ```markdown
-Usage:  docker plugin inspect [OPTIONS] PLUGIN [PLUGIN...]
+Usage:  docker plugin inspect PLUGIN
 
-Display detailed information on one or more plugins
+Inspect a plugin
 
 Options:
-      -f, --format string   Format the output using the given Go template
-          --help            Print usage
+      --help   Print usage
 ```
 
 Returns information about a plugin. By default, this command renders all results
@@ -39,7 +33,7 @@ $ docker plugin inspect tiborvass/no-remove:latest
   "Id": "8c74c978c434745c3ade82f1bc0acf38d04990eaf494fa507c16d9f1daa99c21",
   "Name": "tiborvass/no-remove",
   "Tag": "latest",
-  "Enabled": true,
+  "Active": true,
   "Config": {
     "Mounts": [
       {
@@ -143,13 +137,6 @@ $ docker plugin inspect tiborvass/no-remove:latest
 ```
 (output formatted for readability)
 
-
-```bash
-$ docker plugin inspect -f '{{.Id}}' tiborvass/no-remove:latest
-```
-```
-8c74c978c434745c3ade82f1bc0acf38d04990eaf494fa507c16d9f1daa99c21
-```
 
 
 ## Related information

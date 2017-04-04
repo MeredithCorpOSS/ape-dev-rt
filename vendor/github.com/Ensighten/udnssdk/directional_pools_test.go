@@ -176,11 +176,11 @@ func Test_GeoDirectionalPoolsService_Find_Live(t *testing.T) {
 	dp, resp, err := testClient.DirectionalPools.Geos().Find(p)
 
 	t.Logf("Test Get IP DPool Group (%s, %s)\n", testIPDPool.Name, testIPDPool)
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 	t.Logf("DPool: %+v\n", dp)
 	if err != nil {
 		t.Logf("GetDirectionalPoolIP Error: %+v\n", err)
-		if resp.Response.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == 404 {
 			return
 		}
 		t.Fatal(err)
@@ -253,12 +253,12 @@ func Test_GeoDirectionalPoolService_Delete_Live(t *testing.T) {
 
 	if err != nil {
 		t.Logf("DeleteDirectionalPoolIP Error: %+v\n", err)
-		if resp.Response.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == 404 {
 			return
 		}
 		t.Fatal(err)
 	}
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 func Test_GeoDirectionalPoolsService_Delete(t *testing.T) {
@@ -437,7 +437,7 @@ func Test_IPDirectionalPoolsService_Create_Live(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Response: %+v\n", resp.Response)
+	t.Logf("Response: %+v\n", resp)
 }
 
 func Test_IPDirectionalPoolsService_Create(t *testing.T) {

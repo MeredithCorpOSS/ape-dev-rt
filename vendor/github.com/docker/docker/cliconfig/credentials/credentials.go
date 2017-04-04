@@ -1,7 +1,7 @@
 package credentials
 
 import (
-	"github.com/docker/docker/api/types"
+	"github.com/docker/engine-api/types"
 )
 
 // Store is the interface that any credentials store must implement.

@@ -1,7 +1,7 @@
-// Protocol Buffers for Go with Gadgets
+// Extensions for Protocol Buffers to create more go like structures.
 //
-// Copyright (c) 2013, The GoGo Authors. All rights reserved.
-// http://github.com/gogo/protobuf
+// Copyright (c) 2013, Vastech SA (PTY) LTD. All rights reserved.
+// http://github.com/gogo/protobuf/gogoproto
 //
 // Go support for Protocol Buffers - Google's data interchange format
 //
@@ -50,7 +50,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
 )
 
 var (
@@ -160,7 +159,7 @@ func (w *textWriter) indent() { w.ind++ }
 
 func (w *textWriter) unindent() {
 	if w.ind == 0 {
-		log.Print("proto: textWriter unindented too far")
+		log.Printf("proto: textWriter unindented too far")
 		return
 	}
 	w.ind--
@@ -336,8 +335,7 @@ func writeStruct(w *textWriter, sv reflect.Value) error {
 				}
 				inner := fv.Elem().Elem() // interface -> *T -> T
 				tag := inner.Type().Field(0).Tag.Get("protobuf")
-				props = new(Properties) // Overwrite the outer props var, but not its pointee.
-				props.Parse(tag)
+				props.Parse(tag) // Overwrite the outer props.
 				// Write the value in the oneof, not the oneof itself.
 				fv = inner.Field(0)
 
@@ -388,7 +386,7 @@ func writeStruct(w *textWriter, sv reflect.Value) error {
 		pv = reflect.New(sv.Type())
 		pv.Elem().Set(sv)
 	}
-	if pv.Type().Implements(extensionRangeType) {
+	if pv.Type().Implements(extendableProtoType) {
 		if err := writeExtensions(w, pv); err != nil {
 			return err
 		}
@@ -636,37 +634,28 @@ func (s int32Slice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // pv is assumed to be a pointer to a protocol message struct that is extendable.
 func writeExtensions(w *textWriter, pv reflect.Value) error {
 	emap := extensionMaps[pv.Type().Elem()]
-	e := pv.Interface().(Message)
+	ep := pv.Interface().(extendableProto)
 
+	// Order the extensions by ID.
+	// This isn't strictly necessary, but it will give us
+	// canonical output, which will also make testing easier.
 	var m map[int32]Extension
-	var mu sync.Locker
-	if em, ok := e.(extensionsBytes); ok {
+	if em, ok := ep.(extensionsMap); ok {
+		m = em.ExtensionMap()
+	} else if em, ok := ep.(extensionsBytes); ok {
 		eb := em.GetExtensions()
 		var err error
 		m, err = BytesToExtensionsMap(*eb)
 		if err != nil {
 			return err
 		}
-		mu = notLocker{}
-	} else if _, ok := e.(extendableProto); ok {
-		ep, _ := extendable(e)
-		m, mu = ep.extensionsRead()
-		if m == nil {
-			return nil
-		}
 	}
 
-	// Order the extensions by ID.
-	// This isn't strictly necessary, but it will give us
-	// canonical output, which will also make testing easier.
-
-	mu.Lock()
 	ids := make([]int32, 0, len(m))
 	for id := range m {
 		ids = append(ids, id)
 	}
 	sort.Sort(int32Slice(ids))
-	mu.Unlock()
 
 	for _, extNum := range ids {
 		ext := m[extNum]
@@ -682,7 +671,7 @@ func writeExtensions(w *textWriter, pv reflect.Value) error {
 			continue
 		}
 
-		pb, err := GetExtension(e, desc)
+		pb, err := GetExtension(ep, desc)
 		if err != nil {
 			return fmt.Errorf("failed getting extension: %v", err)
 		}
@@ -738,14 +727,7 @@ func (w *textWriter) writeIndent() {
 	w.complete = false
 }
 
-// TextMarshaler is a configurable text format marshaler.
-type TextMarshaler struct {
-	Compact bool // use compact text format (one line).
-}
-
-// Marshal writes a given protocol buffer in text format.
-// The only errors returned are from w.
-func (m *TextMarshaler) Marshal(w io.Writer, pb Message) error {
+func marshalText(w io.Writer, pb Message, compact bool) error {
 	val := reflect.ValueOf(pb)
 	if pb == nil || val.IsNil() {
 		w.Write([]byte("<nil>"))
@@ -760,7 +742,7 @@ func (m *TextMarshaler) Marshal(w io.Writer, pb Message) error {
 	aw := &textWriter{
 		w:        ww,
 		complete: true,
-		compact:  m.Compact,
+		compact:  compact,
 	}
 
 	if tm, ok := pb.(encoding.TextMarshaler); ok {
@@ -787,29 +769,25 @@ func (m *TextMarshaler) Marshal(w io.Writer, pb Message) error {
 	return nil
 }
 
-// Text is the same as Marshal, but returns the string directly.
-func (m *TextMarshaler) Text(pb Message) string {
+// MarshalText writes a given protocol buffer in text format.
+// The only errors returned are from w.
+func MarshalText(w io.Writer, pb Message) error {
+	return marshalText(w, pb, false)
+}
+
+// MarshalTextString is the same as MarshalText, but returns the string directly.
+func MarshalTextString(pb Message) string {
 	var buf bytes.Buffer
-	m.Marshal(&buf, pb)
+	marshalText(&buf, pb, false)
 	return buf.String()
 }
 
-var (
-	defaultTextMarshaler = TextMarshaler{}
-	compactTextMarshaler = TextMarshaler{Compact: true}
-)
-
-// TODO: consider removing some of the Marshal functions below.
-
-// MarshalText writes a given protocol buffer in text format.
-// The only errors returned are from w.
-func MarshalText(w io.Writer, pb Message) error { return defaultTextMarshaler.Marshal(w, pb) }
-
-// MarshalTextString is the same as MarshalText, but returns the string directly.
-func MarshalTextString(pb Message) string { return defaultTextMarshaler.Text(pb) }
-
 // CompactText writes a given protocol buffer in compact text format (one line).
-func CompactText(w io.Writer, pb Message) error { return compactTextMarshaler.Marshal(w, pb) }
+func CompactText(w io.Writer, pb Message) error { return marshalText(w, pb, true) }
 
 // CompactTextString is the same as CompactText, but returns the string directly.
-func CompactTextString(pb Message) string { return compactTextMarshaler.Text(pb) }
+func CompactTextString(pb Message) string {
+	var buf bytes.Buffer
+	marshalText(&buf, pb, true)
+	return buf.String()
+}

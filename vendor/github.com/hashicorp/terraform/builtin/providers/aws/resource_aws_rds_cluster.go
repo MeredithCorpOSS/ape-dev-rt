@@ -64,16 +64,6 @@ func resourceAwsRDSCluster() *schema.Resource {
 				Computed: true,
 			},
 
-			// TODO: remove parameter_group_name
-			// See https://github.com/hashicorp/terraform/issues/7046
-			// Likely need migration to remove from state
-			"parameter_group_name": {
-				Type:       schema.TypeString,
-				Optional:   true,
-				Computed:   true,
-				Deprecated: "Use db_cluster_parameter_group_name instead. This attribute will be removed in a future version",
-			},
-
 			"db_cluster_parameter_group_name": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -135,8 +125,9 @@ func resourceAwsRDSCluster() *schema.Resource {
 			},
 
 			"master_password": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:      schema.TypeString,
+				Optional:  true,
+				Sensitive: true,
 			},
 
 			"snapshot_identifier": {
@@ -170,9 +161,10 @@ func resourceAwsRDSCluster() *schema.Resource {
 			},
 
 			"preferred_backup_window": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: validateOnceADayWindowFormat,
 			},
 
 			"preferred_maintenance_window": {
@@ -185,6 +177,7 @@ func resourceAwsRDSCluster() *schema.Resource {
 					}
 					return strings.ToLower(val.(string))
 				},
+				ValidateFunc: validateOnceAWeekWindowFormat,
 			},
 
 			"backup_retention_period": {
@@ -298,11 +291,11 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 		}
 	} else {
 		if _, ok := d.GetOk("master_password"); !ok {
-			return fmt.Errorf(`provider.aws: aws_rds_cluster: %s: "master_password": required field is not set`, d.Get("name").(string))
+			return fmt.Errorf(`provider.aws: aws_rds_cluster: %s: "master_password": required field is not set`, d.Get("database_name").(string))
 		}
 
 		if _, ok := d.GetOk("master_username"); !ok {
-			return fmt.Errorf(`provider.aws: aws_rds_cluster: %s: "master_username": required field is not set`, d.Get("name").(string))
+			return fmt.Errorf(`provider.aws: aws_rds_cluster: %s: "master_username": required field is not set`, d.Get("database_name").(string))
 		}
 
 		createOpts := &rds.CreateDBClusterInput{
@@ -324,10 +317,6 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 
 		if attr, ok := d.GetOk("db_subnet_group_name"); ok {
 			createOpts.DBSubnetGroupName = aws.String(attr.(string))
-		}
-
-		if attr, ok := d.GetOk("parameter_group_name"); ok {
-			createOpts.DBClusterParameterGroupName = aws.String(attr.(string))
 		}
 
 		if attr, ok := d.GetOk("db_cluster_parameter_group_name"); ok {
@@ -438,7 +427,6 @@ func resourceAwsRDSClusterRead(d *schema.ResourceData, meta interface{}) error {
 
 	d.Set("cluster_identifier", dbc.DBClusterIdentifier)
 	d.Set("db_subnet_group_name", dbc.DBSubnetGroup)
-	d.Set("parameter_group_name", dbc.DBClusterParameterGroup)
 	d.Set("db_cluster_parameter_group_name", dbc.DBClusterParameterGroup)
 	d.Set("endpoint", dbc.Endpoint)
 	d.Set("engine", dbc.Engine)
@@ -518,12 +506,6 @@ func resourceAwsRDSClusterUpdate(d *schema.ResourceData, meta interface{}) error
 		requestUpdate = true
 	}
 
-	if d.HasChange("parameter_group_name") {
-		d.SetPartial("parameter_group_name")
-		req.DBClusterParameterGroupName = aws.String(d.Get("parameter_group_name").(string))
-		requestUpdate = true
-	}
-
 	if d.HasChange("db_cluster_parameter_group_name") {
 		d.SetPartial("db_cluster_parameter_group_name")
 		req.DBClusterParameterGroupName = aws.String(d.Get("db_cluster_parameter_group_name").(string))
@@ -569,6 +551,13 @@ func resourceAwsRDSClusterDelete(d *schema.ResourceData, meta interface{}) error
 
 	log.Printf("[DEBUG] RDS Cluster delete options: %s", deleteOpts)
 	_, err := conn.DeleteDBCluster(&deleteOpts)
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			if "InvalidDBClusterStateFault" == awsErr.Code() {
+				return fmt.Errorf("RDS Cluster cannot be deleted: %s", awsErr.Message())
+			}
+		}
+	}
 
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"available", "deleting", "backing-up", "modifying"},

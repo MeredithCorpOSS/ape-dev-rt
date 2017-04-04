@@ -29,8 +29,9 @@ func ExampleCognitoIdentity_CreateIdentityPool() {
 		IdentityPoolName:               aws.String("IdentityPoolName"), // Required
 		CognitoIdentityProviders: []*cognitoidentity.Provider{
 			{ // Required
-				ClientId:     aws.String("ProviderClientId"),
-				ProviderName: aws.String("ProviderName"),
+				ClientId:             aws.String("ProviderClientId"),
+				ProviderName:         aws.String("ProviderName"),
+				ServerSideTokenCheck: aws.Bool(true),
 			},
 			// More values...
 		},
@@ -435,6 +436,24 @@ func ExampleCognitoIdentity_SetIdentityPoolRoles() {
 			"Key": aws.String("ARNString"), // Required
 			// More values...
 		},
+		RoleMappings: map[string]*cognitoidentity.RoleMapping{
+			"Key": { // Required
+				Type: aws.String("RoleMappingType"), // Required
+				AmbiguousRoleResolution: aws.String("AmbiguousRoleResolutionType"),
+				RulesConfiguration: &cognitoidentity.RulesConfigurationType{
+					Rules: []*cognitoidentity.MappingRule{ // Required
+						{ // Required
+							Claim:     aws.String("ClaimName"),            // Required
+							MatchType: aws.String("MappingRuleMatchType"), // Required
+							RoleARN:   aws.String("ARNString"),            // Required
+							Value:     aws.String("ClaimValue"),           // Required
+						},
+						// More values...
+					},
+				},
+			},
+			// More values...
+		},
 	}
 	resp, err := svc.SetIdentityPoolRoles(params)
 
@@ -525,8 +544,9 @@ func ExampleCognitoIdentity_UpdateIdentityPool() {
 		IdentityPoolName:               aws.String("IdentityPoolName"), // Required
 		CognitoIdentityProviders: []*cognitoidentity.Provider{
 			{ // Required
-				ClientId:     aws.String("ProviderClientId"),
-				ProviderName: aws.String("ProviderName"),
+				ClientId:             aws.String("ProviderClientId"),
+				ProviderName:         aws.String("ProviderName"),
+				ServerSideTokenCheck: aws.Bool(true),
 			},
 			// More values...
 		},

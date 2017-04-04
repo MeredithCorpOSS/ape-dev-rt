@@ -15,32 +15,6 @@ type baseLayerWriter struct {
 	bw           *winio.BackupFileWriter
 	err          error
 	hasUtilityVM bool
-	dirInfo      []dirInfo
-}
-
-type dirInfo struct {
-	path     string
-	fileInfo winio.FileBasicInfo
-}
-
-// reapplyDirectoryTimes reapplies directory modification, creation, etc. times
-// after processing of the directory tree has completed. The times are expected
-// to be ordered such that parent directories come before child directories.
-func reapplyDirectoryTimes(dis []dirInfo) error {
-	for i := range dis {
-		di := &dis[len(dis)-i-1] // reverse order: process child directories first
-		f, err := winio.OpenForBackup(di.path, syscall.GENERIC_READ|syscall.GENERIC_WRITE, syscall.FILE_SHARE_READ, syscall.OPEN_EXISTING)
-		if err != nil {
-			return err
-		}
-
-		err = winio.SetFileBasicInfo(f, &di.fileInfo)
-		f.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (w *baseLayerWriter) closeCurrentFile() error {
@@ -95,20 +69,17 @@ func (w *baseLayerWriter) Add(name string, fileInfo *winio.FileBasicInfo) (err e
 			return err
 		}
 		createmode = syscall.OPEN_EXISTING
-		if fileInfo.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT == 0 {
-			w.dirInfo = append(w.dirInfo, dirInfo{path, *fileInfo})
-		}
 	}
 
 	mode := uint32(syscall.GENERIC_READ | syscall.GENERIC_WRITE | winio.WRITE_DAC | winio.WRITE_OWNER | winio.ACCESS_SYSTEM_SECURITY)
 	f, err = winio.OpenForBackup(path, mode, syscall.FILE_SHARE_READ, createmode)
 	if err != nil {
-		return makeError(err, "Failed to OpenForBackup", path)
+		return err
 	}
 
 	err = winio.SetFileBasicInfo(f, fileInfo)
 	if err != nil {
-		return makeError(err, "Failed to SetFileBasicInfo", path)
+		return err
 	}
 
 	w.f = f
@@ -160,13 +131,6 @@ func (w *baseLayerWriter) Close() error {
 		return err
 	}
 	if w.err == nil {
-		// Restore the file times of all the directories, since they may have
-		// been modified by creating child directories.
-		err = reapplyDirectoryTimes(w.dirInfo)
-		if err != nil {
-			return err
-		}
-
 		err = ProcessBaseLayer(w.root)
 		if err != nil {
 			return err

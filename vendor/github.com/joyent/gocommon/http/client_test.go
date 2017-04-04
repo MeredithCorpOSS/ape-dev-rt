@@ -10,6 +10,7 @@ import (
 
 	httpsuite "github.com/joyent/gocommon/testing"
 	"github.com/joyent/gosign/auth"
+	"github.com/julienschmidt/httprouter"
 )
 
 const (
@@ -66,7 +67,7 @@ func (s *LoopingHTTPSuite) SetUpSuite(c *gc.C) {
 func (s *LoopingHTTPSuite) setupLoopbackRequest() (*http.Header, chan string, *Client) {
 	var headers http.Header
 	bodyChan := make(chan string, 1)
-	handler := func(resp http.ResponseWriter, req *http.Request) {
+	handler := func(resp http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 		headers = req.Header
 		bodyBytes, _ := ioutil.ReadAll(req.Body)
 		req.Body.Close()
@@ -75,7 +76,7 @@ func (s *LoopingHTTPSuite) setupLoopbackRequest() (*http.Header, chan string, *C
 		resp.WriteHeader(http.StatusNoContent)
 		resp.Write([]byte{})
 	}
-	s.Mux.HandleFunc("/", handler)
+	s.Mux.POST("/", handler)
 	client := New(s.creds, "", nil)
 
 	return &headers, bodyChan, client
@@ -89,8 +90,14 @@ type HTTPSClientTestSuite struct {
 	LoopingHTTPSuite
 }
 
+func newTLSsuite() *HTTPSClientTestSuite {
+	suite := &HTTPSClientTestSuite{}
+	suite.UseTLS = true
+	return suite
+}
+
 var _ = gc.Suite(&HTTPClientTestSuite{})
-var _ = gc.Suite(&HTTPSClientTestSuite{})
+var _ = gc.Suite(newTLSsuite())
 
 func (s *HTTPClientTestSuite) assertHeaderValues(c *gc.C, apiVersion string) {
 	emptyHeaders := http.Header{}

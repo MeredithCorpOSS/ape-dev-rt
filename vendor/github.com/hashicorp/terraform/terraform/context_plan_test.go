@@ -553,6 +553,52 @@ func TestContext2Plan_moduleProviderInherit(t *testing.T) {
 	}
 }
 
+// This tests (for GH-11282) that deeply nested modules properly inherit
+// configuration.
+func TestContext2Plan_moduleProviderInheritDeep(t *testing.T) {
+	var l sync.Mutex
+
+	m := testModule(t, "plan-module-provider-inherit-deep")
+	ctx := testContext2(t, &ContextOpts{
+		Module: m,
+		Providers: map[string]ResourceProviderFactory{
+			"aws": func() (ResourceProvider, error) {
+				l.Lock()
+				defer l.Unlock()
+
+				var from string
+				p := testProvider("aws")
+				p.ConfigureFn = func(c *ResourceConfig) error {
+					v, ok := c.Get("from")
+					if !ok || v.(string) != "root" {
+						return fmt.Errorf("bad")
+					}
+
+					from = v.(string)
+					return nil
+				}
+
+				p.DiffFn = func(
+					info *InstanceInfo,
+					state *InstanceState,
+					c *ResourceConfig) (*InstanceDiff, error) {
+					if from != "root" {
+						return nil, fmt.Errorf("bad resource")
+					}
+
+					return testDiffFn(info, state, c)
+				}
+				return p, nil
+			},
+		},
+	})
+
+	_, err := ctx.Plan()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+}
+
 func TestContext2Plan_moduleProviderDefaults(t *testing.T) {
 	var l sync.Mutex
 	var calls []string
@@ -654,6 +700,29 @@ func TestContext2Plan_moduleProviderDefaultsVar(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, expected) {
 		t.Fatalf("BAD: %#v", calls)
+	}
+}
+
+func TestContext2Plan_moduleProviderVar(t *testing.T) {
+	m := testModule(t, "plan-module-provider-var")
+	p := testProvider("aws")
+	p.DiffFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Module: m,
+		Providers: map[string]ResourceProviderFactory{
+			"aws": testProviderFuncFixed(p),
+		},
+	})
+
+	plan, err := ctx.Plan()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	actual := strings.TrimSpace(plan.String())
+	expected := strings.TrimSpace(testTerraformPlanModuleProviderVarStr)
+	if actual != expected {
+		t.Fatalf("bad:\n%s", actual)
 	}
 }
 
@@ -2896,5 +2965,32 @@ func TestContext2Plan_createBeforeDestroy_depends_datasource(t *testing.T) {
 	}
 	if _, ok := moduleDiff.Resources["data.aws_vpc.bar.1"]; !ok {
 		t.Fatalf("missing diff for data.aws_vpc.bar.1")
+	}
+}
+
+// interpolated lists need to be stored in the original order.
+func TestContext2Plan_listOrder(t *testing.T) {
+	m := testModule(t, "plan-list-order")
+	p := testProvider("aws")
+	p.ApplyFn = testApplyFn
+	p.DiffFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Module: m,
+		Providers: map[string]ResourceProviderFactory{
+			"aws": testProviderFuncFixed(p),
+		},
+	})
+
+	plan, err := ctx.Plan()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	rDiffs := plan.Diff.Modules[0].Resources
+	rDiffA := rDiffs["aws_instance.a"]
+	rDiffB := rDiffs["aws_instance.b"]
+
+	if !rDiffA.Equal(rDiffB) {
+		t.Fatal("aws_instance.a and aws_instance.b diffs should match:\n", plan)
 	}
 }

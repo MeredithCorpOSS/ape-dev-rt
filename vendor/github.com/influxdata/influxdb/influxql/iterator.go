@@ -4,12 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
 
+	"github.com/influxdata/influxdb/models"
+
 	"github.com/gogo/protobuf/proto"
-	"github.com/influxdata/influxdb/influxql/internal"
+	internal "github.com/influxdata/influxdb/influxql/internal"
 )
 
 // ErrUnknownCall is returned when operating on an unknown function call.
@@ -17,11 +18,14 @@ var ErrUnknownCall = errors.New("unknown call")
 
 const (
 	// MinTime is used as the minimum time value when computing an unbounded range.
-	MinTime = int64(0)
+	// This time is one less than the MinNanoTime so that the first minimum
+	// time can be used as a sentinel value to signify that it is the default
+	// value rather than explicitly set by the user.
+	MinTime = models.MinNanoTime - 1
 
 	// MaxTime is used as the maximum time value when computing an unbounded range.
-	// This time is Jan 1, 2050 at midnight UTC.
-	MaxTime = int64(2524608000000000000)
+	// This time is 2262-04-11 23:47:16.854775806 +0000 UTC
+	MaxTime = models.MaxNanoTime
 )
 
 // Iterator represents a generic interface for all Iterators.
@@ -110,6 +114,46 @@ func (a Iterators) cast() interface{} {
 	return a
 }
 
+// Merge combines all iterators into a single iterator.
+// A sorted merge iterator or a merge iterator can be used based on opt.
+func (a Iterators) Merge(opt IteratorOptions) (Iterator, error) {
+	// Check if this is a call expression.
+	call, ok := opt.Expr.(*Call)
+
+	// Merge into a single iterator.
+	if !ok && opt.MergeSorted() {
+		itr := NewSortedMergeIterator(a, opt)
+		if itr != nil && opt.InterruptCh != nil {
+			itr = NewInterruptIterator(itr, opt.InterruptCh)
+		}
+		return itr, nil
+	}
+
+	// We do not need an ordered output so use a merge iterator.
+	itr := NewMergeIterator(a, opt)
+	if itr == nil {
+		return nil, nil
+	}
+
+	if opt.InterruptCh != nil {
+		itr = NewInterruptIterator(itr, opt.InterruptCh)
+	}
+
+	if !ok {
+		// This is not a call expression so do not use a call iterator.
+		return itr, nil
+	}
+
+	// When merging the count() function, use sum() to sum the counted points.
+	if call.Name == "count" {
+		opt.Expr = &Call{
+			Name: "sum",
+			Args: call.Args,
+		}
+	}
+	return NewCallIterator(itr, opt)
+}
+
 // NewMergeIterator returns an iterator to merge itrs into one.
 // Inputs must either be merge iterators or only contain a single name/tag in
 // sorted order. The iterator will output all points by window, name/tag, then
@@ -117,8 +161,10 @@ func (a Iterators) cast() interface{} {
 // interval.
 func NewMergeIterator(inputs []Iterator, opt IteratorOptions) Iterator {
 	inputs = Iterators(inputs).filterNonNil()
-	if len(inputs) == 0 {
-		return &nilFloatIterator{}
+	if n := len(inputs); n == 0 {
+		return nil
+	} else if n == 1 {
+		return inputs[0]
 	}
 
 	// Aggregate functions can use a more relaxed sorting so that points
@@ -137,6 +183,41 @@ func NewMergeIterator(inputs []Iterator, opt IteratorOptions) Iterator {
 	}
 }
 
+// NewParallelMergeIterator returns an iterator that breaks input iterators
+// into groups and processes them in parallel.
+func NewParallelMergeIterator(inputs []Iterator, opt IteratorOptions, parallelism int) Iterator {
+	inputs = Iterators(inputs).filterNonNil()
+	if len(inputs) == 0 {
+		return nil
+	} else if len(inputs) == 1 {
+		return inputs[0]
+	}
+
+	// Limit parallelism to the number of inputs.
+	if len(inputs) < parallelism {
+		parallelism = len(inputs)
+	}
+
+	// Determine the number of inputs per output iterator.
+	n := len(inputs) / parallelism
+
+	// Group iterators together.
+	outputs := make([]Iterator, parallelism)
+	for i := range outputs {
+		var slice []Iterator
+		if i < len(outputs)-1 {
+			slice = inputs[i*n : (i+1)*n]
+		} else {
+			slice = inputs[i*n:]
+		}
+
+		outputs[i] = newParallelIterator(NewMergeIterator(slice, opt))
+	}
+
+	// Merge all groups together.
+	return NewMergeIterator(outputs, opt)
+}
+
 // NewSortedMergeIterator returns an iterator to merge itrs into one.
 // Inputs must either be sorted merge iterators or only contain a single
 // name/tag in sorted order. The iterator will output all points by name/tag,
@@ -145,7 +226,9 @@ func NewMergeIterator(inputs []Iterator, opt IteratorOptions) Iterator {
 func NewSortedMergeIterator(inputs []Iterator, opt IteratorOptions) Iterator {
 	inputs = Iterators(inputs).filterNonNil()
 	if len(inputs) == 0 {
-		return &nilFloatIterator{}
+		return nil
+	} else if len(inputs) == 1 {
+		return inputs[0]
 	}
 
 	switch inputs := Iterators(inputs).cast().(type) {
@@ -159,6 +242,26 @@ func NewSortedMergeIterator(inputs []Iterator, opt IteratorOptions) Iterator {
 		return newBooleanSortedMergeIterator(inputs, opt)
 	default:
 		panic(fmt.Sprintf("unsupported sorted merge iterator type: %T", inputs))
+	}
+}
+
+// newParallelIterator returns an iterator that runs in a separate goroutine.
+func newParallelIterator(input Iterator) Iterator {
+	if input == nil {
+		return nil
+	}
+
+	switch itr := input.(type) {
+	case FloatIterator:
+		return newFloatParallelIterator(itr)
+	case IntegerIterator:
+		return newIntegerParallelIterator(itr)
+	case StringIterator:
+		return newStringParallelIterator(itr)
+	case BooleanIterator:
+		return newBooleanParallelIterator(itr)
+	default:
+		panic(fmt.Sprintf("unsupported parallel iterator type: %T", itr))
 	}
 }
 
@@ -232,8 +335,8 @@ func NewIntervalIterator(input Iterator, opt IteratorOptions) Iterator {
 	}
 }
 
-// NewInterruptIterator returns an iterator that will stop producing output when a channel
-// has been closed on the passed in channel.
+// NewInterruptIterator returns an iterator that will stop producing output
+// when the passed-in channel is closed.
 func NewInterruptIterator(input Iterator, closing <-chan struct{}) Iterator {
 	switch input := input.(type) {
 	case FloatIterator:
@@ -245,17 +348,33 @@ func NewInterruptIterator(input Iterator, closing <-chan struct{}) Iterator {
 	case BooleanIterator:
 		return newBooleanInterruptIterator(input, closing)
 	default:
-		panic(fmt.Sprintf("unsupported fill iterator type: %T", input))
+		panic(fmt.Sprintf("unsupported interrupt iterator type: %T", input))
 	}
 }
 
-// AuxIterator represents an iterator that can split off separate auxilary iterators.
+// NewCloseInterruptIterator returns an iterator that will invoke the Close() method on an
+// iterator when the passed-in channel has been closed.
+func NewCloseInterruptIterator(input Iterator, closing <-chan struct{}) Iterator {
+	switch input := input.(type) {
+	case FloatIterator:
+		return newFloatCloseInterruptIterator(input, closing)
+	case IntegerIterator:
+		return newIntegerCloseInterruptIterator(input, closing)
+	case StringIterator:
+		return newStringCloseInterruptIterator(input, closing)
+	case BooleanIterator:
+		return newBooleanCloseInterruptIterator(input, closing)
+	default:
+		panic(fmt.Sprintf("unsupported close iterator iterator type: %T", input))
+	}
+}
+
+// AuxIterator represents an iterator that can split off separate auxiliary iterators.
 type AuxIterator interface {
 	Iterator
-	IteratorCreator
 
 	// Auxilary iterator
-	Iterator(name string) Iterator
+	Iterator(name string, typ DataType) Iterator
 
 	// Start starts writing to the created iterators.
 	Start()
@@ -266,16 +385,16 @@ type AuxIterator interface {
 }
 
 // NewAuxIterator returns a new instance of AuxIterator.
-func NewAuxIterator(input Iterator, seriesKeys SeriesList, opt IteratorOptions) AuxIterator {
+func NewAuxIterator(input Iterator, opt IteratorOptions) AuxIterator {
 	switch input := input.(type) {
 	case FloatIterator:
-		return newFloatAuxIterator(input, seriesKeys, opt)
+		return newFloatAuxIterator(input, opt)
 	case IntegerIterator:
-		return newIntegerAuxIterator(input, seriesKeys, opt)
+		return newIntegerAuxIterator(input, opt)
 	case StringIterator:
-		return newStringAuxIterator(input, seriesKeys, opt)
+		return newStringAuxIterator(input, opt)
 	case BooleanIterator:
-		return newBooleanAuxIterator(input, seriesKeys, opt)
+		return newBooleanAuxIterator(input, opt)
 	default:
 		panic(fmt.Sprintf("unsupported aux iterator type: %T", input))
 	}
@@ -304,39 +423,35 @@ func (f *auxIteratorField) close() {
 	}
 }
 
-type auxIteratorFields []*auxIteratorField
-
-// newAuxIteratorFields returns a new instance of auxIteratorFields from a list of field names.
-func newAuxIteratorFields(seriesKeys SeriesList, opt IteratorOptions) auxIteratorFields {
-	fields := make(auxIteratorFields, len(opt.Aux))
-	for i, name := range opt.Aux {
-		fields[i] = &auxIteratorField{name: name, opt: opt}
-		for _, s := range seriesKeys {
-			aux := s.Aux[i]
-			if aux == Unknown {
-				continue
-			}
-
-			if fields[i].typ == Unknown || aux < fields[i].typ {
-				fields[i].typ = aux
-			}
-		}
-	}
-	return fields
+type auxIteratorFields struct {
+	fields     []*auxIteratorField
+	dimensions []string
 }
 
-func (a auxIteratorFields) close() {
-	for _, f := range a {
+// newAuxIteratorFields returns a new instance of auxIteratorFields from a list of field names.
+func newAuxIteratorFields(opt IteratorOptions) *auxIteratorFields {
+	fields := make([]*auxIteratorField, len(opt.Aux))
+	for i, ref := range opt.Aux {
+		fields[i] = &auxIteratorField{name: ref.Val, typ: ref.Type, opt: opt}
+	}
+	return &auxIteratorFields{
+		fields:     fields,
+		dimensions: opt.GetDimensions(),
+	}
+}
+
+func (a *auxIteratorFields) close() {
+	for _, f := range a.fields {
 		f.close()
 	}
 }
 
 // iterator creates a new iterator for a named auxilary field.
-func (a auxIteratorFields) iterator(name string) Iterator {
-	for _, f := range a {
+func (a *auxIteratorFields) iterator(name string, typ DataType) Iterator {
+	for _, f := range a.fields {
 		// Skip field if it's name doesn't match.
 		// Exit if no points were received by the iterator.
-		if f.name != name {
+		if f.name != name || (typ != Unknown && f.typ != typ) {
 			continue
 		}
 
@@ -350,7 +465,7 @@ func (a auxIteratorFields) iterator(name string) Iterator {
 			itr := &integerChanIterator{cond: sync.NewCond(&sync.Mutex{})}
 			f.append(itr)
 			return itr
-		case String:
+		case String, Tag:
 			itr := &stringChanIterator{cond: sync.NewCond(&sync.Mutex{})}
 			f.append(itr)
 			return itr
@@ -367,13 +482,13 @@ func (a auxIteratorFields) iterator(name string) Iterator {
 }
 
 // send sends a point to all field iterators.
-func (a auxIteratorFields) send(p Point) (ok bool) {
+func (a *auxIteratorFields) send(p Point) (ok bool) {
 	values := p.aux()
-	for i, f := range a {
+	for i, f := range a.fields {
 		v := values[i]
 
 		tags := p.tags()
-		tags = tags.Subset(f.opt.Dimensions)
+		tags = tags.Subset(a.dimensions)
 
 		// Send new point for each aux iterator.
 		// Primitive pointers represent nil values.
@@ -395,211 +510,109 @@ func (a auxIteratorFields) send(p Point) (ok bool) {
 	return ok
 }
 
-// drainIterator reads all points from an iterator.
-func drainIterator(itr Iterator) {
+func (a *auxIteratorFields) sendError(err error) {
+	for _, f := range a.fields {
+		for _, itr := range f.itrs {
+			switch itr := itr.(type) {
+			case *floatChanIterator:
+				itr.setErr(err)
+			case *integerChanIterator:
+				itr.setErr(err)
+			case *stringChanIterator:
+				itr.setErr(err)
+			case *booleanChanIterator:
+				itr.setErr(err)
+			default:
+				panic(fmt.Sprintf("invalid aux itr type: %T", itr))
+			}
+		}
+	}
+}
+
+// DrainIterator reads and discards all points from itr.
+func DrainIterator(itr Iterator) {
+	defer itr.Close()
+	switch itr := itr.(type) {
+	case FloatIterator:
+		for p, _ := itr.Next(); p != nil; p, _ = itr.Next() {
+		}
+	case IntegerIterator:
+		for p, _ := itr.Next(); p != nil; p, _ = itr.Next() {
+		}
+	case StringIterator:
+		for p, _ := itr.Next(); p != nil; p, _ = itr.Next() {
+		}
+	case BooleanIterator:
+		for p, _ := itr.Next(); p != nil; p, _ = itr.Next() {
+		}
+	default:
+		panic(fmt.Sprintf("unsupported iterator type for draining: %T", itr))
+	}
+}
+
+// DrainIterators reads and discards all points from itrs.
+func DrainIterators(itrs []Iterator) {
+	defer Iterators(itrs).Close()
 	for {
-		switch itr := itr.(type) {
-		case FloatIterator:
-			if p := itr.Next(); p == nil {
-				return
+		var hasData bool
+
+		for _, itr := range itrs {
+			switch itr := itr.(type) {
+			case FloatIterator:
+				if p, _ := itr.Next(); p != nil {
+					hasData = true
+				}
+			case IntegerIterator:
+				if p, _ := itr.Next(); p != nil {
+					hasData = true
+				}
+			case StringIterator:
+				if p, _ := itr.Next(); p != nil {
+					hasData = true
+				}
+			case BooleanIterator:
+				if p, _ := itr.Next(); p != nil {
+					hasData = true
+				}
+			default:
+				panic(fmt.Sprintf("unsupported iterator type for draining: %T", itr))
 			}
-		case IntegerIterator:
-			if p := itr.Next(); p == nil {
-				return
-			}
-		case StringIterator:
-			if p := itr.Next(); p == nil {
-				return
-			}
-		case BooleanIterator:
-			if p := itr.Next(); p == nil {
-				return
-			}
-		default:
-			panic(fmt.Sprintf("unsupported iterator type for draining: %T", itr))
+		}
+
+		// Exit once all iterators return a nil point.
+		if !hasData {
+			break
 		}
 	}
 }
 
 // NewReaderIterator returns an iterator that streams from a reader.
-func NewReaderIterator(r io.Reader) (Iterator, error) {
-	var p Point
-	dec := NewPointDecoder(r)
-	if err := dec.DecodePoint(&p); err == io.EOF {
-		return &nilFloatIterator{}, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	switch p := p.(type) {
-	case *FloatPoint:
-		return newFloatReaderIterator(r, p, dec.Stats()), nil
-	case *IntegerPoint:
-		return newIntegerReaderIterator(r, p, dec.Stats()), nil
-	case *StringPoint:
-		return newStringReaderIterator(r, p, dec.Stats()), nil
-	case *BooleanPoint:
-		return newBooleanReaderIterator(r, p, dec.Stats()), nil
+func NewReaderIterator(r io.Reader, typ DataType, stats IteratorStats) Iterator {
+	switch typ {
+	case Float:
+		return newFloatReaderIterator(r, stats)
+	case Integer:
+		return newIntegerReaderIterator(r, stats)
+	case String:
+		return newStringReaderIterator(r, stats)
+	case Boolean:
+		return newBooleanReaderIterator(r, stats)
 	default:
-		panic(fmt.Sprintf("unsupported point for reader iterator: %T", p))
+		return &nilFloatIterator{}
 	}
 }
 
-// IteratorCreator represents an interface for objects that can create Iterators.
+// IteratorCreator is an interface to create Iterators.
 type IteratorCreator interface {
 	// Creates a simple iterator for use in an InfluxQL query.
-	CreateIterator(opt IteratorOptions) (Iterator, error)
-
-	// Returns the unique fields and dimensions across a list of sources.
-	FieldDimensions(sources Sources) (fields, dimensions map[string]struct{}, err error)
-
-	// Returns the series keys that will be returned by this iterator.
-	SeriesKeys(opt IteratorOptions) (SeriesList, error)
-
-	// Expands regex sources to all matching sources.
-	ExpandSources(sources Sources) (Sources, error)
+	CreateIterator(source *Measurement, opt IteratorOptions) (Iterator, error)
 }
 
-// IteratorCreators represents a list of iterator creators.
-type IteratorCreators []IteratorCreator
+// FieldMapper returns the data type for the field inside of the measurement.
+type FieldMapper interface {
+	FieldDimensions(m *Measurement) (fields map[string]DataType, dimensions map[string]struct{}, err error)
 
-// Close closes all iterator creators that implement io.Closer.
-func (a IteratorCreators) Close() error {
-	for _, ic := range a {
-		if ic, ok := ic.(io.Closer); ok {
-			ic.Close()
-		}
-	}
-	return nil
-}
-
-// CreateIterator returns a single combined iterator from multiple iterator creators.
-func (a IteratorCreators) CreateIterator(opt IteratorOptions) (Iterator, error) {
-	// Create iterators for each shard.
-	// Ensure that they are closed if an error occurs.
-	itrs := make([]Iterator, 0, len(a))
-	if err := func() error {
-		for _, ic := range a {
-			itr, err := ic.CreateIterator(opt)
-			if err != nil {
-				return err
-			}
-			itrs = append(itrs, itr)
-		}
-		return nil
-	}(); err != nil {
-		Iterators(itrs).Close()
-		return nil, err
-	}
-
-	// Merge into a single iterator.
-	if opt.MergeSorted() {
-		itr := NewSortedMergeIterator(itrs, opt)
-		if opt.InterruptCh != nil {
-			itr = NewInterruptIterator(itr, opt.InterruptCh)
-		}
-		return itr, nil
-	}
-
-	itr := NewMergeIterator(itrs, opt)
-	if opt.Expr != nil {
-		if expr, ok := opt.Expr.(*Call); ok && expr.Name == "count" {
-			opt.Expr = &Call{
-				Name: "sum",
-				Args: expr.Args,
-			}
-		}
-	}
-
-	if opt.InterruptCh != nil {
-		itr = NewInterruptIterator(itr, opt.InterruptCh)
-	}
-	return NewCallIterator(itr, opt)
-}
-
-// FieldDimensions returns unique fields and dimensions from multiple iterator creators.
-func (a IteratorCreators) FieldDimensions(sources Sources) (fields, dimensions map[string]struct{}, err error) {
-	fields = make(map[string]struct{})
-	dimensions = make(map[string]struct{})
-
-	for _, ic := range a {
-		f, d, err := ic.FieldDimensions(sources)
-		if err != nil {
-			return nil, nil, err
-		}
-		for k := range f {
-			fields[k] = struct{}{}
-		}
-		for k := range d {
-			dimensions[k] = struct{}{}
-		}
-	}
-	return
-}
-
-// SeriesKeys returns a list of series in all iterator creators in a.
-// If a series exists in multiple creators in a, all instances will be combined
-// into a single Series by calling Combine on it.
-func (a IteratorCreators) SeriesKeys(opt IteratorOptions) (SeriesList, error) {
-	seriesMap := make(map[string]Series)
-	for _, ic := range a {
-		series, err := ic.SeriesKeys(opt)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, s := range series {
-			cur, ok := seriesMap[s.ID()]
-			if ok {
-				cur.Combine(&s)
-			} else {
-				seriesMap[s.ID()] = s
-			}
-		}
-	}
-
-	seriesList := make([]Series, 0, len(seriesMap))
-	for _, s := range seriesMap {
-		seriesList = append(seriesList, s)
-	}
-	sort.Sort(SeriesList(seriesList))
-	return SeriesList(seriesList), nil
-}
-
-// ExpandSources expands sources across all iterator creators and returns a unique result.
-func (a IteratorCreators) ExpandSources(sources Sources) (Sources, error) {
-	m := make(map[string]Source)
-
-	for _, ic := range a {
-		expanded, err := ic.ExpandSources(sources)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, src := range expanded {
-			switch src := src.(type) {
-			case *Measurement:
-				m[src.String()] = src
-			default:
-				return nil, fmt.Errorf("IteratorCreators.ExpandSources: unsupported source type: %T", src)
-			}
-		}
-	}
-
-	// Convert set to sorted slice.
-	names := make([]string, 0, len(m))
-	for name := range m {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Convert set to a list of Sources.
-	sorted := make(Sources, 0, len(m))
-	for _, name := range names {
-		sorted = append(sorted, m[name])
-	}
-
-	return sorted, nil
+	TypeMapper
 }
 
 // IteratorOptions is an object passed to CreateIterator to specify creation options.
@@ -609,14 +622,16 @@ type IteratorOptions struct {
 	Expr Expr
 
 	// Auxilary tags or values to also retrieve for the point.
-	Aux []string
+	Aux []VarRef
 
-	// Data sources from which to retrieve data.
+	// Data sources from which to receive data. This is only used for encoding
+	// measurements over RPC and is no longer used in the open source version.
 	Sources []Source
 
 	// Group by interval and tags.
 	Interval   Interval
-	Dimensions []string
+	Dimensions []string            // The final dimensions of the query (stays the same even in subqueries).
+	GroupBy    map[string]struct{} // Dimensions to group points by in intermediate iterators.
 
 	// Fill options.
 	Fill      FillOption
@@ -641,6 +656,12 @@ type IteratorOptions struct {
 	// Removes duplicate rows from raw queries.
 	Dedupe bool
 
+	// Determines if this is a query for raw data or an aggregate/selector.
+	Ordered bool
+
+	// Limits on the creation of iterators.
+	MaxSeriesN int
+
 	// If this channel is set and is closed, the iterator should try to exit
 	// and close as soon as possible.
 	InterruptCh <-chan struct{}
@@ -649,7 +670,11 @@ type IteratorOptions struct {
 // newIteratorOptionsStmt creates the iterator options from stmt.
 func newIteratorOptionsStmt(stmt *SelectStatement, sopt *SelectOptions) (opt IteratorOptions, err error) {
 	// Determine time range from the condition.
-	startTime, endTime := TimeRange(stmt.Condition)
+	startTime, endTime, err := TimeRange(stmt.Condition)
+	if err != nil {
+		return IteratorOptions{}, err
+	}
+
 	if !startTime.IsZero() {
 		opt.StartTime = startTime.UnixNano()
 	} else {
@@ -677,17 +702,26 @@ func newIteratorOptionsStmt(stmt *SelectStatement, sopt *SelectOptions) (opt Ite
 	// Set duration to zero if a negative interval has been used.
 	if interval < 0 {
 		interval = 0
+	} else if interval > 0 {
+		opt.Interval.Offset, err = stmt.GroupByOffset()
+		if err != nil {
+			return opt, err
+		}
 	}
 	opt.Interval.Duration = interval
 
+	// Determine if the input for this select call must be ordered.
+	opt.Ordered = stmt.IsRawQuery
+
 	// Determine dimensions.
+	opt.GroupBy = make(map[string]struct{}, len(opt.Dimensions))
 	for _, d := range stmt.Dimensions {
 		if d, ok := d.Expr.(*VarRef); ok {
 			opt.Dimensions = append(opt.Dimensions, d.Val)
+			opt.GroupBy[d.Val] = struct{}{}
 		}
 	}
 
-	opt.Sources = stmt.Sources
 	opt.Condition = stmt.Condition
 	opt.Ascending = stmt.TimeAscending()
 	opt.Dedupe = stmt.Dedupe
@@ -702,20 +736,54 @@ func newIteratorOptionsStmt(stmt *SelectStatement, sopt *SelectOptions) (opt Ite
 	opt.Limit, opt.Offset = stmt.Limit, stmt.Offset
 	opt.SLimit, opt.SOffset = stmt.SLimit, stmt.SOffset
 	if sopt != nil {
+		opt.MaxSeriesN = sopt.MaxSeriesN
 		opt.InterruptCh = sopt.InterruptCh
 	}
 
 	return opt, nil
 }
 
-// MergeSorted returns true if the options require a sorted merge.
-// This is only needed when the expression is a variable reference or there is no expr.
-func (opt IteratorOptions) MergeSorted() bool {
-	if opt.Expr == nil {
-		return true
+func newIteratorOptionsSubstatement(stmt *SelectStatement, opt IteratorOptions) (IteratorOptions, error) {
+	subOpt, err := newIteratorOptionsStmt(stmt, nil)
+	if err != nil {
+		return IteratorOptions{}, err
 	}
-	_, ok := opt.Expr.(*VarRef)
-	return ok
+
+	if subOpt.StartTime < opt.StartTime {
+		subOpt.StartTime = opt.StartTime
+	}
+	if subOpt.EndTime > opt.EndTime {
+		subOpt.EndTime = opt.EndTime
+	}
+	subOpt.Dimensions = opt.Dimensions
+	subOpt.InterruptCh = opt.InterruptCh
+
+	// Propagate the SLIMIT and SOFFSET from the outer query.
+	subOpt.SLimit += opt.SLimit
+	subOpt.SOffset += opt.SOffset
+
+	// If the inner query uses a null fill option, switch it to none so we
+	// don't hit an unnecessary penalty from the fill iterator. Null values
+	// will end up getting stripped by an outer query anyway so there's no
+	// point in having them here. We still need all other types of fill
+	// iterators because they can affect the result of the outer query.
+	if subOpt.Fill == NullFill {
+		subOpt.Fill = NoFill
+	}
+
+	// Determine if the input to this iterator needs to be ordered so it outputs
+	// the correct order to the outer query.
+	interval, err := stmt.GroupByInterval()
+	if err != nil {
+		return IteratorOptions{}, err
+	}
+	subOpt.Ordered = opt.Ordered && (interval == 0 && stmt.HasSelector())
+	return subOpt, nil
+}
+
+// MergeSorted returns true if the options require a sorted merge.
+func (opt IteratorOptions) MergeSorted() bool {
+	return opt.Ordered
 }
 
 // SeekTime returns the time the iterator should start from.
@@ -730,14 +798,20 @@ func (opt IteratorOptions) SeekTime() int64 {
 // Window returns the time window [start,end) that t falls within.
 func (opt IteratorOptions) Window(t int64) (start, end int64) {
 	if opt.Interval.IsZero() {
-		return opt.StartTime, opt.EndTime
+		return opt.StartTime, opt.EndTime + 1
 	}
 
 	// Subtract the offset to the time so we calculate the correct base interval.
 	t -= int64(opt.Interval.Offset)
 
 	// Truncate time by duration.
-	t -= t % int64(opt.Interval.Duration)
+	dt := t % int64(opt.Interval.Duration)
+	if dt < 0 {
+		// Negative modulo rounds up instead of down, so offset
+		// with the duration.
+		dt += int64(opt.Interval.Duration)
+	}
+	t -= dt
 
 	// Apply the offset.
 	start = t + int64(opt.Interval.Offset)
@@ -758,6 +832,28 @@ func (opt IteratorOptions) DerivativeInterval() Interval {
 	}
 
 	return Interval{Duration: time.Second}
+}
+
+// ElapsedInterval returns the time interval for the elapsed function.
+func (opt IteratorOptions) ElapsedInterval() Interval {
+	// Use the interval on the elapsed() call, if specified.
+	if expr, ok := opt.Expr.(*Call); ok && len(expr.Args) == 2 {
+		return Interval{Duration: expr.Args[1].(*DurationLiteral).Val}
+	}
+
+	return Interval{Duration: time.Nanosecond}
+}
+
+// GetDimensions retrieves the dimensions for this query.
+func (opt IteratorOptions) GetDimensions() []string {
+	if len(opt.GroupBy) > 0 {
+		dimensions := make([]string, 0, len(opt.GroupBy))
+		for dim := range opt.GroupBy {
+			dimensions = append(dimensions, dim)
+		}
+		return dimensions
+	}
+	return opt.Dimensions
 }
 
 // MarshalBinary encodes opt into a binary format.
@@ -783,7 +879,6 @@ func (opt *IteratorOptions) UnmarshalBinary(buf []byte) error {
 
 func encodeIteratorOptions(opt *IteratorOptions) *internal.IteratorOptions {
 	pb := &internal.IteratorOptions{
-		Aux:        opt.Aux,
 		Interval:   encodeInterval(opt.Interval),
 		Dimensions: opt.Dimensions,
 		Fill:       proto.Int32(int32(opt.Fill)),
@@ -795,6 +890,8 @@ func encodeIteratorOptions(opt *IteratorOptions) *internal.IteratorOptions {
 		SLimit:     proto.Int64(int64(opt.SLimit)),
 		SOffset:    proto.Int64(int64(opt.SOffset)),
 		Dedupe:     proto.Bool(opt.Dedupe),
+		MaxSeriesN: proto.Int64(int64(opt.MaxSeriesN)),
+		Ordered:    proto.Bool(opt.Ordered),
 	}
 
 	// Set expression, if set.
@@ -802,13 +899,32 @@ func encodeIteratorOptions(opt *IteratorOptions) *internal.IteratorOptions {
 		pb.Expr = proto.String(opt.Expr.String())
 	}
 
-	// Convert and encode sources to measurements.
-	sources := make([]*internal.Measurement, len(opt.Sources))
-	for i, source := range opt.Sources {
-		mm := source.(*Measurement)
-		sources[i] = encodeMeasurement(mm)
+	// Convert and encode aux fields as variable references.
+	pb.Fields = make([]*internal.VarRef, len(opt.Aux))
+	pb.Aux = make([]string, len(opt.Aux))
+	for i, ref := range opt.Aux {
+		pb.Fields[i] = encodeVarRef(ref)
+		pb.Aux[i] = ref.Val
 	}
-	pb.Sources = sources
+
+	// Encode group by dimensions from a map.
+	if pb.GroupBy != nil {
+		dimensions := make([]string, 0, len(opt.GroupBy))
+		for dim := range opt.GroupBy {
+			dimensions = append(dimensions, dim)
+		}
+		pb.GroupBy = dimensions
+	}
+
+	// Convert and encode sources to measurements.
+	if opt.Sources != nil {
+		sources := make([]*internal.Measurement, len(opt.Sources))
+		for i, source := range opt.Sources {
+			mm := source.(*Measurement)
+			sources[i] = encodeMeasurement(mm)
+		}
+		pb.Sources = sources
+	}
 
 	// Fill value can only be a number. Set it if available.
 	if v, ok := opt.FillValue.(float64); ok {
@@ -825,7 +941,6 @@ func encodeIteratorOptions(opt *IteratorOptions) *internal.IteratorOptions {
 
 func decodeIteratorOptions(pb *internal.IteratorOptions) (*IteratorOptions, error) {
 	opt := &IteratorOptions{
-		Aux:        pb.GetAux(),
 		Interval:   decodeInterval(pb.GetInterval()),
 		Dimensions: pb.GetDimensions(),
 		Fill:       FillOption(pb.GetFill()),
@@ -838,6 +953,8 @@ func decodeIteratorOptions(pb *internal.IteratorOptions) (*IteratorOptions, erro
 		SLimit:     int(pb.GetSLimit()),
 		SOffset:    int(pb.GetSOffset()),
 		Dedupe:     pb.GetDedupe(),
+		MaxSeriesN: int(pb.GetMaxSeriesN()),
+		Ordered:    pb.GetOrdered(),
 	}
 
 	// Set expression, if set.
@@ -849,16 +966,40 @@ func decodeIteratorOptions(pb *internal.IteratorOptions) (*IteratorOptions, erro
 		opt.Expr = expr
 	}
 
-	// Convert and encode sources to measurements.
-	sources := make([]Source, len(pb.GetSources()))
-	for i, source := range pb.GetSources() {
-		mm, err := decodeMeasurement(source)
-		if err != nil {
-			return nil, err
+	// Convert and decode variable references.
+	if fields := pb.GetFields(); fields != nil {
+		opt.Aux = make([]VarRef, len(fields))
+		for i, ref := range fields {
+			opt.Aux[i] = decodeVarRef(ref)
 		}
-		sources[i] = mm
+	} else {
+		opt.Aux = make([]VarRef, len(pb.GetAux()))
+		for i, name := range pb.GetAux() {
+			opt.Aux[i] = VarRef{Val: name}
+		}
 	}
-	opt.Sources = sources
+
+	// Convert and decode sources to measurements.
+	if pb.Sources != nil {
+		sources := make([]Source, len(pb.GetSources()))
+		for i, source := range pb.GetSources() {
+			mm, err := decodeMeasurement(source)
+			if err != nil {
+				return nil, err
+			}
+			sources[i] = mm
+		}
+		opt.Sources = sources
+	}
+
+	// Convert group by dimensions to a map.
+	if pb.GroupBy != nil {
+		dimensions := make(map[string]struct{}, len(pb.GroupBy))
+		for _, dim := range pb.GetGroupBy() {
+			dimensions[dim] = struct{}{}
+		}
+		opt.GroupBy = dimensions
+	}
 
 	// Set condition, if set.
 	if pb.Condition != nil {
@@ -900,108 +1041,20 @@ func (v *selectInfo) Visit(n Node) Visitor {
 	return v
 }
 
-// Series represents a series that will be returned by the iterator.
-type Series struct {
-	Name string
-	Tags Tags
-	Aux  []DataType
-}
+// FindSelector returns a selector from the selectInfo. This will only
+// return a selector if the Call is a selector and it's the only function
+// in the selectInfo.
+func (v *selectInfo) FindSelector() *Call {
+	if len(v.calls) != 1 {
+		return nil
+	}
 
-// ID is a single string that combines the name and tags id for the series.
-func (s *Series) ID() string {
-	return s.Name + "\x00" + s.Tags.ID()
-}
-
-// Combine combines two series with the same name and tags.
-// It will promote auxiliary iterator types to the highest type.
-func (s *Series) Combine(other *Series) {
-	for i, t := range s.Aux {
-		if other.Aux[i] == Unknown {
-			continue
-		}
-
-		if t == Unknown || other.Aux[i] < t {
-			s.Aux[i] = other.Aux[i]
+	for s := range v.calls {
+		if IsSelector(s) {
+			return s
 		}
 	}
-}
-
-func encodeSeries(s Series) *internal.Series {
-	aux := make([]uint32, len(s.Aux))
-	for i := range s.Aux {
-		aux[i] = uint32(s.Aux[i])
-	}
-
-	return &internal.Series{
-		Name: proto.String(s.Name),
-		Tags: encodeTags(s.Tags.KeyValues()),
-		Aux:  aux,
-	}
-}
-
-func decodeSeries(pb *internal.Series) Series {
-	var aux []DataType
-	if len(pb.GetAux()) > 0 {
-		aux = make([]DataType, len(pb.GetAux()))
-		for i := range pb.GetAux() {
-			aux[i] = DataType(pb.GetAux()[i])
-		}
-	}
-
-	return Series{
-		Name: pb.GetName(),
-		Tags: newTagsID(string(pb.GetTags())),
-		Aux:  aux,
-	}
-}
-
-// SeriesList is a list of series that will be returned by an iterator.
-type SeriesList []Series
-
-func (a SeriesList) Len() int      { return len(a) }
-func (a SeriesList) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-
-func (a SeriesList) Less(i, j int) bool {
-	if a[i].Name != a[j].Name {
-		return a[i].Name < a[j].Name
-	}
-	return a[i].Tags.ID() < a[j].Tags.ID()
-}
-
-// MarshalBinary encodes list into a binary format.
-func (a SeriesList) MarshalBinary() ([]byte, error) {
-	return proto.Marshal(encodeSeriesList(a))
-}
-
-// UnmarshalBinary decodes from a binary format.
-func (a *SeriesList) UnmarshalBinary(buf []byte) error {
-	var pb internal.SeriesList
-	if err := proto.Unmarshal(buf, &pb); err != nil {
-		return err
-	}
-
-	(*a) = decodeSeriesList(&pb)
-
 	return nil
-}
-
-func encodeSeriesList(a SeriesList) *internal.SeriesList {
-	pb := make([]*internal.Series, len(a))
-	for i := range a {
-		pb[i] = encodeSeries(a[i])
-	}
-
-	return &internal.SeriesList{
-		Items: pb,
-	}
-}
-
-func decodeSeriesList(pb *internal.SeriesList) SeriesList {
-	a := make([]Series, len(pb.GetItems()))
-	for i := range pb.GetItems() {
-		a[i] = decodeSeries(pb.GetItems()[i])
-	}
-	return SeriesList(a)
 }
 
 // Interval represents a repeating interval for a query.
@@ -1027,11 +1080,25 @@ func decodeInterval(pb *internal.Interval) Interval {
 	}
 }
 
+func encodeVarRef(ref VarRef) *internal.VarRef {
+	return &internal.VarRef{
+		Val:  proto.String(ref.Val),
+		Type: proto.Int32(int32(ref.Type)),
+	}
+}
+
+func decodeVarRef(pb *internal.VarRef) VarRef {
+	return VarRef{
+		Val:  pb.GetVal(),
+		Type: DataType(pb.GetType()),
+	}
+}
+
 type nilFloatIterator struct{}
 
-func (*nilFloatIterator) Stats() IteratorStats { return IteratorStats{} }
-func (*nilFloatIterator) Close() error         { return nil }
-func (*nilFloatIterator) Next() *FloatPoint    { return nil }
+func (*nilFloatIterator) Stats() IteratorStats       { return IteratorStats{} }
+func (*nilFloatIterator) Close() error               { return nil }
+func (*nilFloatIterator) Next() (*FloatPoint, error) { return nil, nil }
 
 // integerFloatTransformIterator executes a function to modify an existing point for every
 // output of the input iterator.
@@ -1047,12 +1114,14 @@ func (itr *integerFloatTransformIterator) Stats() IteratorStats { return itr.inp
 func (itr *integerFloatTransformIterator) Close() error { return itr.input.Close() }
 
 // Next returns the minimum value for the next available interval.
-func (itr *integerFloatTransformIterator) Next() *FloatPoint {
-	p := itr.input.Next()
-	if p != nil {
-		return itr.fn(p)
+func (itr *integerFloatTransformIterator) Next() (*FloatPoint, error) {
+	p, err := itr.input.Next()
+	if err != nil {
+		return nil, err
+	} else if p != nil {
+		return itr.fn(p), nil
 	}
-	return nil
+	return nil, nil
 }
 
 // integerFloatTransformFunc creates or modifies a point.
@@ -1066,10 +1135,10 @@ type integerFloatCastIterator struct {
 
 func (itr *integerFloatCastIterator) Stats() IteratorStats { return itr.input.Stats() }
 func (itr *integerFloatCastIterator) Close() error         { return itr.input.Close() }
-func (itr *integerFloatCastIterator) Next() *FloatPoint {
-	p := itr.input.Next()
-	if p == nil {
-		return nil
+func (itr *integerFloatCastIterator) Next() (*FloatPoint, error) {
+	p, err := itr.input.Next()
+	if p == nil || err != nil {
+		return nil, err
 	}
 
 	return &FloatPoint{
@@ -1079,7 +1148,7 @@ func (itr *integerFloatCastIterator) Next() *FloatPoint {
 		Nil:   p.Nil,
 		Value: float64(p.Value),
 		Aux:   p.Aux,
-	}
+	}, nil
 }
 
 // IteratorStats represents statistics about an iterator.
@@ -1109,3 +1178,62 @@ func decodeIteratorStats(pb *internal.IteratorStats) IteratorStats {
 		PointN:  int(pb.GetPointN()),
 	}
 }
+
+// floatFastDedupeIterator outputs unique points where the point has a single aux field.
+type floatFastDedupeIterator struct {
+	input FloatIterator
+	m     map[fastDedupeKey]struct{} // lookup of points already sent
+}
+
+// newFloatFastDedupeIterator returns a new instance of floatFastDedupeIterator.
+func newFloatFastDedupeIterator(input FloatIterator) *floatFastDedupeIterator {
+	return &floatFastDedupeIterator{
+		input: input,
+		m:     make(map[fastDedupeKey]struct{}),
+	}
+}
+
+// Stats returns stats from the input iterator.
+func (itr *floatFastDedupeIterator) Stats() IteratorStats { return itr.input.Stats() }
+
+// Close closes the iterator and all child iterators.
+func (itr *floatFastDedupeIterator) Close() error { return itr.input.Close() }
+
+// Next returns the next unique point from the input iterator.
+func (itr *floatFastDedupeIterator) Next() (*FloatPoint, error) {
+	for {
+		// Read next point.
+		// Skip if there are not any aux fields.
+		p, err := itr.input.Next()
+		if p == nil || err != nil {
+			return nil, err
+		} else if len(p.Aux) == 0 {
+			continue
+		}
+
+		// If the point has already been output then move to the next point.
+		key := fastDedupeKey{name: p.Name}
+		key.values[0] = p.Aux[0]
+		if len(p.Aux) > 1 {
+			key.values[1] = p.Aux[1]
+		}
+		if _, ok := itr.m[key]; ok {
+			continue
+		}
+
+		// Otherwise mark it as emitted and return point.
+		itr.m[key] = struct{}{}
+		return p, nil
+	}
+}
+
+type fastDedupeKey struct {
+	name   string
+	values [2]interface{}
+}
+
+type reverseStringSlice []string
+
+func (p reverseStringSlice) Len() int           { return len(p) }
+func (p reverseStringSlice) Less(i, j int) bool { return p[i] > p[j] }
+func (p reverseStringSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }

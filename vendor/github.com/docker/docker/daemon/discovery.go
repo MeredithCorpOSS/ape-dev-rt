@@ -56,12 +56,6 @@ func discoveryOpts(clusterOpts map[string]string) (time.Duration, time.Duration,
 		if err != nil {
 			return time.Duration(0), time.Duration(0), err
 		}
-
-		if h <= 0 {
-			return time.Duration(0), time.Duration(0),
-				fmt.Errorf("discovery.heartbeat must be positive")
-		}
-
 		heartbeat = time.Duration(h) * time.Second
 		ttl = defaultDiscoveryTTLFactor * heartbeat
 	}
@@ -71,12 +65,6 @@ func discoveryOpts(clusterOpts map[string]string) (time.Duration, time.Duration,
 		if err != nil {
 			return time.Duration(0), time.Duration(0), err
 		}
-
-		if t <= 0 {
-			return time.Duration(0), time.Duration(0),
-				fmt.Errorf("discovery.ttl must be positive")
-		}
-
 		ttl = time.Duration(t) * time.Second
 
 		if _, ok := clusterOpts["discovery.heartbeat"]; !ok {

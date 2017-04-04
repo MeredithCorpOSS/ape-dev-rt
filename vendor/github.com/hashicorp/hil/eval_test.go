@@ -704,6 +704,22 @@ func TestEvalInternal(t *testing.T) {
 		},
 
 		{
+			"foo ${0.5 * 75}",
+			nil,
+			false,
+			"foo 37.5",
+			ast.TypeString,
+		},
+
+		{
+			"foo ${75 * 0.5}",
+			nil,
+			false,
+			"foo 37.5",
+			ast.TypeString,
+		},
+
+		{
 			"foo ${42+2*2}",
 			nil,
 			false,
@@ -1584,6 +1600,51 @@ func TestEvalInternal(t *testing.T) {
 			},
 			false,
 			"foo -36",
+			ast.TypeString,
+		},
+
+		{
+			"${var.foo > 1 ? 5 : 0}",
+			&ast.BasicScope{
+				VarMap: map[string]ast.Variable{
+					"var.foo": ast.Variable{
+						Type:  ast.TypeString,
+						Value: "3",
+					},
+				},
+			},
+			false,
+			"5",
+			ast.TypeString,
+		},
+
+		{
+			"${var.foo > 1.5 ? 5 : 0}",
+			&ast.BasicScope{
+				VarMap: map[string]ast.Variable{
+					"var.foo": ast.Variable{
+						Type:  ast.TypeString,
+						Value: "3",
+					},
+				},
+			},
+			false,
+			"5",
+			ast.TypeString,
+		},
+
+		{
+			"${var.foo > 1.5 ? 5 : 0}",
+			&ast.BasicScope{
+				VarMap: map[string]ast.Variable{
+					"var.foo": ast.Variable{
+						Type:  ast.TypeString,
+						Value: "1.2",
+					},
+				},
+			},
+			false,
+			"0",
 			ast.TypeString,
 		},
 	}

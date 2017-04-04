@@ -44,8 +44,8 @@ func (d *driver) CreateNetwork(nid string, option map[string]interface{}, nInfo 
 	case "", modeBridge:
 		// default to macvlan bridge mode if -o macvlan_mode is empty
 		config.MacvlanMode = modeBridge
-	case modePrivate:
-		config.MacvlanMode = modePrivate
+	case modeOpt:
+		config.MacvlanMode = modeOpt
 	case modePassthru:
 		config.MacvlanMode = modePassthru
 	case modeVepa:

@@ -11,13 +11,13 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
-	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/chrootarchive"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/utils"
 	"github.com/docker/docker/volume"
+	containertypes "github.com/docker/engine-api/types/container"
 	"github.com/opencontainers/runc/libcontainer/label"
 )
 
@@ -52,13 +52,13 @@ type ExitStatus struct {
 // environment variables related to links.
 // Sets PATH, HOSTNAME and if container.Config.Tty is set: TERM.
 // The defaults set here do not override the values in container.Config.Env
-func (container *Container) CreateDaemonEnvironment(tty bool, linkedEnv []string) []string {
+func (container *Container) CreateDaemonEnvironment(linkedEnv []string) []string {
 	// Setup environment
 	env := []string{
 		"PATH=" + system.DefaultPathEnv,
 		"HOSTNAME=" + container.Config.Hostname,
 	}
-	if tty {
+	if container.Config.Tty {
 		env = append(env, "TERM=xterm")
 	}
 	env = append(env, linkedEnv...)
@@ -129,7 +129,7 @@ func (container *Container) NetworkMounts() []Mount {
 				Source:      container.ResolvConfPath,
 				Destination: "/etc/resolv.conf",
 				Writable:    writable,
-				Propagation: string(volume.DefaultPropagationMode),
+				Propagation: volume.DefaultPropagationMode,
 			})
 		}
 	}
@@ -148,7 +148,7 @@ func (container *Container) NetworkMounts() []Mount {
 				Source:      container.HostnamePath,
 				Destination: "/etc/hostname",
 				Writable:    writable,
-				Propagation: string(volume.DefaultPropagationMode),
+				Propagation: volume.DefaultPropagationMode,
 			})
 		}
 	}
@@ -167,7 +167,7 @@ func (container *Container) NetworkMounts() []Mount {
 				Source:      container.HostsPath,
 				Destination: "/etc/hosts",
 				Writable:    writable,
-				Propagation: string(volume.DefaultPropagationMode),
+				Propagation: volume.DefaultPropagationMode,
 			})
 		}
 	}
@@ -199,9 +199,6 @@ func (container *Container) CopyImagePathContent(v volume.Volume, destination st
 			logrus.Warnf("error while unmounting volume %s: %v", v.Name(), err)
 		}
 	}()
-	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != syscall.ENOTSUP {
-		return err
-	}
 	return copyExistingContents(rootfs, path)
 }
 
@@ -252,7 +249,7 @@ func (container *Container) IpcMounts() []Mount {
 			Source:      container.ShmPath,
 			Destination: "/dev/shm",
 			Writable:    true,
-			Propagation: string(volume.DefaultPropagationMode),
+			Propagation: volume.DefaultPropagationMode,
 		})
 	}
 
@@ -305,9 +302,6 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 
 	// update HostConfig of container
 	if hostConfig.RestartPolicy.Name != "" {
-		if container.HostConfig.AutoRemove && !hostConfig.RestartPolicy.IsNone() {
-			return fmt.Errorf("Restart policy cannot be updated because AutoRemove is enabled for the container")
-		}
 		container.HostConfig.RestartPolicy = hostConfig.RestartPolicy
 	}
 
@@ -427,9 +421,4 @@ func cleanResourcePath(path string) string {
 // can be mounted locally. A no-op on non-Windows platforms
 func (container *Container) canMountFS() bool {
 	return true
-}
-
-// EnableServiceDiscoveryOnDefaultNetwork Enable service discovery on default network
-func (container *Container) EnableServiceDiscoveryOnDefaultNetwork() bool {
-	return false
 }

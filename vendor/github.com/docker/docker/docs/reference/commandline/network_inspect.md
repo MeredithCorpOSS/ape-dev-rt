@@ -1,17 +1,12 @@
----
-title: "network inspect"
-description: "The network inspect command description and usage"
-keywords: ["network, inspect, user-defined"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "network inspect"
+description = "The network inspect command description and usage"
+keywords = ["network, inspect, user-defined"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # network inspect
 
@@ -21,7 +16,7 @@ Usage:  docker network inspect [OPTIONS] NETWORK [NETWORK...]
 Display detailed information on one or more networks
 
 Options:
-  -f, --format string   Format the output using the given Go template
+  -f, --format string   Format the output using the given go template
       --help            Print usage
 ```
 
@@ -50,7 +45,6 @@ $ sudo docker network inspect bridge
     {
         "Name": "bridge",
         "Id": "b2b1a2cba717161d984383fd68218cf70bbbd17d328496885f7c921333228b0f",
-        "Created": "2016-10-19T04:33:30.360899459Z",
         "Scope": "local",
         "Driver": "bridge",
         "IPAM": {
@@ -86,8 +80,7 @@ $ sudo docker network inspect bridge
             "com.docker.network.bridge.host_binding_ipv4": "0.0.0.0",
             "com.docker.network.bridge.name": "docker0",
             "com.docker.network.driver.mtu": "1500"
-        },
-        "Labels": {}
+        }
     }
 ]
 ```
@@ -102,7 +95,6 @@ $ docker network inspect simple-network
     {
         "Name": "simple-network",
         "Id": "69568e6336d8c96bbf57869030919f7c69524f71183b44d80948bd3927c87f6a",
-        "Created": "2016-10-19T04:33:30.360899459Z",
         "Scope": "local",
         "Driver": "bridge",
         "IPAM": {
@@ -110,13 +102,12 @@ $ docker network inspect simple-network
             "Config": [
                 {
                     "Subnet": "172.22.0.0/16",
-                    "Gateway": "172.22.0.1"
+                    "Gateway": "172.22.0.1/16"
                 }
             ]
         },
         "Containers": {},
-        "Options": {},
-        "Labels": {}
+        "Options": {}
     }
 ]
 ```
@@ -128,4 +119,4 @@ $ docker network inspect simple-network
 * [network create](network_create.md)
 * [network ls](network_ls.md)
 * [network rm](network_rm.md)
-* [Understand Docker container networks](https://docs.docker.com/engine/userguide/networking/)
+* [Understand Docker container networks](../../userguide/networking/dockernetworks.md)

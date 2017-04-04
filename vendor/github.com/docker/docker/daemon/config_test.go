@@ -7,9 +7,43 @@ import (
 	"testing"
 
 	"github.com/docker/docker/opts"
-	"github.com/docker/docker/pkg/testutil/assert"
-	"github.com/spf13/pflag"
+	"github.com/docker/docker/pkg/mflag"
 )
+
+func TestDaemonConfigurationMerge(t *testing.T) {
+	f, err := ioutil.TempFile("", "docker-config-")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configFile := f.Name()
+	f.Write([]byte(`{"debug": true}`))
+	f.Close()
+
+	c := &Config{
+		CommonConfig: CommonConfig{
+			AutoRestart: true,
+			LogConfig: LogConfig{
+				Type:   "syslog",
+				Config: map[string]string{"tag": "test"},
+			},
+		},
+	}
+
+	cc, err := MergeDaemonConfigurations(c, nil, configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cc.Debug {
+		t.Fatalf("expected %v, got %v\n", true, cc.Debug)
+	}
+	if !cc.AutoRestart {
+		t.Fatalf("expected %v, got %v\n", true, cc.AutoRestart)
+	}
+	if cc.LogConfig.Type != "syslog" {
+		t.Fatalf("expected syslog config, got %q\n", cc.LogConfig)
+	}
+}
 
 func TestDaemonConfigurationNotFound(t *testing.T) {
 	_, err := MergeDaemonConfigurations(&Config{}, nil, "/tmp/foo-bar-baz-docker")
@@ -53,26 +87,42 @@ func TestParseClusterAdvertiseSettings(t *testing.T) {
 
 func TestFindConfigurationConflicts(t *testing.T) {
 	config := map[string]interface{}{"authorization-plugins": "foobar"}
-	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
 
-	flags.String("authorization-plugins", "", "")
-	assert.NilError(t, flags.Set("authorization-plugins", "asdf"))
+	flags.String([]string{"-authorization-plugins"}, "", "")
+	if err := flags.Set("-authorization-plugins", "asdf"); err != nil {
+		t.Fatal(err)
+	}
 
-	assert.Error(t,
-		findConfigurationConflicts(config, flags),
-		"authorization-plugins: (from flag: asdf, from file: foobar)")
+	err := findConfigurationConflicts(config, flags)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "authorization-plugins: (from flag: asdf, from file: foobar)") {
+		t.Fatalf("expected authorization-plugins conflict, got %v", err)
+	}
 }
 
 func TestFindConfigurationConflictsWithNamedOptions(t *testing.T) {
 	config := map[string]interface{}{"hosts": []string{"qwer"}}
-	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
 
 	var hosts []string
-	flags.VarP(opts.NewNamedListOptsRef("hosts", &hosts, opts.ValidateHost), "host", "H", "Daemon socket(s) to connect to")
-	assert.NilError(t, flags.Set("host", "tcp://127.0.0.1:4444"))
-	assert.NilError(t, flags.Set("host", "unix:///var/run/docker.sock"))
+	flags.Var(opts.NewNamedListOptsRef("hosts", &hosts, opts.ValidateHost), []string{"H", "-host"}, "Daemon socket(s) to connect to")
+	if err := flags.Set("-host", "tcp://127.0.0.1:4444"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flags.Set("H", "unix:///var/run/docker.sock"); err != nil {
+		t.Fatal(err)
+	}
 
-	assert.Error(t, findConfigurationConflicts(config, flags), "hosts")
+	err := findConfigurationConflicts(config, flags)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "hosts") {
+		t.Fatalf("expected hosts conflict, got %v", err)
+	}
 }
 
 func TestDaemonConfigurationMergeConflicts(t *testing.T) {
@@ -85,8 +135,8 @@ func TestDaemonConfigurationMergeConflicts(t *testing.T) {
 	f.Write([]byte(`{"debug": true}`))
 	f.Close()
 
-	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	flags.Bool("debug", false, "")
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
+	flags.Bool([]string{"debug"}, false, "")
 	flags.Set("debug", "false")
 
 	_, err = MergeDaemonConfigurations(&Config{}, flags, configFile)
@@ -108,8 +158,8 @@ func TestDaemonConfigurationMergeConflictsWithInnerStructs(t *testing.T) {
 	f.Write([]byte(`{"tlscacert": "/etc/certificates/ca.pem"}`))
 	f.Close()
 
-	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	flags.String("tlscacert", "", "")
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
+	flags.String([]string{"tlscacert"}, "", "")
 	flags.Set("tlscacert", "~/.docker/ca.pem")
 
 	_, err = MergeDaemonConfigurations(&Config{}, flags, configFile)
@@ -123,9 +173,9 @@ func TestDaemonConfigurationMergeConflictsWithInnerStructs(t *testing.T) {
 
 func TestFindConfigurationConflictsWithUnknownKeys(t *testing.T) {
 	config := map[string]interface{}{"tls-verify": "true"}
-	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
 
-	flags.Bool("tlsverify", false, "")
+	flags.Bool([]string{"-tlsverify"}, false, "")
 	err := findConfigurationConflicts(config, flags)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -138,15 +188,18 @@ func TestFindConfigurationConflictsWithUnknownKeys(t *testing.T) {
 func TestFindConfigurationConflictsWithMergedValues(t *testing.T) {
 	var hosts []string
 	config := map[string]interface{}{"hosts": "tcp://127.0.0.1:2345"}
-	flags := pflag.NewFlagSet("base", pflag.ContinueOnError)
-	flags.VarP(opts.NewNamedListOptsRef("hosts", &hosts, nil), "host", "H", "")
+	base := mflag.NewFlagSet("base", mflag.ContinueOnError)
+	base.Var(opts.NewNamedListOptsRef("hosts", &hosts, nil), []string{"H", "-host"}, "")
+
+	flags := mflag.NewFlagSet("test", mflag.ContinueOnError)
+	mflag.Merge(flags, base)
 
 	err := findConfigurationConflicts(config, flags)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	flags.Set("host", "unix:///var/run/docker.sock")
+	flags.Set("-host", "unix:///var/run/docker.sock")
 	err = findConfigurationConflicts(config, flags)
 	if err == nil {
 		t.Fatal("expected error, got nil")

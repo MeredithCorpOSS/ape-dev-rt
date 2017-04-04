@@ -37,11 +37,19 @@ type Sandbox interface {
 	Rename(name string) error
 	// Delete destroys this container after detaching it from all connected endpoints.
 	Delete() error
-	// Endpoints returns all the endpoints connected to the sandbox
-	Endpoints() []Endpoint
+	// ResolveName resolves a service name to an IPv4 or IPv6 address by searching
+	// the networks the sandbox is connected to. For IPv6 queries, second return
+	// value will be true if the name exists in docker domain but doesn't have an
+	// IPv6 address. Such queries shouldn't be forwarded to external nameservers.
+	ResolveName(name string, iplen int) ([]net.IP, bool)
+	// ResolveIP returns the service name for the passed in IP. IP is in reverse dotted
+	// notation; the format used for DNS PTR records
+	ResolveIP(name string) string
 	// ResolveService returns all the backend details about the containers or hosts
 	// backing a service. Its purpose is to satisfy an SRV query
-	ResolveService(name string) ([]*net.SRV, []net.IP)
+	ResolveService(name string) ([]*net.SRV, []net.IP, error)
+	// Endpoints returns all the endpoints connected to the sandbox
+	Endpoints() []Endpoint
 }
 
 // SandboxOption is an option setter function type used to pass various options to
@@ -78,7 +86,6 @@ type sandbox struct {
 	isStub             bool
 	inDelete           bool
 	ingress            bool
-	ndotsSet           bool
 	sync.Mutex
 }
 
@@ -123,10 +130,6 @@ type containerConfig struct {
 	exposedPorts      []types.TransportPort
 }
 
-const (
-	resolverIPSandbox = "127.0.0.11"
-)
-
 func (sb *sandbox) ID() string {
 	return sb.id
 }
@@ -144,7 +147,7 @@ func (sb *sandbox) Key() string {
 
 func (sb *sandbox) Labels() map[string]interface{} {
 	sb.Lock()
-	defer sb.Unlock()
+	sb.Unlock()
 	opts := make(map[string]interface{}, len(sb.config.generic))
 	for k, v := range sb.config.generic {
 		opts[k] = v
@@ -199,14 +202,12 @@ func (sb *sandbox) delete(force bool) error {
 	retain := false
 	for _, ep := range sb.getConnectedEndpoints() {
 		// gw network endpoint detach and removal are automatic
-		if ep.endpointInGWNetwork() && !force {
+		if ep.endpointInGWNetwork() {
 			continue
 		}
 		// Retain the sanbdox if we can't obtain the network from store.
 		if _, err := c.getNetworkFromStore(ep.getNetwork().ID()); err != nil {
-			if c.isDistributedControl() {
-				retain = true
-			}
+			retain = true
 			log.Warnf("Failed getting network for ep %s during sandbox %s delete: %v", ep.ID(), sb.ID(), err)
 			continue
 		}
@@ -411,74 +412,90 @@ func (sb *sandbox) ResolveIP(ip string) string {
 
 	for _, ep := range sb.getConnectedEndpoints() {
 		n := ep.getNetwork()
-		svc = n.ResolveIP(ip)
-		if len(svc) != 0 {
-			return svc
+
+		c := n.getController()
+
+		c.Lock()
+		sr, ok := c.svcRecords[n.ID()]
+		c.Unlock()
+
+		if !ok {
+			continue
+		}
+
+		nwName := n.Name()
+		n.Lock()
+		svc, ok = sr.ipMap[ip]
+		n.Unlock()
+		if ok {
+			return svc + "." + nwName
 		}
 	}
-
 	return svc
 }
 
-func (sb *sandbox) ExecFunc(f func()) error {
-	return sb.osSbox.InvokeFunc(f)
+func (sb *sandbox) execFunc(f func()) {
+	sb.osSbox.InvokeFunc(f)
 }
 
-func (sb *sandbox) ResolveService(name string) ([]*net.SRV, []net.IP) {
+func (sb *sandbox) ResolveService(name string) ([]*net.SRV, []net.IP, error) {
 	srv := []*net.SRV{}
 	ip := []net.IP{}
 
 	log.Debugf("Service name To resolve: %v", name)
 
-	// There are DNS implementaions that allow SRV queries for names not in
-	// the format defined by RFC 2782. Hence specific validations checks are
-	// not done
 	parts := strings.Split(name, ".")
 	if len(parts) < 3 {
-		return nil, nil
+		return nil, nil, fmt.Errorf("invalid service name, %s", name)
 	}
+
+	portName := parts[0]
+	proto := parts[1]
+	if proto != "_tcp" && proto != "_udp" {
+		return nil, nil, fmt.Errorf("invalid protocol in service, %s", name)
+	}
+	svcName := strings.Join(parts[2:], ".")
 
 	for _, ep := range sb.getConnectedEndpoints() {
 		n := ep.getNetwork()
 
-		srv, ip = n.ResolveService(name)
+		c := n.getController()
+
+		c.Lock()
+		sr, ok := c.svcRecords[n.ID()]
+		c.Unlock()
+
+		if !ok {
+			continue
+		}
+
+		svcs, ok := sr.service[svcName]
+		if !ok {
+			continue
+		}
+
+		for _, svc := range svcs {
+			if svc.portName != portName {
+				continue
+			}
+			if svc.proto != proto {
+				continue
+			}
+			for _, t := range svc.target {
+				srv = append(srv,
+					&net.SRV{
+						Target: t.name,
+						Port:   t.port,
+					})
+
+				ip = append(ip, t.ip)
+			}
+		}
 		if len(srv) > 0 {
 			break
 		}
 	}
-	return srv, ip
-}
-
-func getDynamicNwEndpoints(epList []*endpoint) []*endpoint {
-	eps := []*endpoint{}
-	for _, ep := range epList {
-		n := ep.getNetwork()
-		if n.dynamic && !n.ingress {
-			eps = append(eps, ep)
-		}
-	}
-	return eps
-}
-
-func getIngressNwEndpoint(epList []*endpoint) *endpoint {
-	for _, ep := range epList {
-		n := ep.getNetwork()
-		if n.ingress {
-			return ep
-		}
-	}
-	return nil
-}
-
-func getLocalNwEndpoints(epList []*endpoint) []*endpoint {
-	eps := []*endpoint{}
-	for _, ep := range epList {
-		n := ep.getNetwork()
-		if !n.dynamic && !n.ingress {
-			eps = append(eps, ep)
-		}
-	}
-	return eps
+	return srv, ip, nil
 }
 
 func (sb *sandbox) ResolveName(name string, ipType int) ([]net.IP, bool) {
@@ -511,21 +528,6 @@ func (sb *sandbox) ResolveName(name string, ipType int) ([]net.IP, bool) {
 	}
 
 	epList := sb.getConnectedEndpoints()
-
-	// In swarm mode services with exposed ports are connected to user overlay
-	// network, ingress network and docker_gwbridge network. Name resolution
-	// should prioritize returning the VIP/IPs on user overlay network.
-	newList := []*endpoint{}
-	if !sb.controller.isDistributedControl() {
-		newList = append(newList, getDynamicNwEndpoints(epList)...)
-		ingressEP := getIngressNwEndpoint(epList)
-		if ingressEP != nil {
-			newList = append(newList, ingressEP)
-		}
-		newList = append(newList, getLocalNwEndpoints(epList)...)
-		epList = newList
-	}
-
 	for i := 0; i < len(reqName); i++ {
 
 		// First check for local container alias
@@ -583,14 +585,32 @@ func (sb *sandbox) resolveName(req string, networkName string, epList []*endpoin
 			ep.Unlock()
 		}
 
-		ip, miss := n.ResolveName(name, ipType)
+		c := n.getController()
+		c.Lock()
+		sr, ok := c.svcRecords[n.ID()]
+		c.Unlock()
 
-		if ip != nil {
-			return ip, false
+		if !ok {
+			continue
 		}
 
-		if miss {
-			ipv6Miss = miss
+		var ip []net.IP
+		n.Lock()
+		ip, ok = sr.svcMap[name]
+
+		if ipType == types.IPv6 {
+			// If the name resolved to v4 address then its a valid name in
+			// the docker network domain. If the network is not v6 enabled
+			// set ipv6Miss to filter the DNS query from going to external
+			// resolvers.
+			if ok && n.enableIPv6 == false {
+				ipv6Miss = true
+			}
+			ip = sr.svcIPv6Map[name]
+		}
+		n.Unlock()
+		if ip != nil {
+			return ip, false
 		}
 	}
 	return nil, ipv6Miss
@@ -638,12 +658,9 @@ func (sb *sandbox) SetKey(basePath string) error {
 	if oldosSbox != nil && sb.resolver != nil {
 		sb.resolver.Stop()
 
-		if err := sb.osSbox.InvokeFunc(sb.resolver.SetupFunc(0)); err == nil {
-			if err := sb.resolver.Start(); err != nil {
-				log.Errorf("Resolver Start failed for container %s, %q", sb.ContainerID(), err)
-			}
-		} else {
-			log.Errorf("Resolver Setup Function failed for container %s, %q", sb.ContainerID(), err)
+		sb.osSbox.InvokeFunc(sb.resolver.SetupFunc())
+		if err := sb.resolver.Start(); err != nil {
+			log.Errorf("Resolver Setup/Start failed for container %s, %q", sb.ContainerID(), err)
 		}
 	}
 
@@ -848,9 +865,8 @@ func (sb *sandbox) clearNetworkResources(origEp *endpoint) error {
 		releaseOSSboxResources(osSbox, ep)
 	}
 
-	sb.Lock()
 	delete(sb.populatedEndpoints, ep.ID())
-
+	sb.Lock()
 	if len(sb.endpoints) == 0 {
 		// sb.endpoints should never be empty and this is unexpected error condition
 		// We log an error message to note this down for debugging purposes.
@@ -1164,8 +1180,4 @@ func (eh *epHeap) Pop() interface{} {
 	x := old[n-1]
 	*eh = old[0 : n-1]
 	return x
-}
-
-func (sb *sandbox) NdotsSet() bool {
-	return sb.ndotsSet
 }

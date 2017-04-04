@@ -6,19 +6,13 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/utils"
-
-	"github.com/docker/docker/cli/command"
 )
 
 func TestClientDebugEnabled(t *testing.T) {
 	defer utils.DisableDebug()
 
-	cmd := newDockerCommand(&command.DockerCli{})
-	cmd.Flags().Set("debug", "true")
-
-	if err := cmd.PersistentPreRunE(cmd, []string{}); err != nil {
-		t.Fatalf("Unexpected error: %s", err.Error())
-	}
+	clientFlags.Common.FlagSet.Parse([]string{"-D"})
+	clientFlags.PostParse()
 
 	if os.Getenv("DEBUG") != "1" {
 		t.Fatal("expected debug enabled, got false")

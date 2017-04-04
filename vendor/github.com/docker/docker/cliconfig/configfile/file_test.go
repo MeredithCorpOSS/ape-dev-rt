@@ -3,7 +3,7 @@ package configfile
 import (
 	"testing"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/engine-api/types"
 )
 
 func TestEncodeAuth(t *testing.T) {

@@ -6,18 +6,19 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/server/httputils"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/backend"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/signal"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/container"
+	"github.com/docker/engine-api/types/filters"
+	"github.com/docker/engine-api/types/versions"
 	"golang.org/x/net/context"
 	"golang.org/x/net/websocket"
 )
@@ -136,7 +137,7 @@ func (s *containerRouter) postContainersStart(ctx context.Context, w http.Respon
 	// A non-nil json object is at least 7 characters.
 	if r.ContentLength > 7 || r.ContentLength == -1 {
 		if versions.GreaterThanOrEqualTo(version, "1.24") {
-			return validationError{fmt.Errorf("starting container with non-empty request body was deprecated since v1.10 and removed in v1.12")}
+			return validationError{fmt.Errorf("starting container with HostConfig was deprecated since v1.10 and removed in v1.12")}
 		}
 
 		if err := httputils.CheckForJSON(r); err != nil {
@@ -150,16 +151,10 @@ func (s *containerRouter) postContainersStart(ctx context.Context, w http.Respon
 		hostConfig = c
 	}
 
-	if err := httputils.ParseForm(r); err != nil {
-		return err
-	}
-
-	checkpoint := r.Form.Get("checkpoint")
 	validateHostname := versions.GreaterThanOrEqualTo(version, "1.24")
-	if err := s.backend.ContainerStart(vars["name"], hostConfig, validateHostname, checkpoint); err != nil {
+	if err := s.backend.ContainerStart(vars["name"], hostConfig, validateHostname); err != nil {
 		return err
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -169,14 +164,7 @@ func (s *containerRouter) postContainersStop(ctx context.Context, w http.Respons
 		return err
 	}
 
-	var seconds *int
-	if tmpSeconds := r.Form.Get("t"); tmpSeconds != "" {
-		valSeconds, err := strconv.Atoi(tmpSeconds)
-		if err != nil {
-			return err
-		}
-		seconds = &valSeconds
-	}
+	seconds, _ := strconv.Atoi(r.Form.Get("t"))
 
 	if err := s.backend.ContainerStop(vars["name"], seconds); err != nil {
 		return err
@@ -230,16 +218,9 @@ func (s *containerRouter) postContainersRestart(ctx context.Context, w http.Resp
 		return err
 	}
 
-	var seconds *int
-	if tmpSeconds := r.Form.Get("t"); tmpSeconds != "" {
-		valSeconds, err := strconv.Atoi(tmpSeconds)
-		if err != nil {
-			return err
-		}
-		seconds = &valSeconds
-	}
+	timeout, _ := strconv.Atoi(r.Form.Get("t"))
 
-	if err := s.backend.ContainerRestart(vars["name"], seconds); err != nil {
+	if err := s.backend.ContainerRestart(vars["name"], timeout); err != nil {
 		return err
 	}
 
@@ -346,12 +327,14 @@ func (s *containerRouter) postContainerUpdate(ctx context.Context, w http.Respon
 
 	name := vars["name"]
 	validateHostname := versions.GreaterThanOrEqualTo(version, "1.24")
-	resp, err := s.backend.ContainerUpdate(name, hostConfig, validateHostname)
+	warnings, err := s.backend.ContainerUpdate(name, hostConfig, validateHostname)
 	if err != nil {
 		return err
 	}
 
-	return httputils.WriteJSON(w, http.StatusOK, resp)
+	return httputils.WriteJSON(w, http.StatusOK, &types.ContainerUpdateResponse{
+		Warnings: warnings,
+	})
 }
 
 func (s *containerRouter) postContainersCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -399,6 +382,10 @@ func (s *containerRouter) deleteContainers(ctx context.Context, w http.ResponseW
 	}
 
 	if err := s.backend.ContainerRm(name, config); err != nil {
+		// Force a 404 for the empty string
+		if strings.Contains(strings.ToLower(err.Error()), "prefix can't be empty") {
+			return fmt.Errorf("no such container: \"\"")
+		}
 		return err
 	}
 
@@ -537,25 +524,4 @@ func (s *containerRouter) wsContainersAttach(ctx context.Context, w http.Respons
 	default:
 	}
 	return err
-}
-
-func (s *containerRouter) postContainersPrune(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if err := httputils.ParseForm(r); err != nil {
-		return err
-	}
-
-	if err := httputils.CheckForJSON(r); err != nil {
-		return err
-	}
-
-	var cfg types.ContainersPruneConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		return err
-	}
-
-	pruneReport, err := s.backend.ContainersPrune(&cfg)
-	if err != nil {
-		return err
-	}
-	return httputils.WriteJSON(w, http.StatusOK, pruneReport)
 }

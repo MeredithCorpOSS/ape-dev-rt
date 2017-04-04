@@ -1,22 +1,17 @@
----
-title: "network create"
-description: "The network create command description and usage"
-keywords: ["network, create"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "network create"
+description = "The network create command description and usage"
+keywords = ["network, create"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # network create
 
 ```markdown
-Usage:	docker network create [OPTIONS] NETWORK
+Usage:	docker network create [OPTIONS]
 
 Create a network
 
@@ -68,7 +63,7 @@ The `dockerd` options that support the `overlay` network are:
 * `--cluster-advertise`
 
 To read more about these options and how to configure them, see ["*Get started
-with multi-host network*"](https://docs.docker.com/engine/userguide/networking/get-started-overlay).
+with multi-host network*"](../../userguide/networking/get-started-overlay.md).
 
 While not required, it is a good idea to install Docker Swarm to
 manage the cluster that makes up your network. Swarm provides sophisticated
@@ -138,11 +133,11 @@ support it you can create multiple subnetworks.
 $ docker network create -d overlay \
   --subnet=192.168.0.0/16 \
   --subnet=192.170.0.0/16 \
-  --gateway=192.168.0.100 \
+  --gateway=192.168.0.100 \ 
   --gateway=192.170.0.100 \
   --ip-range=192.168.1.0/24 \
-  --aux-address="my-router=192.168.1.5" --aux-address="my-switch=192.168.1.6" \
-  --aux-address="my-printer=192.170.1.5" --aux-address="my-nas=192.170.1.6" \
+  --aux-address a=192.168.1.5 --aux-address b=192.168.1.6 \
+  --aux-address a=192.170.1.5 --aux-address b=192.170.1.6 \
   my-multihost-network
 ```
 
@@ -161,7 +156,7 @@ equivalent docker daemon flags used for docker0 bridge:
 | `com.docker.network.bridge.enable_ip_masquerade` | `--ip-masq` | Enable IP masquerading                                |
 | `com.docker.network.bridge.enable_icc`           | `--icc`     | Enable or Disable Inter Container Connectivity        |
 | `com.docker.network.bridge.host_binding_ipv4`    | `--ip`      | Default IP when binding container ports               |
-| `com.docker.network.driver.mtu`                  | `--mtu`     | Set the containers network MTU                        |
+| `com.docker.network.mtu`                         | `--mtu`     | Set the containers network MTU                        |
 
 The following arguments can be passed to `docker network create` for any
 network driver, again with their approximate equivalents to `docker daemon`.
@@ -197,4 +192,4 @@ to create an externally isolated `overlay` network, you can specify the
 * [network disconnect](network_disconnect.md)
 * [network ls](network_ls.md)
 * [network rm](network_rm.md)
-* [Understand Docker container networks](https://docs.docker.com/engine/userguide/networking/)
+* [Understand Docker container networks](../../userguide/networking/dockernetworks.md)

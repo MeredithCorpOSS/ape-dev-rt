@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/integration/checker"
-	icmd "github.com/docker/docker/pkg/integration/cmd"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/go-check/check"
 )
@@ -136,7 +135,6 @@ func assertContainerList(out string, expected []string) bool {
 	return true
 }
 
-// FIXME(vdemeester) Move this into a unit test in daemon package
 func (s *DockerSuite) TestPsListContainersInvalidFilterName(c *check.C) {
 	out, _, err := dockerCmdWithError("ps", "-f", "invalidFilter=test")
 	c.Assert(err, checker.NotNil)
@@ -206,11 +204,8 @@ func (s *DockerSuite) TestPsListContainersFilterStatus(c *check.C) {
 	containerOut = strings.TrimSpace(out)
 	c.Assert(containerOut, checker.Equals, secondID)
 
-	result := dockerCmdWithTimeout(time.Second*60, "ps", "-a", "-q", "--filter=status=rubbish")
-	c.Assert(result, icmd.Matches, icmd.Expected{
-		ExitCode: 1,
-		Err:      "Unrecognised filter value for status",
-	})
+	out, _, _ = dockerCmdWithTimeout(time.Second*60, "ps", "-a", "-q", "--filter=status=rubbish")
+	c.Assert(out, checker.Contains, "Unrecognised filter value for status", check.Commentf("Expected error response due to invalid status filter output: %q", out))
 
 	// Windows doesn't support pausing of containers
 	if daemonPlatform != "windows" {
@@ -566,7 +561,9 @@ func (s *DockerSuite) TestPsFormatMultiNames(c *check.C) {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	expected := []string{"parent", "child,parent/linkedone"}
 	var names []string
-	names = append(names, lines...)
+	for _, l := range lines {
+		names = append(names, l)
+	}
 	c.Assert(expected, checker.DeepEquals, names, check.Commentf("Expected array with non-truncated names: %v, got: %v", expected, names))
 
 	//now list without turning off truncation and make sure we only get the non-link names
@@ -574,7 +571,9 @@ func (s *DockerSuite) TestPsFormatMultiNames(c *check.C) {
 	lines = strings.Split(strings.TrimSpace(string(out)), "\n")
 	expected = []string{"parent", "child"}
 	var truncNames []string
-	truncNames = append(truncNames, lines...)
+	for _, l := range lines {
+		truncNames = append(truncNames, l)
+	}
 	c.Assert(expected, checker.DeepEquals, truncNames, check.Commentf("Expected array with truncated names: %v, got: %v", expected, truncNames))
 }
 
@@ -588,7 +587,9 @@ func (s *DockerSuite) TestPsNamesMultipleTime(c *check.C) {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	expected := []string{"test2 test2", "test1 test1"}
 	var names []string
-	names = append(names, lines...)
+	for _, l := range lines {
+		names = append(names, l)
+	}
 	c.Assert(expected, checker.DeepEquals, names, check.Commentf("Expected array with names displayed twice: %v, got: %v", expected, names))
 }
 
@@ -635,7 +636,7 @@ func (s *DockerSuite) TestPsImageIDAfterUpdate(c *check.C) {
 	originalImageID, err := getIDByName(originalImageName)
 	c.Assert(err, checker.IsNil)
 
-	runCmd = exec.Command(dockerBinary, append([]string{"run", "-d", originalImageName}, sleepCommandForDaemonPlatform()...)...)
+	runCmd = exec.Command(dockerBinary, append([]string{"run", "-d", originalImageName}, defaultSleepCommand...)...)
 	out, _, err = runCommandWithOutput(runCmd)
 	c.Assert(err, checker.IsNil)
 	containerID := strings.TrimSpace(out)
@@ -699,7 +700,7 @@ func (s *DockerSuite) TestPsShowMounts(c *check.C) {
 
 	mp := prefix + slash + "test"
 
-	dockerCmd(c, "volume", "create", "ps-volume-test")
+	dockerCmd(c, "volume", "create", "--name", "ps-volume-test")
 	// volume mount containers
 	runSleepingContainer(c, "--name=volume-test-1", "--volume", "ps-volume-test:"+mp)
 	c.Assert(waitRun("volume-test-1"), checker.IsNil)
@@ -896,9 +897,4 @@ func (s *DockerSuite) TestPsByOrder(c *check.C) {
 	out, err = dockerCmd(c, "ps", "--no-trunc", "-q", "-f", "name=xyz")
 	c.Assert(err, checker.NotNil)
 	c.Assert(strings.TrimSpace(out), checker.Equals, fmt.Sprintf("%s\n%s", container2, container1))
-}
-
-func (s *DockerSuite) TestPsFilterMissingArgErrorCode(c *check.C) {
-	_, errCode, _ := dockerCmdWithError("ps", "--filter")
-	c.Assert(errCode, checker.Equals, 125)
 }

@@ -1,6 +1,9 @@
 package sharetypes
 
-import "github.com/gophercloud/gophercloud"
+import (
+	"github.com/gophercloud/gophercloud"
+	"github.com/gophercloud/gophercloud/pagination"
+)
 
 // ShareType contains all the information associated with an OpenStack
 // ShareType.
@@ -37,5 +40,63 @@ type CreateResult struct {
 
 // DeleteResult contains the response body and error from a Delete request.
 type DeleteResult struct {
+	gophercloud.ErrResult
+}
+
+// ShareTypePage is a pagination.pager that is returned from a call to the List function.
+type ShareTypePage struct {
+	pagination.SinglePageBase
+}
+
+// IsEmpty returns true if a ListResult contains no ShareTypes.
+func (r ShareTypePage) IsEmpty() (bool, error) {
+	shareTypes, err := ExtractShareTypes(r)
+	return len(shareTypes) == 0, err
+}
+
+// ExtractShareTypes extracts and returns ShareTypes. It is used while
+// iterating over a sharetypes.List call.
+func ExtractShareTypes(r pagination.Page) ([]ShareType, error) {
+	var s struct {
+		ShareTypes []ShareType `json:"share_types"`
+	}
+	err := (r.(ShareTypePage)).ExtractInto(&s)
+	return s.ShareTypes, err
+}
+
+// GetDefaultResult contains the response body and error from a Get Default request.
+type GetDefaultResult struct {
+	commonResult
+}
+
+// ExtraSpecs contains all the information associated with extra specifications
+// for an Openstack ShareType.
+type ExtraSpecs map[string]interface{}
+
+type extraSpecsResult struct {
+	gophercloud.Result
+}
+
+// Extract will get the ExtraSpecs object out of the commonResult object.
+func (r extraSpecsResult) Extract() (ExtraSpecs, error) {
+	var s struct {
+		Specs ExtraSpecs `json:"extra_specs"`
+	}
+	err := r.ExtractInto(&s)
+	return s.Specs, err
+}
+
+// GetExtraSpecsResult contains the response body and error from a Get Extra Specs request.
+type GetExtraSpecsResult struct {
+	extraSpecsResult
+}
+
+// SetExtraSpecsResult contains the response body and error from a Set Extra Specs request.
+type SetExtraSpecsResult struct {
+	extraSpecsResult
+}
+
+// UnsetExtraSpecsResult contains the response body and error from a Unset Extra Specs request.
+type UnsetExtraSpecsResult struct {
 	gophercloud.ErrResult
 }

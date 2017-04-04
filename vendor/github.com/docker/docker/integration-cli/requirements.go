@@ -153,18 +153,15 @@ var (
 		},
 		"Test requires support for IPv6",
 	}
-	UserNamespaceROMount = testRequirement{
+	NotGCCGO = testRequirement{
 		func() bool {
-			// quick case--userns not enabled in this test run
-			if os.Getenv("DOCKER_REMAP_ROOT") == "" {
-				return true
-			}
-			if _, _, err := dockerCmdWithError("run", "--rm", "--read-only", "busybox", "date"); err != nil {
+			out, err := exec.Command("go", "version").Output()
+			if err == nil && strings.Contains(string(out), "gccgo") {
 				return false
 			}
 			return true
 		},
-		"Test cannot be run if user namespaces enabled but readonly mounts fail on this kernel.",
+		"Test requires native Golang compiler instead of GCCGO",
 	}
 	UserNamespaceInKernel = testRequirement{
 		func() bool {
@@ -178,7 +175,6 @@ var (
 
 			// We need extra check on redhat based distributions
 			if f, err := os.Open("/sys/module/user_namespace/parameters/enable"); err == nil {
-				defer f.Close()
 				b := make([]byte, 1)
 				_, _ = f.Read(b)
 				if string(b) == "N" {
@@ -200,24 +196,6 @@ var (
 			return true
 		},
 		"Test cannot be run when remapping root",
-	}
-	IsPausable = testRequirement{
-		func() bool {
-			if daemonPlatform == "windows" {
-				return isolation == "hyperv"
-			}
-			return true
-		},
-		"Test requires containers are pausable.",
-	}
-	NotPausable = testRequirement{
-		func() bool {
-			if daemonPlatform == "windows" {
-				return isolation == "process"
-			}
-			return false
-		},
-		"Test requires containers are not pausable.",
 	}
 )
 

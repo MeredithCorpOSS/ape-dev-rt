@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/integration/checker"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/container"
 	"github.com/go-check/check"
 )
 
@@ -36,12 +36,15 @@ func (s *DockerSuite) TestInspectImage(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectInt64(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
 	dockerCmd(c, "run", "-d", "-m=300M", "--name", "inspectTest", "busybox", "true")
 	inspectOut := inspectField(c, "inspectTest", "HostConfig.Memory")
 	c.Assert(inspectOut, checker.Equals, "314572800")
 }
 
 func (s *DockerSuite) TestInspectDefault(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	//Both the container and image are named busybox. docker inspect will fetch the container JSON.
 	//If the container JSON is not available, it will go for the image JSON.
 
@@ -53,26 +56,21 @@ func (s *DockerSuite) TestInspectDefault(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectStatus(c *check.C) {
-	if daemonPlatform != "windows" {
-		defer unpauseAllContainers()
-	}
-	out, _ := runSleepingContainer(c, "-d")
+	defer unpauseAllContainers()
+	testRequires(c, DaemonIsLinux)
+	out, _ := dockerCmd(c, "run", "-d", "busybox", "top")
 	out = strings.TrimSpace(out)
 
 	inspectOut := inspectField(c, out, "State.Status")
 	c.Assert(inspectOut, checker.Equals, "running")
 
-	// Windows does not support pause/unpause on Windows Server Containers.
-	// (RS1 does for Hyper-V Containers, but production CI is not setup for that)
-	if daemonPlatform != "windows" {
-		dockerCmd(c, "pause", out)
-		inspectOut = inspectField(c, out, "State.Status")
-		c.Assert(inspectOut, checker.Equals, "paused")
+	dockerCmd(c, "pause", out)
+	inspectOut = inspectField(c, out, "State.Status")
+	c.Assert(inspectOut, checker.Equals, "paused")
 
-		dockerCmd(c, "unpause", out)
-		inspectOut = inspectField(c, out, "State.Status")
-		c.Assert(inspectOut, checker.Equals, "running")
-	}
+	dockerCmd(c, "unpause", out)
+	inspectOut = inspectField(c, out, "State.Status")
+	c.Assert(inspectOut, checker.Equals, "running")
 
 	dockerCmd(c, "stop", out)
 	inspectOut = inspectField(c, out, "State.Status")
@@ -81,9 +79,11 @@ func (s *DockerSuite) TestInspectStatus(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectTypeFlagContainer(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	//Both the container and image are named busybox. docker inspect will fetch container
 	//JSON State.Running field. If the field is true, it's a container.
-	runSleepingContainer(c, "--name=busybox", "-d")
+
+	dockerCmd(c, "run", "--name=busybox", "-d", "busybox", "top")
 
 	formatStr := "--format={{.State.Running}}"
 	out, _ := dockerCmd(c, "inspect", "--type=container", formatStr, "busybox")
@@ -91,6 +91,7 @@ func (s *DockerSuite) TestInspectTypeFlagContainer(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectTypeFlagWithNoContainer(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	//Run this test on an image named busybox. docker inspect will try to fetch container
 	//JSON. Since there is no container named busybox and --type=container, docker inspect will
 	//not try to get the image JSON. It will throw an error.
@@ -103,6 +104,7 @@ func (s *DockerSuite) TestInspectTypeFlagWithNoContainer(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectTypeFlagWithImage(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	//Both the container and image are named busybox. docker inspect will fetch image
 	//JSON as --type=image. if there is no image with name busybox, docker inspect
 	//will throw an error.
@@ -114,6 +116,7 @@ func (s *DockerSuite) TestInspectTypeFlagWithImage(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectTypeFlagWithInvalidValue(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	//Both the container and image are named busybox. docker inspect will fail
 	//as --type=foobar is not a valid value for the flag.
 
@@ -142,6 +145,7 @@ func (s *DockerSuite) TestInspectImageFilterInt(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectContainerFilterInt(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	runCmd := exec.Command(dockerBinary, "run", "-i", "-a", "stdin", "busybox", "cat")
 	runCmd.Stdin = strings.NewReader("blahblah")
 	out, _, _, err := runCommandWithStdoutStderr(runCmd)
@@ -223,7 +227,7 @@ func (s *DockerSuite) TestInspectBindMountPoint(c *check.C) {
 	vol := inspectFieldJSON(c, "test", "Mounts")
 
 	var mp []types.MountPoint
-	err := json.Unmarshal([]byte(vol), &mp)
+	err := unmarshalJSON([]byte(vol), &mp)
 	c.Assert(err, checker.IsNil)
 
 	// check that there is only one mountpoint
@@ -249,7 +253,7 @@ func (s *DockerSuite) TestInspectNamedMountPoint(c *check.C) {
 	vol := inspectFieldJSON(c, "test", "Mounts")
 
 	var mp []types.MountPoint
-	err := json.Unmarshal([]byte(vol), &mp)
+	err := unmarshalJSON([]byte(vol), &mp)
 	c.Assert(err, checker.IsNil)
 
 	// check that there is only one mountpoint
@@ -266,6 +270,7 @@ func (s *DockerSuite) TestInspectNamedMountPoint(c *check.C) {
 
 // #14947
 func (s *DockerSuite) TestInspectTimesAsRFC3339Nano(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	out, _ := dockerCmd(c, "run", "-d", "busybox", "true")
 	id := strings.TrimSpace(out)
 	startedAt := inspectField(c, id, "State.StartedAt")
@@ -287,6 +292,7 @@ func (s *DockerSuite) TestInspectTimesAsRFC3339Nano(c *check.C) {
 
 // #15633
 func (s *DockerSuite) TestInspectLogConfigNoType(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	dockerCmd(c, "create", "--name=test", "--log-opt", "max-file=42", "busybox")
 	var logConfig container.LogConfig
 
@@ -320,6 +326,18 @@ func (s *DockerSuite) TestInspectSizeFlagContainer(c *check.C) {
 
 	c.Assert(strings.TrimSpace(sz[0]), check.Not(check.Equals), "<nil>")
 	c.Assert(strings.TrimSpace(sz[1]), check.Not(check.Equals), "<nil>")
+}
+
+func (s *DockerSuite) TestInspectSizeFlagImage(c *check.C) {
+	runSleepingContainer(c, "-d")
+
+	formatStr := "--format='{{.SizeRw}},{{.SizeRootFs}}'"
+	out, _, err := dockerCmdWithError("inspect", "-s", "--type=image", formatStr, "busybox")
+
+	// Template error rather than <no value>
+	// This is a more correct behavior because images don't have sizes associated.
+	c.Assert(err, check.Not(check.IsNil))
+	c.Assert(out, checker.Contains, "Template parsing error")
 }
 
 func (s *DockerSuite) TestInspectTemplateError(c *check.C) {
@@ -367,9 +385,11 @@ func (s *DockerSuite) TestInspectStopWhenNotFound(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectHistory(c *check.C) {
-	dockerCmd(c, "run", "--name=testcont", "busybox", "echo", "hello")
+	testRequires(c, DaemonIsLinux)
+	dockerCmd(c, "run", "--name=testcont", "-d", "busybox", "top")
 	dockerCmd(c, "commit", "-m", "test comment", "testcont", "testimg")
 	out, _, err := dockerCmdWithError("inspect", "--format='{{.Comment}}'", "testimg")
+
 	c.Assert(err, check.IsNil)
 	c.Assert(out, checker.Contains, "test comment")
 }
@@ -398,6 +418,7 @@ func (s *DockerSuite) TestInspectContainerNetworkCustom(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectRootFS(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	out, _, err := dockerCmdWithError("inspect", "busybox")
 	c.Assert(err, check.IsNil)
 
@@ -406,14 +427,4 @@ func (s *DockerSuite) TestInspectRootFS(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	c.Assert(len(imageJSON[0].RootFS.Layers), checker.GreaterOrEqualThan, 1)
-}
-
-func (s *DockerSuite) TestInspectAmpersand(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-
-	name := "test"
-	out, _ := dockerCmd(c, "run", "--name", name, "--env", `TEST_ENV="soanni&rtr"`, "busybox", "env")
-	c.Assert(out, checker.Contains, `soanni&rtr`)
-	out, _ = dockerCmd(c, "inspect", name)
-	c.Assert(out, checker.Contains, `soanni&rtr`)
 }

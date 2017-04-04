@@ -17,10 +17,10 @@ limitations under the License.
 package version
 
 import (
+	"context"
 	"flag"
 	"fmt"
-
-	"golang.org/x/net/context"
+	"log"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -30,17 +30,40 @@ var gitVersion string
 
 type version struct {
 	*flags.EmptyFlag
+
+	require string
 }
 
 func init() {
-	if gitVersion == "" {
-		gitVersion = "unknown"
+	// Check that git tag in the release builds match the hardcoded version
+	if gitVersion != "" && gitVersion[1:] != flags.Version {
+		log.Panicf("version mismatch: git=%s vs govc=%s", gitVersion[1:], flags.Version)
 	}
 
 	cli.Register("version", &version{})
 }
 
-func (c *version) Run(ctx context.Context, f *flag.FlagSet) error {
-	fmt.Printf("govc %s\n", gitVersion)
+func (cmd *version) Register(ctx context.Context, f *flag.FlagSet) {
+	f.StringVar(&cmd.require, "require", "", "Require govc version >= this value")
+}
+
+func (cmd *version) Run(ctx context.Context, f *flag.FlagSet) error {
+	if cmd.require != "" {
+		v, err := flags.ParseVersion(flags.Version)
+		if err != nil {
+			panic(err)
+		}
+
+		rv, err := flags.ParseVersion(cmd.require)
+		if err != nil {
+			return fmt.Errorf("failed to parse required version '%s': %s", cmd.require, err)
+		}
+
+		if !rv.Lte(v) {
+			return fmt.Errorf("version %s or higher is required, this is version %s", cmd.require, flags.Version)
+		}
+	}
+
+	fmt.Printf("govc %s\n", flags.Version)
 	return nil
 }

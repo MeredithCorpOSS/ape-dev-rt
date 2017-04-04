@@ -5,16 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	pluginstore "github.com/docker/docker/plugin/store"
 	"github.com/docker/docker/volume/drivers"
-	volumetestutils "github.com/docker/docker/volume/testutils"
+	vt "github.com/docker/docker/volume/testutils"
 )
 
 func TestCreate(t *testing.T) {
-	pluginStore := pluginstore.NewStore("/var/lib/docker")
-	volumedrivers.RegisterPluginGetter(pluginStore)
-
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
 	defer volumedrivers.Unregister("fake")
 	s, err := New("")
 	if err != nil {
@@ -43,8 +39,8 @@ func TestCreate(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
-	volumedrivers.Register(volumetestutils.NewFakeDriver("noop"), "noop")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("noop"), "noop")
 	defer volumedrivers.Unregister("fake")
 	defer volumedrivers.Unregister("noop")
 	s, err := New("")
@@ -54,7 +50,7 @@ func TestRemove(t *testing.T) {
 
 	// doing string compare here since this error comes directly from the driver
 	expected := "no such volume"
-	if err := s.Remove(volumetestutils.NoopVolume{}); err == nil || !strings.Contains(err.Error(), expected) {
+	if err := s.Remove(vt.NoopVolume{}); err == nil || !strings.Contains(err.Error(), expected) {
 		t.Fatalf("Expected error %q, got %v", expected, err)
 	}
 
@@ -76,8 +72,8 @@ func TestRemove(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake2"), "fake2")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("fake2"), "fake2")
 	defer volumedrivers.Unregister("fake")
 	defer volumedrivers.Unregister("fake2")
 
@@ -115,8 +111,8 @@ func TestList(t *testing.T) {
 }
 
 func TestFilterByDriver(t *testing.T) {
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
-	volumedrivers.Register(volumetestutils.NewFakeDriver("noop"), "noop")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("noop"), "noop")
 	defer volumedrivers.Unregister("fake")
 	defer volumedrivers.Unregister("noop")
 	s, err := New("")
@@ -144,8 +140,8 @@ func TestFilterByDriver(t *testing.T) {
 }
 
 func TestFilterByUsed(t *testing.T) {
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
-	volumedrivers.Register(volumetestutils.NewFakeDriver("noop"), "noop")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("noop"), "noop")
 
 	s, err := New("")
 	if err != nil {
@@ -182,7 +178,7 @@ func TestFilterByUsed(t *testing.T) {
 }
 
 func TestDerefMultipleOfSameRef(t *testing.T) {
-	volumedrivers.Register(volumetestutils.NewFakeDriver("fake"), "fake")
+	volumedrivers.Register(vt.NewFakeDriver("fake"), "fake")
 
 	s, err := New("")
 	if err != nil {

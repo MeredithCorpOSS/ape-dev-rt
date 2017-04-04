@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/Sirupsen/logrus"
-	eventstestutils "github.com/docker/docker/daemon/events/testutils"
+	"github.com/docker/docker/daemon/events/testutils"
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/go-check/check"
 )

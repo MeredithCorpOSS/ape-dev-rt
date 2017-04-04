@@ -5,7 +5,7 @@
 # see https://github.com/golang/protobuf for instructions.
 # You also need Go and Git installed.
 
-PKG=github.com/golang/protobuf/ptypes
+PKG=github.com/golang/protobuf/types
 UPSTREAM=https://github.com/google/protobuf
 UPSTREAM_SUBDIR=src/google/protobuf
 PROTO_FILES='
@@ -51,11 +51,17 @@ for f in $(cd $PKG && find * -name '*.proto'); do
   fi
   filename_map[$up]=$f
 done
-# Pass 2: copy files
+# Pass 2: copy files, making necessary adjustments.
 for up in "${!filename_map[@]}"; do
   f=${filename_map[$up]}
   shortname=$(basename $f | sed 's,\.proto$,,')
-  cp $tmpdir/$UPSTREAM_SUBDIR/$up $PKG/$f
+  cat $tmpdir/$UPSTREAM_SUBDIR/$up |
+    # Adjust proto package.
+    # TODO(dsymonds): Upstream the go_package option instead.
+    sed '/^package /a option go_package = "'${shortname}'";' |
+    # Unfortunately "package struct" doesn't work.
+    sed '/option go_package/s,"struct","structpb",' |
+    cat > $PKG/$f
 done
 
 # Run protoc once per package.

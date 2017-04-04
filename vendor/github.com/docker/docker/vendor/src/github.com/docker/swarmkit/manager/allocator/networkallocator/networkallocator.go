@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/docker/docker/pkg/plugins"
-	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/driverapi"
+	"github.com/docker/libnetwork/drivers/overlay/ovmanager"
 	"github.com/docker/libnetwork/drvregistry"
 	"github.com/docker/libnetwork/ipamapi"
+	builtinIpam "github.com/docker/libnetwork/ipams/builtin"
+	nullIpam "github.com/docker/libnetwork/ipams/null"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
-	"github.com/pkg/errors"
 	"golang.org/x/net/context"
 )
 
@@ -20,6 +20,10 @@ const (
 	// default if a network without any driver name specified is
 	// created.
 	DefaultDriver = "overlay"
+)
+
+var (
+	defaultDriverInitFunc = ovmanager.Init
 )
 
 // NetworkAllocator acts as the controller for all network related operations
@@ -63,11 +67,6 @@ type network struct {
 	endpoints map[string]string
 }
 
-type initializer struct {
-	fn    drvregistry.InitFunc
-	ntype string
-}
-
 // New returns a new NetworkAllocator handle
 func New() (*NetworkAllocator, error) {
 	na := &NetworkAllocator{
@@ -79,17 +78,23 @@ func New() (*NetworkAllocator, error) {
 
 	// There are no driver configurations and notification
 	// functions as of now.
-	reg, err := drvregistry.New(nil, nil, nil, nil, nil)
+	reg, err := drvregistry.New(nil, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := initializeDrivers(reg); err != nil {
+	// Add the manager component of overlay driver to the registry.
+	if err := reg.AddDriver(DefaultDriver, defaultDriverInitFunc, nil); err != nil {
 		return nil, err
 	}
 
-	if err = initIPAMDrivers(reg); err != nil {
-		return nil, err
+	for _, fn := range [](func(ipamapi.Callback, interface{}, interface{}) error){
+		builtinIpam.Init,
+		nullIpam.Init,
+	} {
+		if err := fn(reg, nil, nil); err != nil {
+			return nil, err
+		}
 	}
 
 	pa, err := newPortAllocator()
@@ -111,12 +116,12 @@ func (na *NetworkAllocator) Allocate(n *api.Network) error {
 
 	pools, err := na.allocatePools(n)
 	if err != nil {
-		return errors.Wrapf(err, "failed allocating pools and gateway IP for network %s", n.ID)
+		return fmt.Errorf("failed allocating pools and gateway IP for network %s: %v", n.ID, err)
 	}
 
 	if err := na.allocateDriverState(n); err != nil {
 		na.freePools(n, pools)
-		return errors.Wrapf(err, "failed while allocating driver state for network %s", n.ID)
+		return fmt.Errorf("failed while allocating driver state for network %s: %v", n.ID, err)
 	}
 
 	na.networks[n.ID] = &network{
@@ -141,7 +146,7 @@ func (na *NetworkAllocator) Deallocate(n *api.Network) error {
 	}
 
 	if err := na.freeDriverState(n); err != nil {
-		return errors.Wrapf(err, "failed to free driver state for network %s", n.ID)
+		return fmt.Errorf("failed to free driver state for network %s: %v", n.ID, err)
 	}
 
 	delete(na.networks, n.ID)
@@ -160,29 +165,15 @@ func (na *NetworkAllocator) ServiceAllocate(s *api.Service) (err error) {
 		}
 	}()
 
-	if s.Endpoint == nil {
-		s.Endpoint = &api.Endpoint{}
-	}
-	s.Endpoint.Spec = s.Spec.Endpoint.Copy()
-
-	// If ResolutionMode is DNSRR do not try allocating VIPs, but
-	// free any VIP from previous state.
+	// If ResolutionMode is DNSRR do not try allocating VIPs.
 	if s.Spec.Endpoint != nil && s.Spec.Endpoint.Mode == api.ResolutionModeDNSRoundRobin {
-		if s.Endpoint != nil {
-			for _, vip := range s.Endpoint.VirtualIPs {
-				if err := na.deallocateVIP(vip); err != nil {
-					// don't bail here, deallocate as many as possible.
-					log.L.WithError(err).
-						WithField("vip.network", vip.NetworkID).
-						WithField("vip.addr", vip.Addr).Error("error deallocating vip")
-				}
-			}
-
-			s.Endpoint.VirtualIPs = nil
-		}
-
-		delete(na.services, s.ID)
 		return
+	}
+
+	if s.Endpoint == nil {
+		s.Endpoint = &api.Endpoint{
+			Spec: s.Spec.Endpoint.Copy(),
+		}
 	}
 
 	// First allocate VIPs for all the pre-populated endpoint attachments
@@ -192,14 +183,8 @@ func (na *NetworkAllocator) ServiceAllocate(s *api.Service) (err error) {
 		}
 	}
 
-	// Always prefer NetworkAttachmentConfig in the TaskSpec
-	specNetworks := s.Spec.Task.Networks
-	if len(specNetworks) == 0 && s != nil && len(s.Spec.Networks) != 0 {
-		specNetworks = s.Spec.Networks
-	}
-
 outer:
-	for _, nAttach := range specNetworks {
+	for _, nAttach := range s.Spec.Networks {
 		for _, vip := range s.Endpoint.VirtualIPs {
 			if vip.NetworkID == nAttach.Target {
 				continue outer
@@ -213,6 +198,7 @@ outer:
 
 		s.Endpoint.VirtualIPs = append(s.Endpoint.VirtualIPs, vip)
 	}
+	s.Endpoint.Spec = s.Spec.Endpoint.Copy()
 
 	na.services[s.ID] = struct{}{}
 	return
@@ -246,7 +232,7 @@ func (na *NetworkAllocator) IsAllocated(n *api.Network) bool {
 	return ok
 }
 
-// IsTaskAllocated returns if the passed task has its network resources allocated or not.
+// IsTaskAllocated returns if the passed task has it's network resources allocated or not.
 func (na *NetworkAllocator) IsTaskAllocated(t *api.Task) bool {
 	// If the task is not found in the allocated set, then it is
 	// not allocated.
@@ -259,7 +245,7 @@ func (na *NetworkAllocator) IsTaskAllocated(t *api.Task) bool {
 		return false
 	}
 
-	// To determine whether the task has its resources allocated,
+	// To determine whether the task has it's resources allocated,
 	// we just need to look at one network(in case of
 	// multi-network attachment).  This is because we make sure we
 	// allocate for every network or we allocate for none.
@@ -283,30 +269,13 @@ func (na *NetworkAllocator) IsTaskAllocated(t *api.Task) bool {
 	return true
 }
 
-// IsServiceAllocated returns if the passed service has its network resources allocated or not.
+// IsServiceAllocated returns if the passed service has it's network resources allocated or not.
 func (na *NetworkAllocator) IsServiceAllocated(s *api.Service) bool {
-	// If endpoint mode is VIP and allocator does not have the
-	// service in VIP allocated set then it is not allocated.
-	if (len(s.Spec.Task.Networks) != 0 || len(s.Spec.Networks) != 0) &&
-		(s.Spec.Endpoint == nil ||
-			s.Spec.Endpoint.Mode == api.ResolutionModeVirtualIP) {
-		if _, ok := na.services[s.ID]; !ok {
-			return false
-		}
+	if _, ok := na.services[s.ID]; !ok {
+		return false
 	}
 
-	// If the endpoint mode is DNSRR and allocator has the service
-	// in VIP allocated set then we return not allocated to make
-	// sure the allocator triggers networkallocator to free up the
-	// resources if any.
-	if s.Spec.Endpoint != nil && s.Spec.Endpoint.Mode == api.ResolutionModeDNSRoundRobin {
-		if _, ok := na.services[s.ID]; ok {
-			return false
-		}
-	}
-
-	if (s.Spec.Endpoint != nil && len(s.Spec.Endpoint.Ports) != 0) ||
-		(s.Endpoint != nil && len(s.Endpoint.Ports) != 0) {
+	if s.Spec.Endpoint != nil {
 		return na.portAllocator.isPortsAllocated(s)
 	}
 
@@ -369,9 +338,9 @@ func (na *NetworkAllocator) AllocateTask(t *api.Task) error {
 	for i, nAttach := range t.Networks {
 		if err := na.allocateNetworkIPs(nAttach); err != nil {
 			if err := na.releaseEndpoints(t.Networks[:i]); err != nil {
-				log.G(context.TODO()).WithError(err).Errorf("Failed to release IP addresses while rolling back allocation for task %s network %s", t.ID, nAttach.Network.ID)
+				log.G(context.TODO()).Errorf("Failed to release IP addresses while rolling back allocation for task %s network %s: %v", t.ID, nAttach.Network.ID, err)
 			}
-			return errors.Wrapf(err, "failed to allocate network IP for task %s network %s", t.ID, nAttach.Network.ID)
+			return fmt.Errorf("failed to allocate network IP for task %s network %s: %v", t.ID, nAttach.Network.ID, err)
 		}
 	}
 
@@ -391,7 +360,7 @@ func (na *NetworkAllocator) releaseEndpoints(networks []*api.NetworkAttachment) 
 	for _, nAttach := range networks {
 		ipam, _, err := na.resolveIPAM(nAttach.Network)
 		if err != nil {
-			return errors.Wrapf(err, "failed to resolve IPAM while allocating")
+			return fmt.Errorf("failed to resolve IPAM while allocating : %v", err)
 		}
 
 		localNet := na.getNetwork(nAttach.Network.ID)
@@ -415,7 +384,7 @@ func (na *NetworkAllocator) releaseEndpoints(networks []*api.NetworkAttachment) 
 			}
 
 			if err := ipam.ReleaseAddress(poolID, ip); err != nil {
-				log.G(context.TODO()).WithError(err).Errorf("IPAM failure while releasing IP address %s", addr)
+				log.G(context.TODO()).Errorf("IPAM failure while releasing IP address %s: %v", addr, err)
 			}
 		}
 
@@ -442,7 +411,7 @@ func (na *NetworkAllocator) allocateVIP(vip *api.Endpoint_VirtualIP) error {
 
 	ipam, _, err := na.resolveIPAM(localNet.nw)
 	if err != nil {
-		return errors.Wrap(err, "failed to resolve IPAM while allocating")
+		return fmt.Errorf("failed to resolve IPAM while allocating : %v", err)
 	}
 
 	var addr net.IP
@@ -458,7 +427,7 @@ func (na *NetworkAllocator) allocateVIP(vip *api.Endpoint_VirtualIP) error {
 	for _, poolID := range localNet.pools {
 		ip, _, err := ipam.RequestAddress(poolID, addr, nil)
 		if err != nil && err != ipamapi.ErrNoAvailableIPs && err != ipamapi.ErrIPOutOfRange {
-			return errors.Wrap(err, "could not allocate VIP from IPAM")
+			return fmt.Errorf("could not allocate VIP from IPAM: %v", err)
 		}
 
 		// If we got an address then we are done.
@@ -470,18 +439,18 @@ func (na *NetworkAllocator) allocateVIP(vip *api.Endpoint_VirtualIP) error {
 		}
 	}
 
-	return errors.New("could not find an available IP while allocating VIP")
+	return fmt.Errorf("could not find an available IP while allocating VIP")
 }
 
 func (na *NetworkAllocator) deallocateVIP(vip *api.Endpoint_VirtualIP) error {
 	localNet := na.getNetwork(vip.NetworkID)
 	if localNet == nil {
-		return errors.New("networkallocator: could not find local network state")
+		return fmt.Errorf("networkallocator: could not find local network state")
 	}
 
 	ipam, _, err := na.resolveIPAM(localNet.nw)
 	if err != nil {
-		return errors.Wrap(err, "failed to resolve IPAM while allocating")
+		return fmt.Errorf("failed to resolve IPAM while allocating : %v", err)
 	}
 
 	// Retrieve the poolID and immediately nuke
@@ -496,7 +465,7 @@ func (na *NetworkAllocator) deallocateVIP(vip *api.Endpoint_VirtualIP) error {
 	}
 
 	if err := ipam.ReleaseAddress(poolID, ip); err != nil {
-		log.G(context.TODO()).WithError(err).Errorf("IPAM failure while releasing VIP address %s", vip.Addr)
+		log.G(context.TODO()).Errorf("IPAM failure while releasing VIP address %s: %v", vip.Addr, err)
 		return err
 	}
 
@@ -509,7 +478,7 @@ func (na *NetworkAllocator) allocateNetworkIPs(nAttach *api.NetworkAttachment) e
 
 	ipam, _, err := na.resolveIPAM(nAttach.Network)
 	if err != nil {
-		return errors.Wrap(err, "failed to resolve IPAM while allocating")
+		return fmt.Errorf("failed to resolve IPAM while allocating : %v", err)
 	}
 
 	localNet := na.getNetwork(nAttach.Network.ID)
@@ -518,7 +487,7 @@ func (na *NetworkAllocator) allocateNetworkIPs(nAttach *api.NetworkAttachment) e
 	}
 
 	addresses := nAttach.Addresses
-	if len(addresses) == 0 {
+	if addresses == nil {
 		addresses = []string{""}
 	}
 
@@ -528,11 +497,7 @@ func (na *NetworkAllocator) allocateNetworkIPs(nAttach *api.NetworkAttachment) e
 			var err error
 			addr, _, err = net.ParseCIDR(rawAddr)
 			if err != nil {
-				addr = net.ParseIP(rawAddr)
-
-				if addr == nil {
-					return errors.Wrapf(err, "could not parse address string %s", rawAddr)
-				}
+				return err
 			}
 		}
 
@@ -541,7 +506,7 @@ func (na *NetworkAllocator) allocateNetworkIPs(nAttach *api.NetworkAttachment) e
 
 			ip, _, err = ipam.RequestAddress(poolID, addr, nil)
 			if err != nil && err != ipamapi.ErrNoAvailableIPs && err != ipamapi.ErrIPOutOfRange {
-				return errors.Wrap(err, "could not allocate IP from IPAM")
+				return fmt.Errorf("could not allocate IP from IPAM: %v", err)
 			}
 
 			// If we got an address then we are done.
@@ -555,7 +520,7 @@ func (na *NetworkAllocator) allocateNetworkIPs(nAttach *api.NetworkAttachment) e
 		}
 	}
 
-	return errors.New("could not find an available IP")
+	return fmt.Errorf("could not find an available IP")
 }
 
 func (na *NetworkAllocator) freeDriverState(n *api.Network) error {
@@ -587,7 +552,7 @@ func (na *NetworkAllocator) allocateDriverState(n *api.Network) error {
 
 		_, subnet, err := net.ParseCIDR(ic.Subnet)
 		if err != nil {
-			return errors.Wrapf(err, "error parsing subnet %s while allocating driver state", ic.Subnet)
+			return fmt.Errorf("error parsing subnet %s while allocating driver state: %v", ic.Subnet, err)
 		}
 
 		gwIP := net.ParseIP(ic.Gateway)
@@ -625,31 +590,12 @@ func (na *NetworkAllocator) resolveDriver(n *api.Network) (driverapi.Driver, str
 		dName = n.Spec.DriverConfig.Name
 	}
 
-	d, drvcap := na.drvRegistry.Driver(dName)
+	d, _ := na.drvRegistry.Driver(dName)
 	if d == nil {
-		var err error
-		err = na.loadDriver(dName)
-		if err != nil {
-			return nil, "", err
-		}
-
-		d, drvcap = na.drvRegistry.Driver(dName)
-		if d == nil {
-			return nil, "", fmt.Errorf("could not resolve network driver %s", dName)
-		}
-
-	}
-
-	if drvcap.DataScope != datastore.GlobalScope {
-		return nil, "", fmt.Errorf("swarm can allocate network resources only for global scoped networks. network driver (%s) is scoped %s", dName, drvcap.DataScope)
+		return nil, "", fmt.Errorf("could not resolve network driver %s", dName)
 	}
 
 	return d, dName, nil
-}
-
-func (na *NetworkAllocator) loadDriver(name string) error {
-	_, err := plugins.Get(name, driverapi.NetworkPluginEndpointType)
-	return err
 }
 
 // Resolve the IPAM driver
@@ -670,7 +616,7 @@ func (na *NetworkAllocator) resolveIPAM(n *api.Network) (ipamapi.Ipam, string, e
 func (na *NetworkAllocator) freePools(n *api.Network, pools map[string]string) error {
 	ipam, _, err := na.resolveIPAM(n)
 	if err != nil {
-		return errors.Wrapf(err, "failed to resolve IPAM while freeing pools for network %s", n.ID)
+		return fmt.Errorf("failed to resolve IPAM while freeing pools for network %s: %v", n.ID, err)
 	}
 
 	releasePools(ipam, n.IPAM.Configs, pools)
@@ -680,13 +626,13 @@ func (na *NetworkAllocator) freePools(n *api.Network, pools map[string]string) e
 func releasePools(ipam ipamapi.Ipam, icList []*api.IPAMConfig, pools map[string]string) {
 	for _, ic := range icList {
 		if err := ipam.ReleaseAddress(pools[ic.Subnet], net.ParseIP(ic.Gateway)); err != nil {
-			log.G(context.TODO()).WithError(err).Errorf("Failed to release address %s", ic.Subnet)
+			log.G(context.TODO()).Errorf("Failed to release address %s: %v", ic.Subnet, err)
 		}
 	}
 
 	for k, p := range pools {
 		if err := ipam.ReleasePool(p); err != nil {
-			log.G(context.TODO()).WithError(err).Errorf("Failed to release pool %s", k)
+			log.G(context.TODO()).Errorf("Failed to release pool %s: %v", k, err)
 		}
 	}
 }
@@ -758,13 +704,4 @@ func (na *NetworkAllocator) allocatePools(n *api.Network) (map[string]string, er
 	}
 
 	return pools, nil
-}
-
-func initializeDrivers(reg *drvregistry.DrvRegistry) error {
-	for _, i := range getInitializers() {
-		if err := reg.AddDriver(i.ntype, i.fn, nil); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/influxdata/influxdb/influxql/internal"
+	internal "github.com/influxdata/influxdb/influxql/internal"
 )
 
 // DataType represents the primitive data types available in InfluxQL.
@@ -20,9 +21,9 @@ type DataType int
 const (
 	// Unknown primitive data type.
 	Unknown DataType = 0
-	// Float means the data type is a float
+	// Float means the data type is a float.
 	Float = 1
-	// Integer means the data type is a integer
+	// Integer means the data type is an integer.
 	Integer = 2
 	// String means the data type is a string of text.
 	String = 3
@@ -32,6 +33,16 @@ const (
 	Time = 5
 	// Duration means the data type is a duration of time.
 	Duration = 6
+	// Tag means the data type is a tag.
+	Tag = 7
+	// AnyField means the data type is any field.
+	AnyField = 8
+)
+
+var (
+	// ErrInvalidTime is returned when the timestamp string used to
+	// compare against time field is invalid.
+	ErrInvalidTime = errors.New("invalid timestamp string")
 )
 
 // InspectDataType returns the data type of a given value.
@@ -54,6 +65,7 @@ func InspectDataType(v interface{}) DataType {
 	}
 }
 
+// InspectDataTypes returns all of the data types for an interface slice.
 func InspectDataTypes(a []interface{}) []DataType {
 	dta := make([]DataType, len(a))
 	for i, v := range a {
@@ -62,6 +74,7 @@ func InspectDataTypes(a []interface{}) []DataType {
 	return dta
 }
 
+// String returns the human-readable string representation of the DataType.
 func (d DataType) String() string {
 	switch d {
 	case Float:
@@ -76,12 +89,18 @@ func (d DataType) String() string {
 		return "time"
 	case Duration:
 		return "duration"
+	case Tag:
+		return "tag"
+	case AnyField:
+		return "field"
 	}
 	return "unknown"
 }
 
 // Node represents a node in the InfluxDB abstract syntax tree.
 type Node interface {
+	// node is unexported to ensure implementations of Node
+	// can only originate in this package.
 	node()
 	String() string
 }
@@ -96,13 +115,13 @@ func (*CreateRetentionPolicyStatement) node() {}
 func (*CreateSubscriptionStatement) node()    {}
 func (*CreateUserStatement) node()            {}
 func (*Distinct) node()                       {}
+func (*DeleteSeriesStatement) node()          {}
 func (*DeleteStatement) node()                {}
 func (*DropContinuousQueryStatement) node()   {}
 func (*DropDatabaseStatement) node()          {}
 func (*DropMeasurementStatement) node()       {}
 func (*DropRetentionPolicyStatement) node()   {}
 func (*DropSeriesStatement) node()            {}
-func (*DropServerStatement) node()            {}
 func (*DropShardStatement) node()             {}
 func (*DropSubscriptionStatement) node()      {}
 func (*DropUserStatement) node()              {}
@@ -115,7 +134,6 @@ func (*SelectStatement) node()                {}
 func (*SetPasswordUserStatement) node()       {}
 func (*ShowContinuousQueriesStatement) node() {}
 func (*ShowGrantsForUserStatement) node()     {}
-func (*ShowServersStatement) node()           {}
 func (*ShowDatabasesStatement) node()         {}
 func (*ShowFieldKeysStatement) node()         {}
 func (*ShowRetentionPoliciesStatement) node() {}
@@ -146,10 +164,12 @@ func (*nilLiteral) node()      {}
 func (*NumberLiteral) node()   {}
 func (*ParenExpr) node()       {}
 func (*RegexLiteral) node()    {}
+func (*ListLiteral) node()     {}
 func (*SortField) node()       {}
 func (SortFields) node()       {}
 func (Sources) node()          {}
 func (*StringLiteral) node()   {}
+func (*SubQuery) node()        {}
 func (*Target) node()          {}
 func (*TimeLiteral) node()     {}
 func (*VarRef) node()          {}
@@ -178,13 +198,17 @@ func (a Statements) String() string {
 // Statement represents a single command in InfluxQL.
 type Statement interface {
 	Node
+	// stmt is unexported to ensure implementations of Statement
+	// can only originate in this package.
 	stmt()
-	RequiredPrivileges() ExecutionPrivileges
+	RequiredPrivileges() (ExecutionPrivileges, error)
 }
 
 // HasDefaultDatabase provides an interface to get the default database from a Statement.
 type HasDefaultDatabase interface {
 	Node
+	// stmt is unexported to ensure implementations of HasDefaultDatabase
+	// can only originate in this package.
 	stmt()
 	DefaultDatabase() string
 }
@@ -211,13 +235,13 @@ func (*CreateDatabaseStatement) stmt()        {}
 func (*CreateRetentionPolicyStatement) stmt() {}
 func (*CreateSubscriptionStatement) stmt()    {}
 func (*CreateUserStatement) stmt()            {}
+func (*DeleteSeriesStatement) stmt()          {}
 func (*DeleteStatement) stmt()                {}
 func (*DropContinuousQueryStatement) stmt()   {}
 func (*DropDatabaseStatement) stmt()          {}
 func (*DropMeasurementStatement) stmt()       {}
 func (*DropRetentionPolicyStatement) stmt()   {}
 func (*DropSeriesStatement) stmt()            {}
-func (*DropServerStatement) stmt()            {}
 func (*DropSubscriptionStatement) stmt()      {}
 func (*DropUserStatement) stmt()              {}
 func (*GrantStatement) stmt()                 {}
@@ -225,7 +249,6 @@ func (*GrantAdminStatement) stmt()            {}
 func (*KillQueryStatement) stmt()             {}
 func (*ShowContinuousQueriesStatement) stmt() {}
 func (*ShowGrantsForUserStatement) stmt()     {}
-func (*ShowServersStatement) stmt()           {}
 func (*ShowDatabasesStatement) stmt()         {}
 func (*ShowFieldKeysStatement) stmt()         {}
 func (*ShowMeasurementsStatement) stmt()      {}
@@ -249,6 +272,8 @@ func (*SetPasswordUserStatement) stmt()       {}
 // Expr represents an expression that can be evaluated to a value.
 type Expr interface {
 	Node
+	// expr is unexported to ensure implementations of Expr
+	// can only originate in this package.
 	expr()
 }
 
@@ -262,6 +287,7 @@ func (*nilLiteral) expr()      {}
 func (*NumberLiteral) expr()   {}
 func (*ParenExpr) expr()       {}
 func (*RegexLiteral) expr()    {}
+func (*ListLiteral) expr()     {}
 func (*StringLiteral) expr()   {}
 func (*TimeLiteral) expr()     {}
 func (*VarRef) expr()          {}
@@ -270,6 +296,8 @@ func (*Wildcard) expr()        {}
 // Literal represents a static literal.
 type Literal interface {
 	Expr
+	// literal is unexported to ensure implementations of Literal
+	// can only originate in this package.
 	literal()
 }
 
@@ -279,16 +307,20 @@ func (*IntegerLiteral) literal()  {}
 func (*nilLiteral) literal()      {}
 func (*NumberLiteral) literal()   {}
 func (*RegexLiteral) literal()    {}
+func (*ListLiteral) literal()     {}
 func (*StringLiteral) literal()   {}
 func (*TimeLiteral) literal()     {}
 
 // Source represents a source of data for a statement.
 type Source interface {
 	Node
+	// source is unexported to ensure implementations of Source
+	// can only originate in this package.
 	source()
 }
 
 func (*Measurement) source() {}
+func (*SubQuery) source()    {}
 
 // Sources represents a list of sources.
 type Sources []Source
@@ -303,6 +335,23 @@ func (a Sources) Names() []string {
 		}
 	}
 	return names
+}
+
+// Filter returns a list of source names filtered by the database/retention policy.
+func (a Sources) Filter(database, retentionPolicy string) []Source {
+	sources := make([]Source, 0, len(a))
+	for _, s := range a {
+		switch s := s.(type) {
+		case *Measurement:
+			if s.Database == database && s.RetentionPolicy == retentionPolicy {
+				sources = append(sources, s)
+			}
+		case *SubQuery:
+			filteredSources := s.Statement.Sources.Filter(database, retentionPolicy)
+			sources = append(sources, filteredSources...)
+		}
+	}
+	return sources
 }
 
 // HasSystemSource returns true if any of the sources are internal, system sources.
@@ -346,6 +395,20 @@ func (a Sources) String() string {
 	return buf.String()
 }
 
+// Measurements returns all measurements including ones embedded in subqueries.
+func (a Sources) Measurements() []*Measurement {
+	mms := make([]*Measurement, 0, len(a))
+	for _, src := range a {
+		switch src := src.(type) {
+		case *Measurement:
+			mms = append(mms, src)
+		case *SubQuery:
+			mms = append(mms, src.Statement.Sources.Measurements()...)
+		}
+	}
+	return mms
+}
+
 // MarshalBinary encodes a list of sources to a binary format.
 func (a Sources) MarshalBinary() ([]byte, error) {
 	var pb internal.Measurements
@@ -379,7 +442,6 @@ func IsSystemName(name string) bool {
 	case "_fieldKeys",
 		"_measurements",
 		"_series",
-		"_tagKey",
 		"_tagKeys",
 		"_tags":
 		return true
@@ -390,14 +452,14 @@ func IsSystemName(name string) bool {
 
 // SortField represents a field to sort results by.
 type SortField struct {
-	// Name of the field
+	// Name of the field.
 	Name string
 
 	// Sort order.
 	Ascending bool
 }
 
-// String returns a string representation of a sort field
+// String returns a string representation of a sort field.
 func (field *SortField) String() string {
 	var buf bytes.Buffer
 	if field.Name != "" {
@@ -412,10 +474,10 @@ func (field *SortField) String() string {
 	return buf.String()
 }
 
-// SortFields represents an ordered list of ORDER BY fields
+// SortFields represents an ordered list of ORDER BY fields.
 type SortFields []*SortField
 
-// String returns a string representation of sort fields
+// String returns a string representation of sort fields.
 func (a SortFields) String() string {
 	fields := make([]string, 0, len(a))
 	for _, field := range a {
@@ -429,72 +491,72 @@ type CreateDatabaseStatement struct {
 	// Name of the database to be created.
 	Name string
 
-	// IfNotExists indicates whether to return without error if the database
-	// already exists.
-	IfNotExists bool
-
-	// RetentionPolicyCreate indicates whether the user explicitly wants to create a retention policy
+	// RetentionPolicyCreate indicates whether the user explicitly wants to create a retention policy.
 	RetentionPolicyCreate bool
 
-	// RetentionPolicyDuration indicates retention duration for the new database
-	RetentionPolicyDuration time.Duration
+	// RetentionPolicyDuration indicates retention duration for the new database.
+	RetentionPolicyDuration *time.Duration
 
-	// RetentionPolicyReplication indicates retention replication for the new database
-	RetentionPolicyReplication int
+	// RetentionPolicyReplication indicates retention replication for the new database.
+	RetentionPolicyReplication *int
 
-	// RetentionPolicyName indicates retention name for the new database
+	// RetentionPolicyName indicates retention name for the new database.
 	RetentionPolicyName string
+
+	// RetentionPolicyShardGroupDuration indicates shard group duration for the new database.
+	RetentionPolicyShardGroupDuration time.Duration
 }
 
 // String returns a string representation of the create database statement.
 func (s *CreateDatabaseStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("CREATE DATABASE ")
-	if s.IfNotExists {
-		_, _ = buf.WriteString("IF NOT EXISTS ")
-	}
 	_, _ = buf.WriteString(QuoteIdent(s.Name))
 	if s.RetentionPolicyCreate {
-		_, _ = buf.WriteString(" WITH DURATION ")
-		_, _ = buf.WriteString(s.RetentionPolicyDuration.String())
-		_, _ = buf.WriteString(" REPLICATION ")
-		_, _ = buf.WriteString(strconv.Itoa(s.RetentionPolicyReplication))
-		_, _ = buf.WriteString(" NAME ")
-		_, _ = buf.WriteString(QuoteIdent(s.RetentionPolicyName))
+		_, _ = buf.WriteString(" WITH")
+		if s.RetentionPolicyDuration != nil {
+			_, _ = buf.WriteString(" DURATION ")
+			_, _ = buf.WriteString(s.RetentionPolicyDuration.String())
+		}
+		if s.RetentionPolicyReplication != nil {
+			_, _ = buf.WriteString(" REPLICATION ")
+			_, _ = buf.WriteString(strconv.Itoa(*s.RetentionPolicyReplication))
+		}
+		if s.RetentionPolicyShardGroupDuration > 0 {
+			_, _ = buf.WriteString(" SHARD DURATION ")
+			_, _ = buf.WriteString(s.RetentionPolicyShardGroupDuration.String())
+		}
+		if s.RetentionPolicyName != "" {
+			_, _ = buf.WriteString(" NAME ")
+			_, _ = buf.WriteString(QuoteIdent(s.RetentionPolicyName))
+		}
 	}
 
 	return buf.String()
 }
 
 // RequiredPrivileges returns the privilege required to execute a CreateDatabaseStatement.
-func (s *CreateDatabaseStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *CreateDatabaseStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // DropDatabaseStatement represents a command to drop a database.
 type DropDatabaseStatement struct {
 	// Name of the database to be dropped.
 	Name string
-
-	// IfExists indicates whether to return without error if the database
-	// does not exists.
-	IfExists bool
 }
 
 // String returns a string representation of the drop database statement.
 func (s *DropDatabaseStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("DROP DATABASE ")
-	if s.IfExists {
-		_, _ = buf.WriteString("IF EXISTS ")
-	}
 	_, _ = buf.WriteString(QuoteIdent(s.Name))
 	return buf.String()
 }
 
 // RequiredPrivileges returns the privilege required to execute a DropDatabaseStatement.
-func (s *DropDatabaseStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *DropDatabaseStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // DropRetentionPolicyStatement represents a command to drop a retention policy from a database.
@@ -517,8 +579,8 @@ func (s *DropRetentionPolicyStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a DropRetentionPolicyStatement.
-func (s *DropRetentionPolicyStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: s.Database, Privilege: WritePrivilege}}
+func (s *DropRetentionPolicyStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: s.Database, Privilege: WritePrivilege}}, nil
 }
 
 // CreateUserStatement represents a command for creating a new user.
@@ -547,8 +609,8 @@ func (s *CreateUserStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a CreateUserStatement.
-func (s *CreateUserStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *CreateUserStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // DropUserStatement represents a command for dropping a user.
@@ -566,8 +628,8 @@ func (s *DropUserStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a DropUserStatement.
-func (s *DropUserStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *DropUserStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // Privilege is a type of action a user can be granted the right to use.
@@ -627,8 +689,8 @@ func (s *GrantStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a GrantStatement.
-func (s *GrantStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *GrantStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // GrantAdminStatement represents a command for granting admin privilege.
@@ -646,26 +708,39 @@ func (s *GrantAdminStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a GrantAdminStatement.
-func (s *GrantAdminStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *GrantAdminStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
+// KillQueryStatement represents a command for killing a query.
 type KillQueryStatement struct {
 	// The query to kill.
 	QueryID uint64
+
+	// The host to delegate the kill to.
+	Host string
 }
 
+// String returns a string representation of the kill query statement.
 func (s *KillQueryStatement) String() string {
-	return fmt.Sprintf("KILL QUERY %d", s.QueryID)
+	var buf bytes.Buffer
+	_, _ = buf.WriteString("KILL QUERY ")
+	_, _ = buf.WriteString(strconv.FormatUint(s.QueryID, 10))
+	if s.Host != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Host))
+	}
+	return buf.String()
 }
 
-func (s *KillQueryStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+// RequiredPrivileges returns the privilege required to execute a KillQueryStatement.
+func (s *KillQueryStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // SetPasswordUserStatement represents a command for changing user password.
 type SetPasswordUserStatement struct {
-	// Plain Password
+	// Plain-text password.
 	Password string
 
 	// Who to grant the privilege to.
@@ -683,8 +758,8 @@ func (s *SetPasswordUserStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a SetPasswordUserStatement.
-func (s *SetPasswordUserStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *SetPasswordUserStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // RevokeStatement represents a command to revoke a privilege from a user.
@@ -712,8 +787,8 @@ func (s *RevokeStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a RevokeStatement.
-func (s *RevokeStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *RevokeStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // RevokeAdminStatement represents a command to revoke admin privilege from a user.
@@ -731,8 +806,8 @@ func (s *RevokeAdminStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a RevokeAdminStatement.
-func (s *RevokeAdminStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *RevokeAdminStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // CreateRetentionPolicyStatement represents a command to create a retention policy.
@@ -751,6 +826,9 @@ type CreateRetentionPolicyStatement struct {
 
 	// Should this policy be set as default for the database?
 	Default bool
+
+	// Shard Duration.
+	ShardGroupDuration time.Duration
 }
 
 // String returns a string representation of the create retention policy.
@@ -764,6 +842,10 @@ func (s *CreateRetentionPolicyStatement) String() string {
 	_, _ = buf.WriteString(FormatDuration(s.Duration))
 	_, _ = buf.WriteString(" REPLICATION ")
 	_, _ = buf.WriteString(strconv.Itoa(s.Replication))
+	if s.ShardGroupDuration > 0 {
+		_, _ = buf.WriteString(" SHARD DURATION ")
+		_, _ = buf.WriteString(FormatDuration(s.ShardGroupDuration))
+	}
 	if s.Default {
 		_, _ = buf.WriteString(" DEFAULT")
 	}
@@ -771,8 +853,8 @@ func (s *CreateRetentionPolicyStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a CreateRetentionPolicyStatement.
-func (s *CreateRetentionPolicyStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *CreateRetentionPolicyStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // AlterRetentionPolicyStatement represents a command to alter an existing retention policy.
@@ -791,6 +873,9 @@ type AlterRetentionPolicyStatement struct {
 
 	// Should this policy be set as defalut for the database?
 	Default bool
+
+	// Duration of the Shard.
+	ShardGroupDuration *time.Duration
 }
 
 // String returns a string representation of the alter retention policy statement.
@@ -811,6 +896,11 @@ func (s *AlterRetentionPolicyStatement) String() string {
 		_, _ = buf.WriteString(strconv.Itoa(*s.Replication))
 	}
 
+	if s.ShardGroupDuration != nil {
+		_, _ = buf.WriteString(" SHARD DURATION ")
+		_, _ = buf.WriteString(FormatDuration(*s.ShardGroupDuration))
+	}
+
 	if s.Default {
 		_, _ = buf.WriteString(" DEFAULT")
 	}
@@ -819,11 +909,11 @@ func (s *AlterRetentionPolicyStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute an AlterRetentionPolicyStatement.
-func (s *AlterRetentionPolicyStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *AlterRetentionPolicyStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
-// FillOption represents different options for aggregate windows.
+// FillOption represents different options for filling aggregate windows.
 type FillOption int
 
 const (
@@ -831,10 +921,12 @@ const (
 	NullFill FillOption = iota
 	// NoFill means that empty aggregate windows will be purged from the result.
 	NoFill
-	// NumberFill means that empty aggregate windows will be filled with the given number
+	// NumberFill means that empty aggregate windows will be filled with a provided number.
 	NumberFill
-	// PreviousFill means that empty aggregate windows will be filled with whatever the previous aggregate window had
+	// PreviousFill means that empty aggregate windows will be filled with whatever the previous aggregate window had.
 	PreviousFill
+	// LinearFill means that empty aggregate windows will be filled with whatever a linear value between non null windows.
+	LinearFill
 )
 
 // SelectStatement represents a command for extracting data from the database.
@@ -842,19 +934,19 @@ type SelectStatement struct {
 	// Expressions returned from the selection.
 	Fields Fields
 
-	// Target (destination) for the result of the select.
+	// Target (destination) for the result of a SELECT INTO query.
 	Target *Target
 
 	// Expressions used for grouping the selection.
 	Dimensions Dimensions
 
-	// Data sources that fields are extracted from.
+	// Data sources (measurements) that fields are extracted from.
 	Sources Sources
 
 	// An expression evaluated on data point.
 	Condition Expr
 
-	// Fields to sort results by
+	// Fields to sort results by.
 	SortFields SortFields
 
 	// Maximum number of rows to be returned. Unlimited if zero.
@@ -869,17 +961,20 @@ type SelectStatement struct {
 	// Returns series starting at an offset from the first one.
 	SOffset int
 
-	// memoize the group by interval
+	// Memoized group by interval from GroupBy().
 	groupByInterval time.Duration
 
-	// if it's a query for raw data values (i.e. not an aggregate)
+	// Whether it's a query for raw data values (i.e. not an aggregate).
 	IsRawQuery bool
 
-	// What fill option the select statement uses, if any
+	// What fill option the select statement uses, if any.
 	Fill FillOption
 
-	// The value to fill empty aggregate buckets with, if any
+	// The value to fill empty aggregate buckets with, if any.
 	FillValue interface{}
+
+	// Renames the implicit time field name.
+	TimeAlias string
 
 	// Removes the "time" column from the output.
 	OmitTime bool
@@ -888,8 +983,8 @@ type SelectStatement struct {
 	Dedupe bool
 }
 
-// HasDerivative returns true if one of the function calls in the statement is a
-// derivative aggregate
+// HasDerivative returns true if any function call in the statement is a
+// derivative aggregate.
 func (s *SelectStatement) HasDerivative() bool {
 	for _, f := range s.FunctionCalls() {
 		if f.Name == "derivative" || f.Name == "non_negative_derivative" {
@@ -899,8 +994,8 @@ func (s *SelectStatement) HasDerivative() bool {
 	return false
 }
 
-// IsSimpleDerivative return true if one of the function call is a derivative function with a
-// variable ref as the first arg
+// IsSimpleDerivative return true if any function call is a derivative function with a
+// variable ref as the first arg.
 func (s *SelectStatement) IsSimpleDerivative() bool {
 	for _, f := range s.FunctionCalls() {
 		if f.Name == "derivative" || f.Name == "non_negative_derivative" {
@@ -913,32 +1008,19 @@ func (s *SelectStatement) IsSimpleDerivative() bool {
 	return false
 }
 
-// HasSimpleCount return true if one of the function calls is a count function with a
-// variable ref as the first arg
-func (s *SelectStatement) HasSimpleCount() bool {
-	// recursively check for a simple count(varref) function
-	var hasCount func(f *Call) bool
-	hasCount = func(f *Call) bool {
-		if f.Name == "count" {
-			// it's nested if the first argument is an aggregate function
-			if _, ok := f.Args[0].(*VarRef); ok {
-				return true
+// HasSelector returns true if there is exactly one selector.
+func (s *SelectStatement) HasSelector() bool {
+	var selector *Call
+	for _, f := range s.Fields {
+		if call, ok := f.Expr.(*Call); ok {
+			if selector != nil || !IsSelector(call) {
+				// This is an aggregate call or there is already a selector.
+				return false
 			}
-		} else {
-			for _, arg := range f.Args {
-				if child, ok := arg.(*Call); ok {
-					return hasCount(child)
-				}
-			}
-		}
-		return false
-	}
-	for _, f := range s.FunctionCalls() {
-		if hasCount(f) {
-			return true
+			selector = call
 		}
 	}
-	return false
+	return selector != nil
 }
 
 // TimeAscending returns true if the time field is sorted in chronological order.
@@ -946,22 +1028,23 @@ func (s *SelectStatement) TimeAscending() bool {
 	return len(s.SortFields) == 0 || s.SortFields[0].Ascending
 }
 
+// TimeFieldName returns the name of the time field.
+func (s *SelectStatement) TimeFieldName() string {
+	if s.TimeAlias != "" {
+		return s.TimeAlias
+	}
+	return "time"
+}
+
 // Clone returns a deep copy of the statement.
 func (s *SelectStatement) Clone() *SelectStatement {
-	clone := &SelectStatement{
-		Fields:     make(Fields, 0, len(s.Fields)),
-		Dimensions: make(Dimensions, 0, len(s.Dimensions)),
-		Sources:    cloneSources(s.Sources),
-		SortFields: make(SortFields, 0, len(s.SortFields)),
-		Condition:  CloneExpr(s.Condition),
-		Limit:      s.Limit,
-		Offset:     s.Offset,
-		SLimit:     s.SLimit,
-		SOffset:    s.SOffset,
-		Fill:       s.Fill,
-		FillValue:  s.FillValue,
-		IsRawQuery: s.IsRawQuery,
-	}
+	clone := *s
+	clone.Fields = make(Fields, 0, len(s.Fields))
+	clone.Dimensions = make(Dimensions, 0, len(s.Dimensions))
+	clone.Sources = cloneSources(s.Sources)
+	clone.SortFields = make(SortFields, 0, len(s.SortFields))
+	clone.Condition = CloneExpr(s.Condition)
+
 	if s.Target != nil {
 		clone.Target = &Target{
 			Measurement: &Measurement{
@@ -981,7 +1064,7 @@ func (s *SelectStatement) Clone() *SelectStatement {
 	for _, f := range s.SortFields {
 		clone.SortFields = append(clone.SortFields, &SortField{Name: f.Name, Ascending: f.Ascending})
 	}
-	return clone
+	return &clone
 }
 
 func cloneSources(sources Sources) Sources {
@@ -1004,32 +1087,66 @@ func cloneSource(s Source) Source {
 			m.Regex = &RegexLiteral{Val: regexp.MustCompile(s.Regex.Val.String())}
 		}
 		return m
+	case *SubQuery:
+		return &SubQuery{Statement: s.Statement.Clone()}
 	default:
 		panic("unreachable")
 	}
 }
 
-// RewriteWildcards returns the re-written form of the select statement. Any wildcard query
+// RewriteFields returns the re-written form of the select statement. Any wildcard query
 // fields are replaced with the supplied fields, and any wildcard GROUP BY fields are replaced
-// with the supplied dimensions.
-func (s *SelectStatement) RewriteWildcards(ic IteratorCreator) (*SelectStatement, error) {
-	// Ignore if there are no wildcards.
-	hasFieldWildcard := s.HasFieldWildcard()
-	hasDimensionWildcard := s.HasDimensionWildcard()
-	if !hasFieldWildcard && !hasDimensionWildcard {
-		return s, nil
+// with the supplied dimensions. Any fields with no type specifier are rewritten with the
+// appropriate type.
+func (s *SelectStatement) RewriteFields(m FieldMapper) (*SelectStatement, error) {
+	// Clone the statement so we aren't rewriting the original.
+	other := s.Clone()
+
+	// Iterate through the sources and rewrite any subqueries first.
+	for _, src := range other.Sources {
+		switch src := src.(type) {
+		case *SubQuery:
+			stmt, err := src.Statement.RewriteFields(m)
+			if err != nil {
+				return nil, err
+			}
+			src.Statement = stmt
+		}
 	}
 
-	// Retrieve a list of unique field and dimensions.
-	fieldSet, dimensionSet, err := ic.FieldDimensions(s.Sources)
+	// Rewrite all variable references in the fields with their types if one
+	// hasn't been specified.
+	rewrite := func(n Node) {
+		ref, ok := n.(*VarRef)
+		if !ok || (ref.Type != Unknown && ref.Type != AnyField) {
+			return
+		}
+
+		typ := EvalType(ref, other.Sources, m)
+		if typ == Tag && ref.Type == AnyField {
+			return
+		}
+		ref.Type = typ
+	}
+	WalkFunc(other.Fields, rewrite)
+	WalkFunc(other.Condition, rewrite)
+
+	// Ignore if there are no wildcards.
+	hasFieldWildcard := other.HasFieldWildcard()
+	hasDimensionWildcard := other.HasDimensionWildcard()
+	if !hasFieldWildcard && !hasDimensionWildcard {
+		return other, nil
+	}
+
+	fieldSet, dimensionSet, err := FieldDimensions(other.Sources, m)
 	if err != nil {
-		return s, err
+		return nil, err
 	}
 
 	// If there are no dimension wildcards then merge dimensions to fields.
 	if !hasDimensionWildcard {
 		// Remove the dimensions present in the group by so they don't get added as fields.
-		for _, d := range s.Dimensions {
+		for _, d := range other.Dimensions {
 			switch expr := d.Expr.(type) {
 			case *VarRef:
 				if _, ok := dimensionSet[expr.Val]; ok {
@@ -1037,26 +1154,113 @@ func (s *SelectStatement) RewriteWildcards(ic IteratorCreator) (*SelectStatement
 				}
 			}
 		}
-
-		for k := range dimensionSet {
-			fieldSet[k] = struct{}{}
-		}
-		dimensionSet = nil
 	}
-	fields := stringSetSlice(fieldSet)
-	dimensions := stringSetSlice(dimensionSet)
 
-	other := s.Clone()
+	// Sort the field and dimension names for wildcard expansion.
+	var fields []VarRef
+	if len(fieldSet) > 0 {
+		fields = make([]VarRef, 0, len(fieldSet))
+		for name, typ := range fieldSet {
+			fields = append(fields, VarRef{Val: name, Type: typ})
+		}
+		if !hasDimensionWildcard {
+			for name := range dimensionSet {
+				fields = append(fields, VarRef{Val: name, Type: Tag})
+			}
+			dimensionSet = nil
+		}
+		sort.Sort(VarRefs(fields))
+	}
+	dimensions := stringSetSlice(dimensionSet)
 
 	// Rewrite all wildcard query fields
 	if hasFieldWildcard {
 		// Allocate a slice assuming there is exactly one wildcard for efficiency.
-		rwFields := make(Fields, 0, len(s.Fields)+len(fields)-1)
-		for _, f := range s.Fields {
-			switch f.Expr.(type) {
+		rwFields := make(Fields, 0, len(other.Fields)+len(fields)-1)
+		for _, f := range other.Fields {
+			switch expr := f.Expr.(type) {
 			case *Wildcard:
-				for _, name := range fields {
-					rwFields = append(rwFields, &Field{Expr: &VarRef{Val: name}})
+				for _, ref := range fields {
+					if expr.Type == FIELD && ref.Type == Tag {
+						continue
+					} else if expr.Type == TAG && ref.Type != Tag {
+						continue
+					}
+					rwFields = append(rwFields, &Field{Expr: &VarRef{Val: ref.Val, Type: ref.Type}})
+				}
+			case *RegexLiteral:
+				for _, ref := range fields {
+					if expr.Val.MatchString(ref.Val) {
+						rwFields = append(rwFields, &Field{Expr: &VarRef{Val: ref.Val, Type: ref.Type}})
+					}
+				}
+			case *Call:
+				// Clone a template that we can modify and use for new fields.
+				template := CloneExpr(expr).(*Call)
+
+				// Search for the call with a wildcard by continuously descending until
+				// we no longer have a call.
+				call := template
+				for len(call.Args) > 0 {
+					arg, ok := call.Args[0].(*Call)
+					if !ok {
+						break
+					}
+					call = arg
+				}
+
+				// Check if this field value is a wildcard.
+				if len(call.Args) == 0 {
+					rwFields = append(rwFields, f)
+					continue
+				}
+
+				// Retrieve if this is a wildcard or a regular expression.
+				var re *regexp.Regexp
+				switch expr := call.Args[0].(type) {
+				case *Wildcard:
+					if expr.Type == TAG {
+						return nil, fmt.Errorf("unable to use tag wildcard in %s()", call.Name)
+					}
+				case *RegexLiteral:
+					re = expr.Val
+				default:
+					rwFields = append(rwFields, f)
+					continue
+				}
+
+				// All types that can expand wildcards support float and integer.
+				supportedTypes := map[DataType]struct{}{
+					Float:   struct{}{},
+					Integer: struct{}{},
+				}
+
+				// Add additional types for certain functions.
+				switch call.Name {
+				case "count", "first", "last", "distinct", "elapsed", "mode", "sample":
+					supportedTypes[String] = struct{}{}
+					fallthrough
+				case "min", "max":
+					supportedTypes[Boolean] = struct{}{}
+				}
+
+				for _, ref := range fields {
+					// Do not expand tags within a function call. It likely won't do anything
+					// anyway and will be the wrong thing in 99% of cases.
+					if ref.Type == Tag {
+						continue
+					} else if _, ok := supportedTypes[ref.Type]; !ok {
+						continue
+					} else if re != nil && !re.MatchString(ref.Val) {
+						continue
+					}
+
+					// Make a new expression and replace the wildcard within this cloned expression.
+					call.Args[0] = &VarRef{Val: ref.Val, Type: ref.Type}
+					rwFields = append(rwFields, &Field{
+						Expr:  CloneExpr(template),
+						Alias: fmt.Sprintf("%s_%s", f.Name(), ref.Val),
+					})
 				}
 			default:
 				rwFields = append(rwFields, f)
@@ -1068,12 +1272,18 @@ func (s *SelectStatement) RewriteWildcards(ic IteratorCreator) (*SelectStatement
 	// Rewrite all wildcard GROUP BY fields
 	if hasDimensionWildcard {
 		// Allocate a slice assuming there is exactly one wildcard for efficiency.
-		rwDimensions := make(Dimensions, 0, len(s.Dimensions)+len(dimensions)-1)
-		for _, d := range s.Dimensions {
-			switch d.Expr.(type) {
+		rwDimensions := make(Dimensions, 0, len(other.Dimensions)+len(dimensions)-1)
+		for _, d := range other.Dimensions {
+			switch expr := d.Expr.(type) {
 			case *Wildcard:
 				for _, name := range dimensions {
 					rwDimensions = append(rwDimensions, &Dimension{Expr: &VarRef{Val: name}})
+				}
+			case *RegexLiteral:
+				for _, name := range dimensions {
+					if expr.Val.MatchString(name) {
+						rwDimensions = append(rwDimensions, &Dimension{Expr: &VarRef{Val: name}})
+					}
 				}
 			default:
 				rwDimensions = append(rwDimensions, d)
@@ -1085,8 +1295,95 @@ func (s *SelectStatement) RewriteWildcards(ic IteratorCreator) (*SelectStatement
 	return other, nil
 }
 
-// RewriteDistinct rewrites the expression to be a call for map/reduce to work correctly
-// This method assumes all validation has passed
+// RewriteRegexConditions rewrites regex conditions to make better use of the
+// database index.
+//
+// Conditions that can currently be simplified are:
+//
+//     - host =~ /^foo$/ becomes host = 'foo'
+//     - host !~ /^foo$/ becomes host != 'foo'
+//
+// Note: if the regex contains groups, character classes, repetition or
+// similar, it's likely it won't be rewritten. In order to support rewriting
+// regexes with these characters would be a lot more work.
+func (s *SelectStatement) RewriteRegexConditions() {
+	s.Condition = RewriteExpr(s.Condition, func(e Expr) Expr {
+		be, ok := e.(*BinaryExpr)
+		if !ok || (be.Op != EQREGEX && be.Op != NEQREGEX) {
+			// This expression is not a binary condition or doesn't have a
+			// regex based operator.
+			return e
+		}
+
+		// Handle regex-based condition.
+		rhs := be.RHS.(*RegexLiteral) // This must be a regex.
+
+		val, ok := matchExactRegex(rhs.Val.String())
+		if !ok {
+			// Regex didn't match.
+			return e
+		}
+
+		// Remove leading and trailing ^ and $.
+		be.RHS = &StringLiteral{Val: val}
+
+		// Update the condition operator.
+		if be.Op == EQREGEX {
+			be.Op = EQ
+		} else {
+			be.Op = NEQ
+		}
+		return be
+	})
+}
+
+// matchExactRegex matches regexes that have the following form: /^foo$/. It
+// considers /^$/ to be a matching regex.
+func matchExactRegex(v string) (string, bool) {
+	re, err := syntax.Parse(v, syntax.Perl)
+	if err != nil {
+		// Nothing we can do or log.
+		return "", false
+	}
+
+	if re.Op != syntax.OpConcat {
+		return "", false
+	}
+
+	if len(re.Sub) < 2 || len(re.Sub) > 3 {
+		// Regex has too few or too many subexpressions.
+		return "", false
+	}
+
+	start := re.Sub[0]
+	if !(start.Op == syntax.OpBeginLine || start.Op == syntax.OpBeginText) {
+		// Regex does not begin with ^
+		return "", false
+	}
+
+	end := re.Sub[len(re.Sub)-1]
+	if !(end.Op == syntax.OpEndLine || end.Op == syntax.OpEndText) {
+		// Regex does not end with $
+		return "", false
+	}
+
+	if len(re.Sub) == 3 {
+		middle := re.Sub[1]
+		if middle.Op != syntax.OpLiteral {
+			// Regex does not contain a literal op.
+			return "", false
+		}
+
+		// We can rewrite this regex.
+		return string(middle.Rune), true
+	}
+
+	// The regex /^$/
+	return "", true
+}
+
+// RewriteDistinct rewrites the expression to be a call for map/reduce to work correctly.
+// This method assumes all validation has passed.
 func (s *SelectStatement) RewriteDistinct() {
 	WalkFunc(s.Fields, func(n Node) {
 		switch n := n.(type) {
@@ -1111,14 +1408,50 @@ func (s *SelectStatement) RewriteTimeFields() {
 		switch expr := s.Fields[i].Expr.(type) {
 		case *VarRef:
 			if expr.Val == "time" {
+				s.TimeAlias = s.Fields[i].Alias
 				s.Fields = append(s.Fields[:i], s.Fields[i+1:]...)
 			}
 		}
 	}
 }
 
+// RewriteTimeCondition adds time constraints to aggregate queries.
+func (s *SelectStatement) RewriteTimeCondition(now time.Time) error {
+	interval, err := s.GroupByInterval()
+	if err != nil {
+		return err
+	} else if interval > 0 && s.Condition != nil {
+		_, tmax, err := TimeRange(s.Condition)
+		if err != nil {
+			return err
+		}
+
+		if tmax.IsZero() {
+			s.Condition = &BinaryExpr{
+				Op:  AND,
+				LHS: s.Condition,
+				RHS: &BinaryExpr{
+					Op:  LTE,
+					LHS: &VarRef{Val: "time"},
+					RHS: &TimeLiteral{Val: now},
+				},
+			}
+		}
+	}
+
+	for _, source := range s.Sources {
+		switch source := source.(type) {
+		case *SubQuery:
+			if err := source.Statement.RewriteTimeCondition(now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // ColumnNames will walk all fields and functions and return the appropriate field names for the select statement
-// while maintaining order of the field names
+// while maintaining order of the field names.
 func (s *SelectStatement) ColumnNames() []string {
 	// First walk each field to determine the number of columns.
 	columnFields := Fields{}
@@ -1147,7 +1480,7 @@ func (s *SelectStatement) ColumnNames() []string {
 	columnNames := make([]string, len(columnFields)+offset)
 	if !s.OmitTime {
 		// Add the implicit time if requested.
-		columnNames[0] = "time"
+		columnNames[0] = s.TimeFieldName()
 	}
 
 	// Keep track of the encountered column names.
@@ -1181,14 +1514,53 @@ func (s *SelectStatement) ColumnNames() []string {
 				count++
 			}
 		}
-		names[name] += 1
+		names[name]++
 		columnNames[i+offset] = name
 	}
 	return columnNames
 }
 
-// HasTimeFieldSpecified will walk all fields and determine if the user explicitly asked for time
-// This is needed to determine re-write behaviors for functions like TOP and BOTTOM
+// FieldExprByName returns the expression that matches the field name and the
+// index where this was found. If the name matches one of the arguments to
+// "top" or "bottom", the variable reference inside of the function is returned
+// and the index is of the function call rather than the variable reference.
+// If no expression is found, -1 is returned for the index and the expression
+// will be nil.
+func (s *SelectStatement) FieldExprByName(name string) (int, Expr) {
+	for i, f := range s.Fields {
+		if f.Name() == name {
+			return i, f.Expr
+		} else if call, ok := f.Expr.(*Call); ok && (call.Name == "top" || call.Name == "bottom") && len(call.Args) > 2 {
+			for _, arg := range call.Args[1 : len(call.Args)-1] {
+				if arg, ok := arg.(*VarRef); ok && arg.Val == name {
+					return i, arg
+				}
+			}
+		}
+	}
+	return -1, nil
+}
+
+// Reduce calls the Reduce function on the different components of the
+// SelectStatement to reduce the statement.
+func (s *SelectStatement) Reduce(valuer Valuer) *SelectStatement {
+	stmt := s.Clone()
+	stmt.Condition = Reduce(stmt.Condition, valuer)
+	for _, d := range stmt.Dimensions {
+		d.Expr = Reduce(d.Expr, valuer)
+	}
+
+	for _, source := range stmt.Sources {
+		switch source := source.(type) {
+		case *SubQuery:
+			source.Statement = source.Statement.Reduce(valuer)
+		}
+	}
+	return stmt
+}
+
+// HasTimeFieldSpecified will walk all fields and determine if the user explicitly asked for time.
+// This is needed to determine re-write behaviors for functions like TOP and BOTTOM.
 func (s *SelectStatement) HasTimeFieldSpecified() bool {
 	for _, f := range s.Fields {
 		if f.Name() == "time" {
@@ -1225,6 +1597,8 @@ func (s *SelectStatement) String() string {
 		_, _ = buf.WriteString(" fill(none)")
 	case NumberFill:
 		_, _ = buf.WriteString(fmt.Sprintf(" fill(%v)", s.FillValue))
+	case LinearFill:
+		_, _ = buf.WriteString(" fill(linear)")
 	case PreviousFill:
 		_, _ = buf.WriteString(" fill(previous)")
 	}
@@ -1249,39 +1623,56 @@ func (s *SelectStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute the SelectStatement.
-func (s *SelectStatement) RequiredPrivileges() ExecutionPrivileges {
-	ep := ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+// NOTE: Statement should be normalized first (database name(s) in Sources and
+// Target should be populated). If the statement has not been normalized, an
+// empty string will be returned for the database name and it is up to the caller
+// to interpret that as the default database.
+func (s *SelectStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	ep := ExecutionPrivileges{}
+	for _, source := range s.Sources {
+		measurement, ok := source.(*Measurement)
+		if !ok {
+			return nil, fmt.Errorf("invalid measurement: %s", source)
+		}
+
+		ep = append(ep, ExecutionPrivilege{
+			Name:      measurement.Database,
+			Privilege: ReadPrivilege,
+		})
+	}
 
 	if s.Target != nil {
 		p := ExecutionPrivilege{Admin: false, Name: s.Target.Measurement.Database, Privilege: WritePrivilege}
 		ep = append(ep, p)
 	}
-	return ep
+	return ep, nil
 }
 
-// HasWildcard returns whether or not the select statement has at least 1 wildcard
+// HasWildcard returns whether or not the select statement has at least 1 wildcard.
 func (s *SelectStatement) HasWildcard() bool {
 	return s.HasFieldWildcard() || s.HasDimensionWildcard()
 }
 
-// HasFieldWildcard returns whether or not the select statement has at least 1 wildcard in the fields
-func (s *SelectStatement) HasFieldWildcard() bool {
-	for _, f := range s.Fields {
-		_, ok := f.Expr.(*Wildcard)
-		if ok {
-			return true
+// HasFieldWildcard returns whether or not the select statement has at least 1 wildcard in the fields.
+func (s *SelectStatement) HasFieldWildcard() (hasWildcard bool) {
+	WalkFunc(s.Fields, func(n Node) {
+		if hasWildcard {
+			return
 		}
-	}
-
-	return false
+		switch n.(type) {
+		case *Wildcard, *RegexLiteral:
+			hasWildcard = true
+		}
+	})
+	return hasWildcard
 }
 
 // HasDimensionWildcard returns whether or not the select statement has
-// at least 1 wildcard in the dimensions aka `GROUP BY`
+// at least 1 wildcard in the dimensions aka `GROUP BY`.
 func (s *SelectStatement) HasDimensionWildcard() bool {
 	for _, d := range s.Dimensions {
-		_, ok := d.Expr.(*Wildcard)
-		if ok {
+		switch d.Expr.(type) {
+		case *Wildcard, *RegexLiteral:
 			return true
 		}
 	}
@@ -1302,15 +1693,7 @@ func (s *SelectStatement) validate(tr targetRequirement) error {
 		return err
 	}
 
-	if err := s.validateCountDistinct(); err != nil {
-		return err
-	}
-
 	if err := s.validateAggregates(tr); err != nil {
-		return err
-	}
-
-	if err := s.validateDerivative(); err != nil {
 		return err
 	}
 
@@ -1339,24 +1722,39 @@ func (s *SelectStatement) validateDimensions() error {
 	for _, dim := range s.Dimensions {
 		switch expr := dim.Expr.(type) {
 		case *Call:
-			// Ensure the call is time() and it only has one duration argument.
+			// Ensure the call is time() and it has one or two duration arguments.
 			// If we already have a duration
 			if expr.Name != "time" {
 				return errors.New("only time() calls allowed in dimensions")
-			} else if len(expr.Args) != 1 {
-				return errors.New("time dimension expected one argument")
+			} else if got := len(expr.Args); got < 1 || got > 2 {
+				return errors.New("time dimension expected 1 or 2 arguments")
 			} else if lit, ok := expr.Args[0].(*DurationLiteral); !ok {
-				return errors.New("time dimension must have one duration argument")
+				return errors.New("time dimension must have duration argument")
 			} else if dur != 0 {
 				return errors.New("multiple time dimensions not allowed")
 			} else {
 				dur = lit.Val
+				if len(expr.Args) == 2 {
+					switch lit := expr.Args[1].(type) {
+					case *DurationLiteral:
+						// noop
+					case *Call:
+						if lit.Name != "now" {
+							return errors.New("time dimension offset function must be now()")
+						} else if len(lit.Args) != 0 {
+							return errors.New("time dimension offset now() function requires no arguments")
+						}
+					default:
+						return errors.New("time dimension offset must be duration or now()")
+					}
+				}
 			}
 		case *VarRef:
 			if strings.ToLower(expr.Val) == "time" {
 				return errors.New("time() is a function and expects at least one argument")
 			}
 		case *Wildcard:
+		case *RegexLiteral:
 		default:
 			return errors.New("only time and tag dimensions allowed")
 		}
@@ -1381,12 +1779,12 @@ func (s *SelectStatement) validSelectWithAggregate() error {
 			numAggregates++
 		}
 	}
-	// For TOP, BOTTOM, MAX, MIN, FIRST, LAST (selector functions) it is ok to ask for fields and tags
+	// For TOP, BOTTOM, MAX, MIN, FIRST, LAST, PERCENTILE (selector functions) it is ok to ask for fields and tags
 	// but only if one function is specified.  Combining multiple functions and fields and tags is not currently supported
 	onlySelectors := true
 	for k := range calls {
 		switch k {
-		case "top", "bottom", "max", "min", "first", "last":
+		case "top", "bottom", "max", "min", "first", "last", "percentile", "sample":
 		default:
 			onlySelectors = false
 			break
@@ -1433,7 +1831,7 @@ func (s *SelectStatement) validTopBottomAggr(expr *Call) error {
 	return nil
 }
 
-// validPercentileAggr determines if PERCENTILE have valid arguments.
+// validPercentileAggr determines if the call to PERCENTILE has valid arguments.
 func (s *SelectStatement) validPercentileAggr(expr *Call) error {
 	if err := s.validSelectWithAggregate(); err != nil {
 		return err
@@ -1442,25 +1840,81 @@ func (s *SelectStatement) validPercentileAggr(expr *Call) error {
 		return fmt.Errorf("invalid number of arguments for %s, expected %d, got %d", expr.Name, exp, got)
 	}
 
+	switch expr.Args[0].(type) {
+	case *VarRef, *RegexLiteral, *Wildcard:
+		// do nothing
+	default:
+		return fmt.Errorf("expected field argument in percentile()")
+	}
+
 	switch expr.Args[1].(type) {
 	case *IntegerLiteral, *NumberLiteral:
 		return nil
 	default:
 		return fmt.Errorf("expected float argument in percentile()")
 	}
-	return nil
+}
+
+// validPercentileAggr determines if the call to SAMPLE has valid arguments.
+func (s *SelectStatement) validSampleAggr(expr *Call) error {
+	if err := s.validSelectWithAggregate(); err != nil {
+		return err
+	}
+	if exp, got := 2, len(expr.Args); got != exp {
+		return fmt.Errorf("invalid number of arguments for %s, expected %d, got %d", expr.Name, exp, got)
+	}
+
+	switch expr.Args[0].(type) {
+	case *VarRef, *RegexLiteral, *Wildcard:
+		// do nothing
+	default:
+		return fmt.Errorf("expected field argument in sample()")
+	}
+
+	switch expr.Args[1].(type) {
+	case *IntegerLiteral:
+		return nil
+	default:
+		return fmt.Errorf("expected integer argument in sample()")
+	}
 }
 
 func (s *SelectStatement) validateAggregates(tr targetRequirement) error {
 	for _, f := range s.Fields {
 		for _, expr := range walkFunctionCalls(f.Expr) {
 			switch expr.Name {
-			case "derivative", "non_negative_derivative":
+			case "derivative", "non_negative_derivative", "difference", "moving_average", "cumulative_sum", "elapsed":
 				if err := s.validSelectWithAggregate(); err != nil {
 					return err
 				}
-				if min, max, got := 1, 2, len(expr.Args); got > max || got < min {
-					return fmt.Errorf("invalid number of arguments for %s, expected at least %d but no more than %d, got %d", expr.Name, min, max, got)
+				switch expr.Name {
+				case "derivative", "non_negative_derivative", "elapsed":
+					if min, max, got := 1, 2, len(expr.Args); got > max || got < min {
+						return fmt.Errorf("invalid number of arguments for %s, expected at least %d but no more than %d, got %d", expr.Name, min, max, got)
+					}
+					// If a duration arg is passed, make sure it's a duration
+					if len(expr.Args) == 2 {
+						// Second must be a duration .e.g (1h)
+						if _, ok := expr.Args[1].(*DurationLiteral); !ok {
+							return fmt.Errorf("second argument to %s must be a duration, got %T", expr.Name, expr.Args[1])
+						}
+					}
+				case "difference", "cumulative_sum":
+					if got := len(expr.Args); got != 1 {
+						return fmt.Errorf("invalid number of arguments for %s, expected 1, got %d", expr.Name, got)
+					}
+				case "moving_average":
+					if got := len(expr.Args); got != 2 {
+						return fmt.Errorf("invalid number of arguments for moving_average, expected 2, got %d", got)
+					}
+
+					if lit, ok := expr.Args[1].(*IntegerLiteral); !ok {
+						return fmt.Errorf("second argument for moving_average must be an integer, got %T", expr.Args[1])
+					} else if lit.Val <= 1 {
+						return fmt.Errorf("moving_average window must be greater than 1, got %d", lit.Val)
+					} else if int64(int(lit.Val)) != lit.Val {
+						return fmt.Errorf("moving_average window too large, got %d", lit.Val)
+					}
 				}
 				// Validate that if they have grouping by time, they need a sub-call like min/max, etc.
 				groupByInterval, err := s.GroupByInterval()
@@ -1488,11 +1942,15 @@ func (s *SelectStatement) validateAggregates(tr targetRequirement) error {
 						}
 
 						switch fc := c.Args[0].(type) {
-						case *VarRef:
+						case *VarRef, *Wildcard, *RegexLiteral:
 							// do nothing
 						case *Call:
-							if fc.Name != "distinct" {
+							if fc.Name != "distinct" || expr.Name != "count" {
 								return fmt.Errorf("expected field argument in %s()", c.Name)
+							} else if exp, got := 1, len(fc.Args); got != exp {
+								return fmt.Errorf("count(distinct %s) can only have %d argument(s), got %d", fc.Name, exp, got)
+							} else if _, ok := fc.Args[0].(*VarRef); !ok {
+								return fmt.Errorf("expected field argument in distinct()")
 							}
 						case *Distinct:
 							if expr.Name != "count" {
@@ -1511,19 +1969,56 @@ func (s *SelectStatement) validateAggregates(tr targetRequirement) error {
 				if err := s.validPercentileAggr(expr); err != nil {
 					return err
 				}
+			case "sample":
+				if err := s.validSampleAggr(expr); err != nil {
+					return err
+				}
+			case "holt_winters", "holt_winters_with_fit":
+				if exp, got := 3, len(expr.Args); got != exp {
+					return fmt.Errorf("invalid number of arguments for %s, expected %d, got %d", expr.Name, exp, got)
+				}
+				// Validate that if they have grouping by time, they need a sub-call like min/max, etc.
+				groupByInterval, err := s.GroupByInterval()
+				if err != nil {
+					return fmt.Errorf("invalid group interval: %v", err)
+				}
+
+				if _, ok := expr.Args[0].(*Call); ok && groupByInterval == 0 {
+					return fmt.Errorf("%s aggregate requires a GROUP BY interval", expr.Name)
+				} else if !ok {
+					return fmt.Errorf("must use aggregate function with %s", expr.Name)
+				}
+				if arg, ok := expr.Args[1].(*IntegerLiteral); !ok {
+					return fmt.Errorf("expected integer argument as second arg in %s", expr.Name)
+				} else if arg.Val <= 0 {
+					return fmt.Errorf("second arg to %s must be greater than 0, got %d", expr.Name, arg.Val)
+				}
+				if _, ok := expr.Args[2].(*IntegerLiteral); !ok {
+					return fmt.Errorf("expected integer argument as third arg in %s", expr.Name)
+				}
 			default:
 				if err := s.validSelectWithAggregate(); err != nil {
 					return err
 				}
 				if exp, got := 1, len(expr.Args); got != exp {
+					// Special error message if distinct was used as the argument.
+					if expr.Name == "count" && got >= 1 {
+						if _, ok := expr.Args[0].(*Distinct); ok {
+							return fmt.Errorf("count(distinct <field>) can only have one argument")
+						}
+					}
 					return fmt.Errorf("invalid number of arguments for %s, expected %d, got %d", expr.Name, exp, got)
 				}
 				switch fc := expr.Args[0].(type) {
-				case *VarRef:
+				case *VarRef, *Wildcard, *RegexLiteral:
 					// do nothing
 				case *Call:
-					if fc.Name != "distinct" {
+					if fc.Name != "distinct" || expr.Name != "count" {
 						return fmt.Errorf("expected field argument in %s()", expr.Name)
+					} else if exp, got := 1, len(fc.Args); got != exp {
+						return fmt.Errorf("count(distinct <field>) can only have one argument")
+					} else if _, ok := fc.Args[0].(*VarRef); !ok {
+						return fmt.Errorf("expected field argument in distinct()")
 					}
 				case *Distinct:
 					if expr.Name != "count" {
@@ -1548,16 +2043,48 @@ func (s *SelectStatement) validateAggregates(tr targetRequirement) error {
 
 	// If we have an aggregate function with a group by time without a where clause, it's an invalid statement
 	if tr == targetNotRequired { // ignore create continuous query statements
-		if !s.IsRawQuery && groupByDuration > 0 && !HasTimeExpr(s.Condition) {
-			return fmt.Errorf("aggregate functions with GROUP BY time require a WHERE time clause")
+		if err := s.validateGroupByInterval(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// HasDistinct checks if a select statement contains DISTINCT
+// validateGroupByInterval ensures that any select statements that have a group
+// by interval either have a time expression limiting the time range or have a
+// parent query that does that.
+func (s *SelectStatement) validateGroupByInterval() error {
+	// If we have a time expression, we and all subqueries are fine.
+	if HasTimeExpr(s.Condition) {
+		return nil
+	}
+
+	// Check if this is not a raw query and if the group by duration exists.
+	// If these are true, then we have an error.
+	interval, err := s.GroupByInterval()
+	if err != nil {
+		return err
+	} else if !s.IsRawQuery && interval > 0 {
+		return fmt.Errorf("aggregate functions with GROUP BY time require a WHERE time clause")
+	}
+
+	// Validate the subqueries. If we have a time expression in this select
+	// statement, we don't need to do this because parent time ranges propagate
+	// to children. So we only execute this when there is no time condition in
+	// the parent.
+	for _, source := range s.Sources {
+		switch source := source.(type) {
+		case *SubQuery:
+			if err := source.Statement.validateGroupByInterval(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// HasDistinct checks if a select statement contains a call to DISTINCT.
 func (s *SelectStatement) HasDistinct() bool {
-	// determine if we have a call named distinct
 	for _, f := range s.Fields {
 		switch c := f.Expr.(type) {
 		case *Call:
@@ -1593,103 +2120,6 @@ func (s *SelectStatement) validateDistinct() error {
 	return nil
 }
 
-// HasCountDistinct checks if a select statement contains COUNT and DISTINCT
-func (s *SelectStatement) HasCountDistinct() bool {
-	for _, f := range s.Fields {
-		if c, ok := f.Expr.(*Call); ok {
-			if c.Name == "count" {
-				for _, a := range c.Args {
-					if _, ok := a.(*Distinct); ok {
-						return true
-					}
-					if c, ok := a.(*Call); ok {
-						if c.Name == "distinct" {
-							return true
-						}
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-func (s *SelectStatement) validateCountDistinct() error {
-	if !s.HasCountDistinct() {
-		return nil
-	}
-
-	valid := func(e Expr) bool {
-		c, ok := e.(*Call)
-		if !ok {
-			return true
-		}
-		if c.Name != "count" {
-			return true
-		}
-		for _, a := range c.Args {
-			if _, ok := a.(*Distinct); ok {
-				return len(c.Args) == 1
-			}
-			if d, ok := a.(*Call); ok {
-				if d.Name == "distinct" {
-					return len(d.Args) == 1
-				}
-			}
-		}
-		return true
-	}
-
-	for _, f := range s.Fields {
-		if !valid(f.Expr) {
-			return fmt.Errorf("count(distinct <field>) can only have one argument")
-		}
-	}
-
-	return nil
-}
-
-func (s *SelectStatement) validateDerivative() error {
-	if !s.HasDerivative() {
-		return nil
-	}
-
-	// If a derivative is requested, it must be the only field in the query. We don't support
-	// multiple fields in combination w/ derivaties yet.
-	if len(s.Fields) != 1 {
-		return fmt.Errorf("derivative cannot be used with other fields")
-	}
-
-	aggr := s.FunctionCalls()
-	if len(aggr) != 1 {
-		return fmt.Errorf("derivative cannot be used with other fields")
-	}
-
-	// Derivative requires two arguments
-	derivativeCall := aggr[0]
-	if len(derivativeCall.Args) == 0 {
-		return fmt.Errorf("derivative requires a field argument")
-	}
-
-	// First arg must be a field or aggr over a field e.g. (mean(field))
-	_, callOk := derivativeCall.Args[0].(*Call)
-	_, varOk := derivativeCall.Args[0].(*VarRef)
-
-	if !(callOk || varOk) {
-		return fmt.Errorf("derivative requires a field argument")
-	}
-
-	// If a duration arg is pased, make sure it's a duration
-	if len(derivativeCall.Args) == 2 {
-		// Second must be a duration .e.g (1h)
-		if _, ok := derivativeCall.Args[1].(*DurationLiteral); !ok {
-			return fmt.Errorf("derivative requires a duration argument")
-		}
-	}
-
-	return nil
-}
-
 // GroupByInterval extracts the time interval, if specified.
 func (s *SelectStatement) GroupByInterval() (time.Duration, error) {
 	// return if we've already pulled it out
@@ -1705,17 +2135,47 @@ func (s *SelectStatement) GroupByInterval() (time.Duration, error) {
 	for _, d := range s.Dimensions {
 		if call, ok := d.Expr.(*Call); ok && call.Name == "time" {
 			// Make sure there is exactly one argument.
-			if len(call.Args) != 1 {
-				return 0, errors.New("time dimension expected one argument")
+			if got := len(call.Args); got < 1 || got > 2 {
+				return 0, errors.New("time dimension expected 1 or 2 arguments")
 			}
 
 			// Ensure the argument is a duration.
 			lit, ok := call.Args[0].(*DurationLiteral)
 			if !ok {
-				return 0, errors.New("time dimension must have one duration argument")
+				return 0, errors.New("time dimension must have duration argument")
 			}
 			s.groupByInterval = lit.Val
 			return lit.Val, nil
+		}
+	}
+	return 0, nil
+}
+
+// GroupByOffset extracts the time interval offset, if specified.
+func (s *SelectStatement) GroupByOffset() (time.Duration, error) {
+	interval, err := s.GroupByInterval()
+	if err != nil {
+		return 0, err
+	}
+
+	// Ignore if there are no dimensions.
+	if len(s.Dimensions) == 0 {
+		return 0, nil
+	}
+
+	for _, d := range s.Dimensions {
+		if call, ok := d.Expr.(*Call); ok && call.Name == "time" {
+			if len(call.Args) == 2 {
+				switch expr := call.Args[1].(type) {
+				case *DurationLiteral:
+					return expr.Val % interval, nil
+				case *TimeLiteral:
+					return expr.Val.Sub(expr.Val.Truncate(interval)), nil
+				default:
+					return 0, fmt.Errorf("invalid time dimension offset: %s", expr)
+				}
+			}
+			return 0, nil
 		}
 	}
 	return 0, nil
@@ -1734,13 +2194,13 @@ func (s *SelectStatement) SetTimeRange(start, end time.Time) error {
 		return err
 	}
 
-	// fold out any previously replaced time dimensios and set the condition
+	// Fold out any previously replaced time dimensions and set the condition.
 	s.Condition = Reduce(expr, nil)
 
 	return nil
 }
 
-// rewriteWithoutTimeDimensions will remove any WHERE time... clauses from the select statement
+// rewriteWithoutTimeDimensions will remove any WHERE time... clauses from the select statement.
 // This is necessary when setting an explicit time range to override any that previously existed.
 func (s *SelectStatement) rewriteWithoutTimeDimensions() string {
 	n := RewriteFunc(s.Condition, func(n Node) Node {
@@ -1760,72 +2220,7 @@ func (s *SelectStatement) rewriteWithoutTimeDimensions() string {
 	return n.String()
 }
 
-/*
-
-BinaryExpr
-
-SELECT mean(xxx.value) + avg(yyy.value) FROM xxx JOIN yyy WHERE xxx.host = 123
-
-from xxx where host = 123
-select avg(value) from yyy where host = 123
-
-SELECT xxx.value FROM xxx WHERE xxx.host = 123
-SELECT yyy.value FROM yyy
-
----
-
-SELECT MEAN(xxx.value) + MEAN(cpu.load.value)
-FROM xxx JOIN yyy
-GROUP BY host
-WHERE (xxx.region == "uswest" OR yyy.region == "uswest") AND xxx.otherfield == "XXX"
-
-select * from (
-	select mean + mean from xxx join yyy
-	group by time(5m), host
-) (xxx.region == "uswest" OR yyy.region == "uswest") AND xxx.otherfield == "XXX"
-
-(seriesIDS for xxx.region = 'uswest' union seriesIDs for yyy.regnion = 'uswest') | seriesIDS xxx.otherfield = 'XXX'
-
-WHERE xxx.region == "uswest" AND xxx.otherfield == "XXX"
-WHERE yyy.region == "uswest"
-
-
-*/
-
-// Substatement returns a single-series statement for a given variable reference.
-func (s *SelectStatement) Substatement(ref *VarRef) (*SelectStatement, error) {
-	// Copy dimensions and properties to new statement.
-	other := &SelectStatement{
-		Fields:     Fields{{Expr: ref}},
-		Dimensions: s.Dimensions,
-		Limit:      s.Limit,
-		Offset:     s.Offset,
-		SortFields: s.SortFields,
-	}
-
-	// If there is only one series source then return it with the whole condition.
-	if len(s.Sources) == 1 {
-		other.Sources = s.Sources
-		other.Condition = s.Condition
-		return other, nil
-	}
-
-	// Find the matching source.
-	name := MatchSource(s.Sources, ref.Val)
-	if name == "" {
-		return nil, fmt.Errorf("field source not found: %s", ref.Val)
-	}
-	other.Sources = append(other.Sources, &Measurement{Name: name})
-
-	// Filter out conditions.
-	if s.Condition != nil {
-		other.Condition = filterExprBySource(name, s.Condition)
-	}
-
-	return other, nil
-}
-
-// NamesInWhere returns the field and tag names (idents) referenced in the where clause
+// NamesInWhere returns the field and tag names (idents) referenced in the where clause.
 func (s *SelectStatement) NamesInWhere() []string {
 	var a []string
 	if s.Condition != nil {
@@ -1834,7 +2229,7 @@ func (s *SelectStatement) NamesInWhere() []string {
 	return a
 }
 
-// NamesInSelect returns the field and tag names (idents) in the select clause
+// NamesInSelect returns the field and tag names (idents) in the select clause.
 func (s *SelectStatement) NamesInSelect() []string {
 	var a []string
 
@@ -1845,7 +2240,7 @@ func (s *SelectStatement) NamesInSelect() []string {
 	return a
 }
 
-// NamesInDimension returns the field and tag names (idents) in the group by
+// NamesInDimension returns the field and tag names (idents) in the group by clause.
 func (s *SelectStatement) NamesInDimension() []string {
 	var a []string
 
@@ -1875,21 +2270,19 @@ func LimitTagSets(a []*TagSet, slimit, soffset int) []*TagSet {
 	return a[soffset : soffset+slimit]
 }
 
-// walkNames will walk the Expr and return the database fields
+// walkNames will walk the Expr and return the identifier names used.
 func walkNames(exp Expr) []string {
 	switch expr := exp.(type) {
 	case *VarRef:
 		return []string{expr.Val}
 	case *Call:
-		if len(expr.Args) == 0 {
-			return nil
+		var a []string
+		for _, expr := range expr.Args {
+			if ref, ok := expr.(*VarRef); ok {
+				a = append(a, ref.Val)
+			}
 		}
-		lit, ok := expr.Args[0].(*VarRef)
-		if !ok {
-			return nil
-		}
-
-		return []string{lit.Val}
+		return a
 	case *BinaryExpr:
 		var ret []string
 		ret = append(ret, walkNames(expr.LHS)...)
@@ -1902,26 +2295,53 @@ func walkNames(exp Expr) []string {
 	return nil
 }
 
-// ExprNames returns a list of non-"time" field names from an expression.
-func ExprNames(expr Expr) []string {
-	m := make(map[string]struct{})
-	for _, name := range walkNames(expr) {
-		if name == "time" {
-			continue
+// walkRefs will walk the Expr and return the var refs used.
+func walkRefs(exp Expr) []VarRef {
+	switch expr := exp.(type) {
+	case *VarRef:
+		return []VarRef{*expr}
+	case *Call:
+		a := make([]VarRef, 0, len(expr.Args))
+		for _, expr := range expr.Args {
+			if ref, ok := expr.(*VarRef); ok {
+				a = append(a, *ref)
+			}
 		}
-		m[name] = struct{}{}
+		return a
+	case *BinaryExpr:
+		lhs := walkRefs(expr.LHS)
+		rhs := walkRefs(expr.RHS)
+		ret := make([]VarRef, 0, len(lhs)+len(rhs))
+		ret = append(ret, lhs...)
+		ret = append(ret, rhs...)
+		return ret
+	case *ParenExpr:
+		return walkRefs(expr.Expr)
 	}
 
-	a := make([]string, 0, len(m))
+	return nil
+}
+
+// ExprNames returns a list of non-"time" field names from an expression.
+func ExprNames(expr Expr) []VarRef {
+	m := make(map[VarRef]struct{})
+	for _, ref := range walkRefs(expr) {
+		if ref.Val == "time" {
+			continue
+		}
+		m[ref] = struct{}{}
+	}
+
+	a := make([]VarRef, 0, len(m))
 	for k := range m {
 		a = append(a, k)
 	}
-	sort.Strings(a)
+	sort.Sort(VarRefs(a))
 
 	return a
 }
 
-// FunctionCalls returns the Call objects from the query
+// FunctionCalls returns the Call objects from the query.
 func (s *SelectStatement) FunctionCalls() []*Call {
 	var a []*Call
 	for _, f := range s.Fields {
@@ -1930,7 +2350,7 @@ func (s *SelectStatement) FunctionCalls() []*Call {
 	return a
 }
 
-// FunctionCallsByPosition returns the Call objects from the query in the order they appear in the select statement
+// FunctionCallsByPosition returns the Call objects from the query in the order they appear in the select statement.
 func (s *SelectStatement) FunctionCallsByPosition() [][]*Call {
 	var a [][]*Call
 	for _, f := range s.Fields {
@@ -1939,7 +2359,7 @@ func (s *SelectStatement) FunctionCallsByPosition() [][]*Call {
 	return a
 }
 
-// walkFunctionCalls walks the Field of a query for any function calls made
+// walkFunctionCalls walks the Expr and returns any function calls made.
 func walkFunctionCalls(exp Expr) []*Call {
 	switch expr := exp.(type) {
 	case *VarRef:
@@ -1958,7 +2378,7 @@ func walkFunctionCalls(exp Expr) []*Call {
 	return nil
 }
 
-// filters an expression to exclude expressions unrelated to a source.
+// filterExprBySource filters an expression to exclude expressions unrelated to a source.
 func filterExprBySource(name string, expr Expr) Expr {
 	switch expr := expr.(type) {
 	case *VarRef:
@@ -1998,7 +2418,7 @@ func filterExprBySource(name string, expr Expr) Expr {
 }
 
 // MatchSource returns the source name that matches a field name.
-// Returns a blank string if no sources match.
+// It returns a blank string if no sources match.
 func MatchSource(sources Sources, name string) string {
 	for _, src := range sources {
 		switch src := src.(type) {
@@ -2033,7 +2453,7 @@ func (t *Target) String() string {
 	return buf.String()
 }
 
-// DeleteStatement represents a command for removing data from the database.
+// DeleteStatement represents a command for deleting data from the database.
 type DeleteStatement struct {
 	// Data source that values are removed from.
 	Source Source
@@ -2055,12 +2475,16 @@ func (s *DeleteStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a DeleteStatement.
-func (s *DeleteStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}
+func (s *DeleteStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}, nil
 }
 
 // ShowSeriesStatement represents a command for listing series in the database.
 type ShowSeriesStatement struct {
+	// Database to query. If blank, use the default database.
+	// The database can also be specified per source in the Sources.
+	Database string
+
 	// Measurement(s) the series are listed for.
 	Sources Sources
 
@@ -2083,6 +2507,10 @@ func (s *ShowSeriesStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SHOW SERIES")
 
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Database))
+	}
 	if s.Sources != nil {
 		_, _ = buf.WriteString(" FROM ")
 		_, _ = buf.WriteString(s.Sources.String())
@@ -2108,8 +2536,8 @@ func (s *ShowSeriesStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a ShowSeriesStatement.
-func (s *ShowSeriesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+func (s *ShowSeriesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // DropSeriesStatement represents a command for removing a series from the database.
@@ -2139,35 +2567,39 @@ func (s *DropSeriesStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a DropSeriesStatement.
-func (s DropSeriesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}
+func (s DropSeriesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}, nil
 }
 
-// DropServerStatement represents a command for removing a server from the cluster.
-type DropServerStatement struct {
-	// ID of the node to be dropped.
-	NodeID uint64
+// DeleteSeriesStatement represents a command for deleting all or part of a series from a database.
+type DeleteSeriesStatement struct {
+	// Data source that fields are extracted from (optional)
+	Sources Sources
 
-	// Meta indicates if the server being dropped is a meta or data node
-	Meta bool
+	// An expression evaluated on data point (optional)
+	Condition Expr
 }
 
-// String returns a string representation of the drop series statement.
-func (s *DropServerStatement) String() string {
+// String returns a string representation of the delete series statement.
+func (s *DeleteSeriesStatement) String() string {
 	var buf bytes.Buffer
-	_, _ = buf.WriteString("DROP ")
-	if s.Meta {
-		_, _ = buf.WriteString(" META SERVER ")
-	} else {
-		_, _ = buf.WriteString(" DATA SERVER ")
+	buf.WriteString("DELETE")
+
+	if s.Sources != nil {
+		buf.WriteString(" FROM ")
+		buf.WriteString(s.Sources.String())
 	}
-	_, _ = buf.WriteString(strconv.FormatUint(s.NodeID, 10))
+	if s.Condition != nil {
+		buf.WriteString(" WHERE ")
+		buf.WriteString(s.Condition.String())
+	}
+
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege required to execute a DropServerStatement.
-func (s *DropServerStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Name: "", Privilege: AllPrivileges}}
+// RequiredPrivileges returns the privilege required to execute a DeleteSeriesStatement.
+func (s DeleteSeriesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}, nil
 }
 
 // DropShardStatement represents a command for removing a shard from
@@ -2175,9 +2607,6 @@ func (s *DropServerStatement) RequiredPrivileges() ExecutionPrivileges {
 type DropShardStatement struct {
 	// ID of the shard to be dropped.
 	ID uint64
-
-	// Meta indicates if the server being dropped is a meta or data node
-	Meta bool
 }
 
 // String returns a string representation of the drop series statement.
@@ -2190,19 +2619,19 @@ func (s *DropShardStatement) String() string {
 
 // RequiredPrivileges returns the privilege required to execute a
 // DropShardStatement.
-func (s *DropShardStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *DropShardStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowContinuousQueriesStatement represents a command for listing continuous queries.
 type ShowContinuousQueriesStatement struct{}
 
-// String returns a string representation of the list continuous queries statement.
+// String returns a string representation of the show continuous queries statement.
 func (s *ShowContinuousQueriesStatement) String() string { return "SHOW CONTINUOUS QUERIES" }
 
 // RequiredPrivileges returns the privilege required to execute a ShowContinuousQueriesStatement.
-func (s *ShowContinuousQueriesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+func (s *ShowContinuousQueriesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // ShowGrantsForUserStatement represents a command for listing user privileges.
@@ -2221,30 +2650,19 @@ func (s *ShowGrantsForUserStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a ShowGrantsForUserStatement
-func (s *ShowGrantsForUserStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
-}
-
-// ShowServersStatement represents a command for listing all servers.
-type ShowServersStatement struct{}
-
-// String returns a string representation of the show servers command.
-func (s *ShowServersStatement) String() string { return "SHOW SERVERS" }
-
-// RequiredPrivileges returns the privilege required to execute a ShowServersStatement
-func (s *ShowServersStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowGrantsForUserStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowDatabasesStatement represents a command for listing all databases in the cluster.
 type ShowDatabasesStatement struct{}
 
-// String returns a string representation of the list databases command.
+// String returns a string representation of the show databases command.
 func (s *ShowDatabasesStatement) String() string { return "SHOW DATABASES" }
 
-// RequiredPrivileges returns the privilege required to execute a ShowDatabasesStatement
-func (s *ShowDatabasesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+// RequiredPrivileges returns the privilege required to execute a ShowDatabasesStatement.
+func (s *ShowDatabasesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // CreateContinuousQueryStatement represents a command for creating a continuous query.
@@ -2258,10 +2676,10 @@ type CreateContinuousQueryStatement struct {
 	// Source of data (SELECT statement).
 	Source *SelectStatement
 
-	// Interval to resample previous queries
+	// Interval to resample previous queries.
 	ResampleEvery time.Duration
 
-	// Maximum duration to resample previous queries
+	// Maximum duration to resample previous queries.
 	ResampleFor time.Duration
 }
 
@@ -2289,7 +2707,7 @@ func (s *CreateContinuousQueryStatement) DefaultDatabase() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a CreateContinuousQueryStatement.
-func (s *CreateContinuousQueryStatement) RequiredPrivileges() ExecutionPrivileges {
+func (s *CreateContinuousQueryStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
 	ep := ExecutionPrivileges{{Admin: false, Name: s.Database, Privilege: ReadPrivilege}}
 
 	// Selecting into a database that's different from the source?
@@ -2306,7 +2724,7 @@ func (s *CreateContinuousQueryStatement) RequiredPrivileges() ExecutionPrivilege
 		ep = append(ep, p)
 	}
 
-	return ep
+	return ep, nil
 }
 
 func (s *CreateContinuousQueryStatement) validate() error {
@@ -2338,12 +2756,15 @@ func (s *DropContinuousQueryStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a DropContinuousQueryStatement
-func (s *DropContinuousQueryStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}
+func (s *DropContinuousQueryStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: WritePrivilege}}, nil
 }
 
 // ShowMeasurementsStatement represents a command for listing measurements.
 type ShowMeasurementsStatement struct {
+	// Database to query. If blank, use the default database.
+	Database string
+
 	// Measurement name or regex.
 	Source Source
 
@@ -2366,6 +2787,10 @@ func (s *ShowMeasurementsStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SHOW MEASUREMENTS")
 
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(s.Database)
+	}
 	if s.Source != nil {
 		_, _ = buf.WriteString(" WITH MEASUREMENT ")
 		if m, ok := s.Source.(*Measurement); ok && m.Regex != nil {
@@ -2394,9 +2819,9 @@ func (s *ShowMeasurementsStatement) String() string {
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege(s) required to execute a ShowMeasurementsStatement
-func (s *ShowMeasurementsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+// RequiredPrivileges returns the privilege(s) required to execute a ShowMeasurementsStatement.
+func (s *ShowMeasurementsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // DropMeasurementStatement represents a command to drop a measurement.
@@ -2414,11 +2839,11 @@ func (s *DropMeasurementStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a DropMeasurementStatement
-func (s *DropMeasurementStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *DropMeasurementStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
-// SowQueriesStatement represents a command for listing all running queries.
+// ShowQueriesStatement represents a command for listing all running queries.
 type ShowQueriesStatement struct{}
 
 // String returns a string representation of the show queries statement.
@@ -2427,8 +2852,8 @@ func (s *ShowQueriesStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a ShowQueriesStatement.
-func (s *ShowQueriesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+func (s *ShowQueriesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // ShowRetentionPoliciesStatement represents a command for listing retention policies.
@@ -2440,36 +2865,38 @@ type ShowRetentionPoliciesStatement struct {
 // String returns a string representation of a ShowRetentionPoliciesStatement.
 func (s *ShowRetentionPoliciesStatement) String() string {
 	var buf bytes.Buffer
-	_, _ = buf.WriteString("SHOW RETENTION POLICIES ON ")
-	_, _ = buf.WriteString(QuoteIdent(s.Database))
+	_, _ = buf.WriteString("SHOW RETENTION POLICIES")
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Database))
+	}
 	return buf.String()
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a ShowRetentionPoliciesStatement
-func (s *ShowRetentionPoliciesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+func (s *ShowRetentionPoliciesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // ShowStatsStatement displays statistics for a given module.
 type ShowStatsStatement struct {
-	// Module
 	Module string
 }
 
 // String returns a string representation of a ShowStatsStatement.
 func (s *ShowStatsStatement) String() string {
 	var buf bytes.Buffer
-	_, _ = buf.WriteString("SHOW STATS ")
+	_, _ = buf.WriteString("SHOW STATS")
 	if s.Module != "" {
-		_, _ = buf.WriteString("FOR ")
-		_, _ = buf.WriteString(s.Module)
+		_, _ = buf.WriteString(" FOR ")
+		_, _ = buf.WriteString(QuoteString(s.Module))
 	}
 	return buf.String()
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a ShowStatsStatement
-func (s *ShowStatsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowStatsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowShardGroupsStatement represents a command for displaying shard groups in the cluster.
@@ -2479,8 +2906,8 @@ type ShowShardGroupsStatement struct{}
 func (s *ShowShardGroupsStatement) String() string { return "SHOW SHARD GROUPS" }
 
 // RequiredPrivileges returns the privileges required to execute the statement.
-func (s *ShowShardGroupsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowShardGroupsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowShardsStatement represents a command for displaying shards in the cluster.
@@ -2490,8 +2917,8 @@ type ShowShardsStatement struct{}
 func (s *ShowShardsStatement) String() string { return "SHOW SHARDS" }
 
 // RequiredPrivileges returns the privileges required to execute the statement.
-func (s *ShowShardsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowShardsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowDiagnosticsStatement represents a command for show node diagnostics.
@@ -2503,20 +2930,20 @@ type ShowDiagnosticsStatement struct {
 // String returns a string representation of the ShowDiagnosticsStatement.
 func (s *ShowDiagnosticsStatement) String() string {
 	var buf bytes.Buffer
-	_, _ = buf.WriteString("SHOW DIAGNOSTICS ")
+	_, _ = buf.WriteString("SHOW DIAGNOSTICS")
 	if s.Module != "" {
-		_, _ = buf.WriteString("FOR ")
-		_, _ = buf.WriteString(s.Module)
+		_, _ = buf.WriteString(" FOR ")
+		_, _ = buf.WriteString(QuoteString(s.Module))
 	}
 	return buf.String()
 }
 
 // RequiredPrivileges returns the privilege required to execute a ShowDiagnosticsStatement
-func (s *ShowDiagnosticsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowDiagnosticsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
-// CreateSubscriptionStatement represents a command to add a subscription to the incoming data stream
+// CreateSubscriptionStatement represents a command to add a subscription to the incoming data stream.
 type CreateSubscriptionStatement struct {
 	Name            string
 	Database        string
@@ -2547,9 +2974,9 @@ func (s *CreateSubscriptionStatement) String() string {
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege required to execute a CreateSubscriptionStatement
-func (s *CreateSubscriptionStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+// RequiredPrivileges returns the privilege required to execute a CreateSubscriptionStatement.
+func (s *CreateSubscriptionStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // DropSubscriptionStatement represents a command to drop a subscription to the incoming data stream.
@@ -2565,33 +2992,37 @@ func (s *DropSubscriptionStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege required to execute a DropSubscriptionStatement
-func (s *DropSubscriptionStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *DropSubscriptionStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowSubscriptionsStatement represents a command to show a list of subscriptions.
 type ShowSubscriptionsStatement struct {
 }
 
-// String returns a string representation of the ShowSubscriptionStatement.
+// String returns a string representation of the ShowSubscriptionsStatement.
 func (s *ShowSubscriptionsStatement) String() string {
 	return "SHOW SUBSCRIPTIONS"
 }
 
-// RequiredPrivileges returns the privilege required to execute a ShowSubscriptionStatement
-func (s *ShowSubscriptionsStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+// RequiredPrivileges returns the privilege required to execute a ShowSubscriptionsStatement.
+func (s *ShowSubscriptionsStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowTagKeysStatement represents a command for listing tag keys.
 type ShowTagKeysStatement struct {
+	// Database to query. If blank, use the default database.
+	// The database can also be specified per source in the Sources.
+	Database string
+
 	// Data sources that fields are extracted from.
 	Sources Sources
 
 	// An expression evaluated on data point.
 	Condition Expr
 
-	// Fields to sort results by
+	// Fields to sort results by.
 	SortFields SortFields
 
 	// Maximum number of tag keys per measurement. Unlimited if zero.
@@ -2612,6 +3043,10 @@ func (s *ShowTagKeysStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SHOW TAG KEYS")
 
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Database))
+	}
 	if s.Sources != nil {
 		_, _ = buf.WriteString(" FROM ")
 		_, _ = buf.WriteString(s.Sources.String())
@@ -2643,23 +3078,30 @@ func (s *ShowTagKeysStatement) String() string {
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege(s) required to execute a ShowTagKeysStatement
-func (s *ShowTagKeysStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+// RequiredPrivileges returns the privilege(s) required to execute a ShowTagKeysStatement.
+func (s *ShowTagKeysStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // ShowTagValuesStatement represents a command for listing tag values.
 type ShowTagValuesStatement struct {
+	// Database to query. If blank, use the default database.
+	// The database can also be specified per source in the Sources.
+	Database string
+
 	// Data source that fields are extracted from.
 	Sources Sources
 
-	// Tag key(s) to pull values from.
-	TagKeys []string
+	// Operation to use when selecting tag key(s).
+	Op Token
+
+	// Literal to compare the tag key(s) with.
+	TagKeyExpr Literal
 
 	// An expression evaluated on data point.
 	Condition Expr
 
-	// Fields to sort results by
+	// Fields to sort results by.
 	SortFields SortFields
 
 	// Maximum number of rows to be returned.
@@ -2675,18 +3117,22 @@ func (s *ShowTagValuesStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SHOW TAG VALUES")
 
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Database))
+	}
 	if s.Sources != nil {
 		_, _ = buf.WriteString(" FROM ")
 		_, _ = buf.WriteString(s.Sources.String())
 	}
-	_, _ = buf.WriteString(" WITH KEY IN (")
-	for idx, tagKey := range s.TagKeys {
-		if idx != 0 {
-			_, _ = buf.WriteString(", ")
-		}
-		_, _ = buf.WriteString(QuoteIdent(tagKey))
+	_, _ = buf.WriteString(" WITH KEY ")
+	_, _ = buf.WriteString(s.Op.String())
+	_, _ = buf.WriteString(" ")
+	if lit, ok := s.TagKeyExpr.(*StringLiteral); ok {
+		_, _ = buf.WriteString(QuoteIdent(lit.Val))
+	} else {
+		_, _ = buf.WriteString(s.TagKeyExpr.String())
 	}
-	_, _ = buf.WriteString(")")
 	if s.Condition != nil {
 		_, _ = buf.WriteString(" WHERE ")
 		_, _ = buf.WriteString(s.Condition.String())
@@ -2706,9 +3152,9 @@ func (s *ShowTagValuesStatement) String() string {
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege(s) required to execute a ShowTagValuesStatement
-func (s *ShowTagValuesStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+// RequiredPrivileges returns the privilege(s) required to execute a ShowTagValuesStatement.
+func (s *ShowTagValuesStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // ShowUsersStatement represents a command for listing users.
@@ -2720,12 +3166,16 @@ func (s *ShowUsersStatement) String() string {
 }
 
 // RequiredPrivileges returns the privilege(s) required to execute a ShowUsersStatement
-func (s *ShowUsersStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}
+func (s *ShowUsersStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: true, Name: "", Privilege: AllPrivileges}}, nil
 }
 
 // ShowFieldKeysStatement represents a command for listing field keys.
 type ShowFieldKeysStatement struct {
+	// Database to query. If blank, use the default database.
+	// The database can also be specified per source in the Sources.
+	Database string
+
 	// Data sources that fields are extracted from.
 	Sources Sources
 
@@ -2745,6 +3195,10 @@ func (s *ShowFieldKeysStatement) String() string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SHOW FIELD KEYS")
 
+	if s.Database != "" {
+		_, _ = buf.WriteString(" ON ")
+		_, _ = buf.WriteString(QuoteIdent(s.Database))
+	}
 	if s.Sources != nil {
 		_, _ = buf.WriteString(" FROM ")
 		_, _ = buf.WriteString(s.Sources.String())
@@ -2764,9 +3218,9 @@ func (s *ShowFieldKeysStatement) String() string {
 	return buf.String()
 }
 
-// RequiredPrivileges returns the privilege(s) required to execute a ShowFieldKeysStatement
-func (s *ShowFieldKeysStatement) RequiredPrivileges() ExecutionPrivileges {
-	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}
+// RequiredPrivileges returns the privilege(s) required to execute a ShowFieldKeysStatement.
+func (s *ShowFieldKeysStatement) RequiredPrivileges() (ExecutionPrivileges, error) {
+	return ExecutionPrivileges{{Admin: false, Name: "", Privilege: ReadPrivilege}}, nil
 }
 
 // Fields represents a list of fields.
@@ -2850,10 +3304,14 @@ func (f *Field) String() string {
 	return fmt.Sprintf("%s AS %s", str, QuoteIdent(f.Alias))
 }
 
-// Sort Interface for Fields
-func (a Fields) Len() int           { return len(a) }
+// Len implements sort.Interface.
+func (a Fields) Len() int { return len(a) }
+
+// Less implements sort.Interface.
 func (a Fields) Less(i, j int) bool { return a[i].Name() < a[j].Name() }
-func (a Fields) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+
+// Swap implements sort.Interface.
+func (a Fields) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
 // Dimensions represents a list of dimensions.
 type Dimensions []*Dimension
@@ -2948,7 +3406,7 @@ func encodeMeasurement(mm *Measurement) *internal.Measurement {
 		IsTarget:        proto.Bool(mm.IsTarget),
 	}
 	if mm.Regex != nil {
-		pb.Regex = proto.String(mm.Regex.String())
+		pb.Regex = proto.String(mm.Regex.Val.String())
 	}
 	return pb
 }
@@ -2972,14 +3430,56 @@ func decodeMeasurement(pb *internal.Measurement) (*Measurement, error) {
 	return mm, nil
 }
 
+// SubQuery is a source with a SelectStatement as the backing store.
+type SubQuery struct {
+	Statement *SelectStatement
+}
+
+// String returns a string representation of the subquery.
+func (s *SubQuery) String() string {
+	return fmt.Sprintf("(%s)", s.Statement.String())
+}
+
 // VarRef represents a reference to a variable.
 type VarRef struct {
-	Val string
+	Val  string
+	Type DataType
 }
 
 // String returns a string representation of the variable reference.
 func (r *VarRef) String() string {
-	return QuoteIdent(r.Val)
+	buf := bytes.NewBufferString(QuoteIdent(r.Val))
+	if r.Type != Unknown {
+		buf.WriteString("::")
+		buf.WriteString(r.Type.String())
+	}
+	return buf.String()
+}
+
+// VarRefs represents a slice of VarRef types.
+type VarRefs []VarRef
+
+// Len implements sort.Interface.
+func (a VarRefs) Len() int { return len(a) }
+
+// Less implements sort.Interface.
+func (a VarRefs) Less(i, j int) bool {
+	if a[i].Val != a[j].Val {
+		return a[i].Val < a[j].Val
+	}
+	return a[i].Type < a[j].Type
+}
+
+// Swap implements sort.Interface.
+func (a VarRefs) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+
+// Strings returns a slice of the variable names.
+func (a VarRefs) Strings() []string {
+	s := make([]string, len(a))
+	for i, ref := range a {
+		s[i] = ref.Val
+	}
+	return s
 }
 
 // Call represents a function call.
@@ -2998,47 +3498,6 @@ func (c *Call) String() string {
 
 	// Write function name and args.
 	return fmt.Sprintf("%s(%s)", c.Name, strings.Join(str, ", "))
-}
-
-// Fields will extract any field names from the call.  Only specific calls support this.
-func (c *Call) Fields() []string {
-	switch c.Name {
-	case "top", "bottom":
-		// maintain the order the user specified in the query
-		keyMap := make(map[string]struct{})
-		keys := []string{}
-		for i, a := range c.Args {
-			if i == 0 {
-				// special case, first argument is always the name of the function regardless of the field name
-				keys = append(keys, c.Name)
-				continue
-			}
-			switch v := a.(type) {
-			case *VarRef:
-				if _, ok := keyMap[v.Val]; !ok {
-					keyMap[v.Val] = struct{}{}
-					keys = append(keys, v.Val)
-				}
-			}
-		}
-		return keys
-	case "min", "max", "first", "last", "sum", "mean":
-		// maintain the order the user specified in the query
-		keyMap := make(map[string]struct{})
-		keys := []string{}
-		for _, a := range c.Args {
-			switch v := a.(type) {
-			case *VarRef:
-				if _, ok := keyMap[v.Val]; !ok {
-					keyMap[v.Val] = struct{}{}
-					keys = append(keys, v.Val)
-				}
-			}
-		}
-		return keys
-	default:
-		panic(fmt.Sprintf("*call.Fields is unable to provide information on %s", c.Name))
-	}
 }
 
 // Distinct represents a DISTINCT expression.
@@ -3107,6 +3566,25 @@ func isFalseLiteral(expr Expr) bool {
 	return false
 }
 
+// ListLiteral represents a list of tag key literals.
+type ListLiteral struct {
+	Vals []string
+}
+
+// String returns a string representation of the literal.
+func (s *ListLiteral) String() string {
+	var buf bytes.Buffer
+	_, _ = buf.WriteString("(")
+	for idx, tagKey := range s.Vals {
+		if idx != 0 {
+			_, _ = buf.WriteString(", ")
+		}
+		_, _ = buf.WriteString(QuoteIdent(tagKey))
+	}
+	_, _ = buf.WriteString(")")
+	return buf.String()
+}
+
 // StringLiteral represents a string literal.
 type StringLiteral struct {
 	Val string
@@ -3114,6 +3592,33 @@ type StringLiteral struct {
 
 // String returns a string representation of the literal.
 func (l *StringLiteral) String() string { return QuoteString(l.Val) }
+
+// IsTimeLiteral returns if this string can be interpreted as a time literal.
+func (l *StringLiteral) IsTimeLiteral() bool {
+	return isDateTimeString(l.Val) || isDateString(l.Val)
+}
+
+// ToTimeLiteral returns a time literal if this string can be converted to a time literal.
+func (l *StringLiteral) ToTimeLiteral() (*TimeLiteral, error) {
+	if isDateTimeString(l.Val) {
+		t, err := time.Parse(DateTimeFormat, l.Val)
+		if err != nil {
+			// try to parse it as an RFCNano time
+			t, err = time.Parse(time.RFC3339Nano, l.Val)
+			if err != nil {
+				return nil, ErrInvalidTime
+			}
+		}
+		return &TimeLiteral{Val: t}, nil
+	} else if isDateString(l.Val) {
+		t, err := time.Parse(DateFormat, l.Val)
+		if err != nil {
+			return nil, ErrInvalidTime
+		}
+		return &TimeLiteral{Val: t}, nil
+	}
+	return nil, ErrInvalidTime
+}
 
 // TimeLiteral represents a point-in-time literal.
 type TimeLiteral struct {
@@ -3198,6 +3703,8 @@ func (v *binaryExprValidator) Visit(n Node) Visitor {
 	return v
 }
 
+// BinaryExprName returns the name of a binary expression by concatenating
+// the variables in the binary expression with underscores.
 func BinaryExprName(expr *BinaryExpr) string {
 	v := binaryExprNameVisitor{}
 	Walk(&v, expr)
@@ -3255,10 +3762,21 @@ func CloneRegexLiteral(r *RegexLiteral) *RegexLiteral {
 }
 
 // Wildcard represents a wild card expression.
-type Wildcard struct{}
+type Wildcard struct {
+	Type Token
+}
 
 // String returns a string representation of the wildcard.
-func (e *Wildcard) String() string { return "*" }
+func (e *Wildcard) String() string {
+	switch e.Type {
+	case FIELD:
+		return "*::field"
+	case TAG:
+		return "*::tag"
+	default:
+		return "*"
+	}
+}
 
 // CloneExpr returns a deep copy of the expression.
 func CloneExpr(expr Expr) Expr {
@@ -3293,9 +3811,9 @@ func CloneExpr(expr Expr) Expr {
 	case *TimeLiteral:
 		return &TimeLiteral{Val: expr.Val}
 	case *VarRef:
-		return &VarRef{Val: expr.Val}
+		return &VarRef{Val: expr.Val, Type: expr.Type}
 	case *Wildcard:
-		return &Wildcard{}
+		return &Wildcard{Type: expr.Type}
 	}
 	panic("unreachable")
 }
@@ -3342,16 +3860,24 @@ func OnlyTimeExpr(expr Expr) bool {
 }
 
 // TimeRange returns the minimum and maximum times specified by an expression.
-// Returns zero times if there is no bound.
-func TimeRange(expr Expr) (min, max time.Time) {
+// It returns zero times if there is no bound.
+func TimeRange(expr Expr) (min, max time.Time, err error) {
 	WalkFunc(expr, func(n Node) {
+		if err != nil {
+			return
+		}
+
 		if n, ok := n.(*BinaryExpr); ok {
 			// Extract literal expression & operator on LHS.
 			// Check for "time" on the left-hand side first.
 			// Otherwise check for for the right-hand side and flip the operator.
-			value, op := timeExprValue(n.LHS, n.RHS), n.Op
-			if value.IsZero() {
-				if value = timeExprValue(n.RHS, n.LHS); value.IsZero() {
+			op := n.Op
+			var value time.Time
+			value, err = timeExprValue(n.LHS, n.RHS)
+			if err != nil {
+				return
+			} else if value.IsZero() {
+				if value, err = timeExprValue(n.RHS, n.LHS); value.IsZero() || err != nil {
 					return
 				} else if op == LT {
 					op = GT
@@ -3397,12 +3923,16 @@ func TimeRange(expr Expr) (min, max time.Time) {
 }
 
 // TimeRangeAsEpochNano returns the minimum and maximum times, as epoch nano, specified by
-// and expression. If there is no lower bound, the start of the epoch is returned
+// an expression. If there is no lower bound, the minimum time is returned
 // for minimum. If there is no higher bound, now is returned for maximum.
-func TimeRangeAsEpochNano(expr Expr) (min, max int64) {
-	tmin, tmax := TimeRange(expr)
+func TimeRangeAsEpochNano(expr Expr) (min, max int64, err error) {
+	tmin, tmax, err := TimeRange(expr)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	if tmin.IsZero() {
-		min = time.Unix(0, 0).UnixNano()
+		min = time.Unix(0, MinTime).UnixNano()
 	} else {
 		min = tmin.UnixNano()
 	}
@@ -3416,20 +3946,40 @@ func TimeRangeAsEpochNano(expr Expr) (min, max int64) {
 
 // timeExprValue returns the time literal value of a "time == <TimeLiteral>" expression.
 // Returns zero time if the expression is not a time expression.
-func timeExprValue(ref Expr, lit Expr) time.Time {
+func timeExprValue(ref Expr, lit Expr) (t time.Time, err error) {
 	if ref, ok := ref.(*VarRef); ok && strings.ToLower(ref.Val) == "time" {
+		// If literal looks like a date time then parse it as a time literal.
+		if strlit, ok := lit.(*StringLiteral); ok {
+			if strlit.IsTimeLiteral() {
+				t, err := strlit.ToTimeLiteral()
+				if err != nil {
+					return time.Time{}, err
+				}
+				lit = t
+			}
+		}
+
 		switch lit := lit.(type) {
 		case *TimeLiteral:
-			return lit.Val
+			if lit.Val.After(time.Unix(0, MaxTime)) {
+				return time.Time{}, fmt.Errorf("time %s overflows time literal", lit.Val.Format(time.RFC3339))
+			} else if lit.Val.Before(time.Unix(0, MinTime+1)) {
+				// The minimum allowable time literal is one greater than the minimum time because the minimum time
+				// is a sentinel value only used internally.
+				return time.Time{}, fmt.Errorf("time %s underflows time literal", lit.Val.Format(time.RFC3339))
+			}
+			return lit.Val, nil
 		case *DurationLiteral:
-			return time.Unix(0, int64(lit.Val)).UTC()
+			return time.Unix(0, int64(lit.Val)).UTC(), nil
 		case *NumberLiteral:
-			return time.Unix(0, int64(lit.Val)).UTC()
+			return time.Unix(0, int64(lit.Val)).UTC(), nil
 		case *IntegerLiteral:
-			return time.Unix(0, lit.Val).UTC()
+			return time.Unix(0, lit.Val).UTC(), nil
+		default:
+			return time.Time{}, fmt.Errorf("invalid operation: time and %T are not compatible", lit)
 		}
 	}
-	return time.Time{}
+	return time.Time{}, nil
 }
 
 // Visitor can be called by Walk to traverse an AST hierarchy.
@@ -3468,6 +4018,10 @@ func Walk(v Visitor, node Node) {
 		for _, c := range n {
 			Walk(v, c)
 		}
+
+	case *DeleteSeriesStatement:
+		Walk(v, n.Sources)
+		Walk(v, n.Condition)
 
 	case *DropSeriesStatement:
 		Walk(v, n.Sources)
@@ -3523,6 +4077,9 @@ func Walk(v Visitor, node Node) {
 			Walk(v, s)
 		}
 
+	case *SubQuery:
+		Walk(v, n.Statement)
+
 	case Statements:
 		for _, s := range n {
 			Walk(v, s)
@@ -3567,6 +4124,9 @@ func Rewrite(r Rewriter, node Node) Node {
 		n.Dimensions = Rewrite(r, n.Dimensions).(Dimensions)
 		n.Sources = Rewrite(r, n.Sources).(Sources)
 		n.Condition = Rewrite(r, n.Condition).(Expr)
+
+	case *SubQuery:
+		n.Statement = Rewrite(r, n.Statement).(*SelectStatement)
 
 	case Fields:
 		for i, f := range n {
@@ -3828,6 +4388,132 @@ func EvalBool(expr Expr, m map[string]interface{}) bool {
 	return v
 }
 
+// TypeMapper maps a data type to the measurement and field.
+type TypeMapper interface {
+	MapType(measurement *Measurement, field string) DataType
+}
+
+type nilTypeMapper struct{}
+
+func (nilTypeMapper) MapType(*Measurement, string) DataType { return Unknown }
+
+// EvalType evaluates the expression's type.
+func EvalType(expr Expr, sources Sources, typmap TypeMapper) DataType {
+	if typmap == nil {
+		typmap = nilTypeMapper{}
+	}
+
+	switch expr := expr.(type) {
+	case *VarRef:
+		// If this variable already has an assigned type, just use that.
+		if expr.Type != Unknown && expr.Type != AnyField {
+			return expr.Type
+		}
+
+		var typ DataType
+		for _, src := range sources {
+			switch src := src.(type) {
+			case *Measurement:
+				t := typmap.MapType(src, expr.Val)
+				if typ == Unknown || t < typ {
+					typ = t
+				}
+			case *SubQuery:
+				_, e := src.Statement.FieldExprByName(expr.Val)
+				if e != nil {
+					t := EvalType(e, src.Statement.Sources, typmap)
+					if typ == Unknown || t < typ {
+						typ = t
+					}
+				}
+
+				if typ == Unknown {
+					for _, d := range src.Statement.Dimensions {
+						if d, ok := d.Expr.(*VarRef); ok && expr.Val == d.Val {
+							typ = Tag
+						}
+					}
+				}
+			}
+		}
+		return typ
+	case *Call:
+		switch expr.Name {
+		case "mean", "median":
+			return Float
+		case "count":
+			return Integer
+		default:
+			return EvalType(expr.Args[0], sources, typmap)
+		}
+	case *ParenExpr:
+		return EvalType(expr, sources, typmap)
+	case *NumberLiteral:
+		return Float
+	case *IntegerLiteral:
+		return Integer
+	case *StringLiteral:
+		return String
+	case *BooleanLiteral:
+		return Boolean
+	case *BinaryExpr:
+		lhs := EvalType(expr.LHS, sources, typmap)
+		rhs := EvalType(expr.RHS, sources, typmap)
+		if lhs != Unknown && rhs != Unknown {
+			if lhs < rhs {
+				return lhs
+			} else {
+				return rhs
+			}
+		} else if lhs != Unknown {
+			return lhs
+		} else {
+			return rhs
+		}
+	}
+	return Unknown
+}
+
+func FieldDimensions(sources Sources, m FieldMapper) (fields map[string]DataType, dimensions map[string]struct{}, err error) {
+	fields = make(map[string]DataType)
+	dimensions = make(map[string]struct{})
+
+	for _, src := range sources {
+		switch src := src.(type) {
+		case *Measurement:
+			f, d, err := m.FieldDimensions(src)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			for k, typ := range f {
+				if _, ok := fields[k]; typ != Unknown && (!ok || typ < fields[k]) {
+					fields[k] = typ
+				}
+			}
+			for k := range d {
+				dimensions[k] = struct{}{}
+			}
+		case *SubQuery:
+			for _, f := range src.Statement.Fields {
+				k := f.Name()
+				typ := EvalType(f.Expr, src.Statement.Sources, m)
+
+				if _, ok := fields[k]; typ != Unknown && (!ok || typ < fields[k]) {
+					fields[k] = typ
+				}
+			}
+			for _, d := range src.Statement.Dimensions {
+				switch d := d.Expr.(type) {
+				case *VarRef:
+					dimensions[d.Val] = struct{}{}
+				}
+			}
+		}
+	}
+	return
+}
+
 // Reduce evaluates expr using the available values in valuer.
 // References that don't exist in valuer are ignored.
 func Reduce(expr Expr, valuer Valuer) Expr {
@@ -3854,6 +4540,8 @@ func reduce(expr Expr, valuer Valuer) Expr {
 		return reduceParenExpr(expr, valuer)
 	case *VarRef:
 		return reduceVarRef(expr, valuer)
+	case *nilLiteral:
+		return expr
 	default:
 		return CloneExpr(expr)
 	}
@@ -3976,6 +4664,18 @@ func reduceBinaryExprDurationLHS(op Token, lhs *DurationLiteral, rhs Expr) Expr 
 		case ADD:
 			return &TimeLiteral{Val: rhs.Val.Add(lhs.Val)}
 		}
+	case *StringLiteral:
+		t, err := rhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		expr := reduceBinaryExprDurationLHS(op, lhs, t)
+
+		// If the returned expression is still a binary expr, that means
+		// we couldn't reduce it so this wasn't used in a time literal context.
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
+		}
 	case *nilLiteral:
 		return &BooleanLiteral{Val: false}
 	}
@@ -4011,6 +4711,30 @@ func reduceBinaryExprIntegerLHS(op Token, lhs *IntegerLiteral, rhs Expr) Expr {
 			return &BooleanLiteral{Val: lhs.Val < rhs.Val}
 		case LTE:
 			return &BooleanLiteral{Val: lhs.Val <= rhs.Val}
+		}
+	case *DurationLiteral:
+		// Treat the integer as a timestamp.
+		switch op {
+		case ADD:
+			return &TimeLiteral{Val: time.Unix(0, lhs.Val).Add(rhs.Val)}
+		case SUB:
+			return &TimeLiteral{Val: time.Unix(0, lhs.Val).Add(-rhs.Val)}
+		}
+	case *TimeLiteral:
+		d := &DurationLiteral{Val: time.Duration(lhs.Val)}
+		expr := reduceBinaryExprDurationLHS(op, d, rhs)
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
+		}
+	case *StringLiteral:
+		t, err := rhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		d := &DurationLiteral{Val: time.Duration(lhs.Val)}
+		expr := reduceBinaryExprDurationLHS(op, d, t)
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
 		}
 	case *nilLiteral:
 		return &BooleanLiteral{Val: false}
@@ -4091,11 +4815,105 @@ func reduceBinaryExprStringLHS(op Token, lhs *StringLiteral, rhs Expr) Expr {
 	case *StringLiteral:
 		switch op {
 		case EQ:
-			return &BooleanLiteral{Val: lhs.Val == rhs.Val}
+			var expr Expr = &BooleanLiteral{Val: lhs.Val == rhs.Val}
+			// This might be a comparison between time literals.
+			// If it is, parse the time literals and then compare since it
+			// could be a different result if they use different formats
+			// for the same time.
+			if lhs.IsTimeLiteral() && rhs.IsTimeLiteral() {
+				tlhs, err := lhs.ToTimeLiteral()
+				if err != nil {
+					return expr
+				}
+
+				trhs, err := rhs.ToTimeLiteral()
+				if err != nil {
+					return expr
+				}
+
+				t := reduceBinaryExprTimeLHS(op, tlhs, trhs)
+				if _, ok := t.(*BinaryExpr); !ok {
+					expr = t
+				}
+			}
+			return expr
 		case NEQ:
-			return &BooleanLiteral{Val: lhs.Val != rhs.Val}
+			var expr Expr = &BooleanLiteral{Val: lhs.Val != rhs.Val}
+			// This might be a comparison between time literals.
+			// If it is, parse the time literals and then compare since it
+			// could be a different result if they use different formats
+			// for the same time.
+			if lhs.IsTimeLiteral() && rhs.IsTimeLiteral() {
+				tlhs, err := lhs.ToTimeLiteral()
+				if err != nil {
+					return expr
+				}
+
+				trhs, err := rhs.ToTimeLiteral()
+				if err != nil {
+					return expr
+				}
+
+				t := reduceBinaryExprTimeLHS(op, tlhs, trhs)
+				if _, ok := t.(*BinaryExpr); !ok {
+					expr = t
+				}
+			}
+			return expr
 		case ADD:
 			return &StringLiteral{Val: lhs.Val + rhs.Val}
+		default:
+			// Attempt to convert the string literal to a time literal.
+			t, err := lhs.ToTimeLiteral()
+			if err != nil {
+				break
+			}
+			expr := reduceBinaryExprTimeLHS(op, t, rhs)
+
+			// If the returned expression is still a binary expr, that means
+			// we couldn't reduce it so this wasn't used in a time literal context.
+			if _, ok := expr.(*BinaryExpr); !ok {
+				return expr
+			}
+		}
+	case *DurationLiteral:
+		// Attempt to convert the string literal to a time literal.
+		t, err := lhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		expr := reduceBinaryExprTimeLHS(op, t, rhs)
+
+		// If the returned expression is still a binary expr, that means
+		// we couldn't reduce it so this wasn't used in a time literal context.
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
+		}
+	case *TimeLiteral:
+		// Attempt to convert the string literal to a time literal.
+		t, err := lhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		expr := reduceBinaryExprTimeLHS(op, t, rhs)
+
+		// If the returned expression is still a binary expr, that means
+		// we couldn't reduce it so this wasn't used in a time literal context.
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
+		}
+	case *IntegerLiteral:
+		// Attempt to convert the string literal to a time literal.
+		t, err := lhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		expr := reduceBinaryExprTimeLHS(op, t, rhs)
+
+		// If the returned expression is still a binary expr, that means
+		// we couldn't reduce it so this wasn't used in a time literal context.
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
 		}
 	case *nilLiteral:
 		switch op {
@@ -4115,6 +4933,12 @@ func reduceBinaryExprTimeLHS(op Token, lhs *TimeLiteral, rhs Expr) Expr {
 		case SUB:
 			return &TimeLiteral{Val: lhs.Val.Add(-rhs.Val)}
 		}
+	case *IntegerLiteral:
+		d := &DurationLiteral{Val: time.Duration(rhs.Val)}
+		expr := reduceBinaryExprTimeLHS(op, lhs, d)
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
+		}
 	case *TimeLiteral:
 		switch op {
 		case SUB:
@@ -4131,6 +4955,18 @@ func reduceBinaryExprTimeLHS(op Token, lhs *TimeLiteral, rhs Expr) Expr {
 			return &BooleanLiteral{Val: lhs.Val.Before(rhs.Val)}
 		case LTE:
 			return &BooleanLiteral{Val: lhs.Val.Before(rhs.Val) || lhs.Val.Equal(rhs.Val)}
+		}
+	case *StringLiteral:
+		t, err := rhs.ToTimeLiteral()
+		if err != nil {
+			break
+		}
+		expr := reduceBinaryExprTimeLHS(op, lhs, t)
+
+		// If the returned expression is still a binary expr, that means
+		// we couldn't reduce it so this wasn't used in a time literal context.
+		if _, ok := expr.(*BinaryExpr); !ok {
+			return expr
 		}
 	case *nilLiteral:
 		return &BooleanLiteral{Val: false}
@@ -4166,14 +5002,14 @@ func reduceParenExpr(expr *ParenExpr, valuer Valuer) Expr {
 func reduceVarRef(expr *VarRef, valuer Valuer) Expr {
 	// Ignore if there is no valuer.
 	if valuer == nil {
-		return &VarRef{Val: expr.Val}
+		return &VarRef{Val: expr.Val, Type: expr.Type}
 	}
 
 	// Retrieve the value of the ref.
 	// Ignore if the value doesn't exist.
 	v, ok := valuer.Value(expr.Val)
 	if !ok {
-		return &VarRef{Val: expr.Val}
+		return &VarRef{Val: expr.Val, Type: expr.Type}
 	}
 
 	// Return the value as a literal.
@@ -4194,9 +5030,8 @@ func reduceVarRef(expr *VarRef, valuer Valuer) Expr {
 }
 
 // Valuer is the interface that wraps the Value() method.
-//
-// Value returns the value and existence flag for a given key.
 type Valuer interface {
+	// Value returns the value and existence flag for a given key.
 	Value(key string) (interface{}, bool)
 }
 
@@ -4232,4 +5067,14 @@ func (v *containsVarRefVisitor) Visit(n Node) Visitor {
 		v.contains = true
 	}
 	return v
+}
+
+func IsSelector(expr Expr) bool {
+	if call, ok := expr.(*Call); ok {
+		switch call.Name {
+		case "first", "last", "min", "max", "percentile", "sample", "top", "bottom":
+			return true
+		}
+	}
+	return false
 }

@@ -6,11 +6,11 @@
 package mergo
 
 import (
-	"gopkg.in/yaml.v1"
 	"io/ioutil"
 	"reflect"
 	"testing"
 	"time"
+	"gopkg.in/yaml.v1"
 )
 
 type simpleTest struct {
@@ -20,7 +20,7 @@ type simpleTest struct {
 type complexTest struct {
 	St simpleTest
 	sz int
-	Id string
+	ID string
 }
 
 type moreComplextText struct {
@@ -102,7 +102,7 @@ func TestSimpleStruct(t *testing.T) {
 
 func TestComplexStruct(t *testing.T) {
 	a := complexTest{}
-	a.Id = "athing"
+	a.ID = "athing"
 	b := complexTest{simpleTest{42}, 1, "bthing"}
 	if err := Merge(&a, b); err != nil {
 		t.FailNow()
@@ -113,8 +113,8 @@ func TestComplexStruct(t *testing.T) {
 	if a.sz == 1 {
 		t.Fatalf("a's private field sz not preserved from merge: a.sz(%d) == b.sz(%d)", a.sz, b.sz)
 	}
-	if a.Id == b.Id {
-		t.Fatalf("a's field Id merged unexpectedly: a.Id(%s) == b.Id(%s)", a.Id, b.Id)
+	if a.ID == b.ID {
+		t.Fatalf("a's field ID merged unexpectedly: a.ID(%s) == b.ID(%s)", a.ID, b.ID)
 	}
 }
 
@@ -245,23 +245,23 @@ func TestSliceStruct(t *testing.T) {
 
 func TestMapsWithOverwrite(t *testing.T) {
 	m := map[string]simpleTest{
-		"a": simpleTest{},   // overwritten by 16
-		"b": simpleTest{42}, // not overwritten by empty value
-		"c": simpleTest{13}, // overwritten by 12
-		"d": simpleTest{61},
+		"a": {},   // overwritten by 16
+		"b": {42}, // not overwritten by empty value
+		"c": {13}, // overwritten by 12
+		"d": {61},
 	}
 	n := map[string]simpleTest{
-		"a": simpleTest{16},
-		"b": simpleTest{},
-		"c": simpleTest{12},
-		"e": simpleTest{14},
+		"a": {16},
+		"b": {},
+		"c": {12},
+		"e": {14},
 	}
 	expect := map[string]simpleTest{
-		"a": simpleTest{16},
-		"b": simpleTest{},
-		"c": simpleTest{12},
-		"d": simpleTest{61},
-		"e": simpleTest{14},
+		"a": {16},
+		"b": {},
+		"c": {12},
+		"d": {61},
+		"e": {14},
 	}
 
 	if err := MergeWithOverwrite(&m, n); err != nil {
@@ -275,23 +275,23 @@ func TestMapsWithOverwrite(t *testing.T) {
 
 func TestMaps(t *testing.T) {
 	m := map[string]simpleTest{
-		"a": simpleTest{},
-		"b": simpleTest{42},
-		"c": simpleTest{13},
-		"d": simpleTest{61},
+		"a": {},
+		"b": {42},
+		"c": {13},
+		"d": {61},
 	}
 	n := map[string]simpleTest{
-		"a": simpleTest{16},
-		"b": simpleTest{},
-		"c": simpleTest{12},
-		"e": simpleTest{14},
+		"a": {16},
+		"b": {},
+		"c": {12},
+		"e": {14},
 	}
 	expect := map[string]simpleTest{
-		"a": simpleTest{0},
-		"b": simpleTest{42},
-		"c": simpleTest{13},
-		"d": simpleTest{61},
-		"e": simpleTest{14},
+		"a": {0},
+		"b": {42},
+		"c": {13},
+		"d": {61},
+		"e": {14},
 	}
 
 	if err := Merge(&m, n); err != nil {
@@ -341,7 +341,7 @@ func TestTwoPointerValues(t *testing.T) {
 
 func TestMap(t *testing.T) {
 	a := complexTest{}
-	a.Id = "athing"
+	a.ID = "athing"
 	c := moreComplextText{a, simpleTest{}, simpleTest{}}
 	b := map[string]interface{}{
 		"ct": map[string]interface{}{
@@ -374,8 +374,8 @@ func TestMap(t *testing.T) {
 	if c.Ct.sz == 1 {
 		t.Fatalf("a's private field sz not preserved from merge: c.Ct.sz(%d) == b.Ct.sz(%d)", c.Ct.sz, m["sz"])
 	}
-	if c.Ct.Id == m["id"] {
-		t.Fatalf("a's field Id merged unexpectedly: c.Ct.Id(%s) == b.Ct.Id(%s)", c.Ct.Id, m["id"])
+	if c.Ct.ID == m["id"] {
+		t.Fatalf("a's field ID merged unexpectedly: c.Ct.ID(%s) == b.Ct.ID(%s)", c.Ct.ID, m["id"])
 	}
 }
 
@@ -475,15 +475,14 @@ type structWithNestedPtrValueMap struct {
 func TestNestedPtrValueInMap(t *testing.T) {
 	src := &structWithNestedPtrValueMap{
 		NestedPtrValue: map[string]*simpleNested{
-			"x": &simpleNested{
+			"x": {
 				A: 1,
 			},
 		},
 	}
 	dst := &structWithNestedPtrValueMap{
 		NestedPtrValue: map[string]*simpleNested{
-			"x": &simpleNested{
-			},
+			"x": {},
 		},
 	}
 	if err := Map(dst, src); err != nil {
@@ -499,4 +498,50 @@ func loadYAML(path string) (m map[string]interface{}) {
 	raw, _ := ioutil.ReadFile(path)
 	_ = yaml.Unmarshal(raw, &m)
 	return
+}
+
+type structWithMap struct {
+	m map[string]structWithUnexportedProperty
+}
+
+type structWithUnexportedProperty struct {
+	s string
+}
+
+func TestUnexportedProperty(t *testing.T) {
+	a := structWithMap{map[string]structWithUnexportedProperty{
+		"key": structWithUnexportedProperty{"hello"},
+	}}
+	b := structWithMap{map[string]structWithUnexportedProperty{
+		"key": structWithUnexportedProperty{"hi"},
+	}}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Should not have panicked")
+		}
+	}()
+	Merge(&a, b)
+}
+
+type structWithBoolPointer struct {
+	C *bool
+}
+
+func TestBooleanPointer(t *testing.T) {
+	bt, bf := true, false
+	src := structWithBoolPointer{
+		&bt,
+	}
+	dst := structWithBoolPointer{
+		&bf,
+	}
+	if err := Merge(&dst, src); err != nil {
+		t.FailNow()
+	}
+	if dst.C == src.C {
+		t.Fatalf("dst.C should be a different pointer than src.C")
+	}
+	if *dst.C != *src.C {
+		t.Fatalf("dst.C should be true")
+	}
 }

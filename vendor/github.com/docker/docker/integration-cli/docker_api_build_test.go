@@ -11,22 +11,15 @@ import (
 	"github.com/go-check/check"
 )
 
-func (s *DockerSuite) TestBuildAPIDockerFileRemote(c *check.C) {
+func (s *DockerSuite) TestBuildApiDockerFileRemote(c *check.C) {
 	testRequires(c, NotUserNamespace)
-	var testD string
-	if daemonPlatform == "windows" {
-		testD = `FROM busybox
+	testRequires(c, DaemonIsLinux)
+	server, err := fakeStorage(map[string]string{
+		"testD": `FROM busybox
 COPY * /tmp/
 RUN find / -name ba*
-RUN find /tmp/`
-	} else {
-		// -xdev is required because sysfs can cause EPERM
-		testD = `FROM busybox
-COPY * /tmp/
-RUN find / -xdev -name ba*
-RUN find /tmp/`
-	}
-	server, err := fakeStorage(map[string]string{"testD": testD})
+RUN find /tmp/`,
+	})
 	c.Assert(err, checker.IsNil)
 	defer server.Close()
 
@@ -44,7 +37,8 @@ RUN find /tmp/`
 	c.Assert(out, checker.Not(checker.Contains), "baz")
 }
 
-func (s *DockerSuite) TestBuildAPIRemoteTarballContext(c *check.C) {
+func (s *DockerSuite) TestBuildApiRemoteTarballContext(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	buffer := new(bytes.Buffer)
 	tw := tar.NewWriter(buffer)
 	defer tw.Close()
@@ -77,7 +71,8 @@ func (s *DockerSuite) TestBuildAPIRemoteTarballContext(c *check.C) {
 	b.Close()
 }
 
-func (s *DockerSuite) TestBuildAPIRemoteTarballContextWithCustomDockerfile(c *check.C) {
+func (s *DockerSuite) TestBuildApiRemoteTarballContextWithCustomDockerfile(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	buffer := new(bytes.Buffer)
 	tw := tar.NewWriter(buffer)
 	defer tw.Close()
@@ -132,7 +127,8 @@ RUN echo 'right'
 	c.Assert(string(content), checker.Not(checker.Contains), "wrong")
 }
 
-func (s *DockerSuite) TestBuildAPILowerDockerfile(c *check.C) {
+func (s *DockerSuite) TestBuildApiLowerDockerfile(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	git, err := newFakeGit("repo", map[string]string{
 		"dockerfile": `FROM busybox
 RUN echo from dockerfile`,
@@ -151,7 +147,8 @@ RUN echo from dockerfile`,
 	c.Assert(out, checker.Contains, "from dockerfile")
 }
 
-func (s *DockerSuite) TestBuildAPIBuildGitWithF(c *check.C) {
+func (s *DockerSuite) TestBuildApiBuildGitWithF(c *check.C) {
+	testRequires(c, DaemonIsLinux)
 	git, err := newFakeGit("repo", map[string]string{
 		"baz": `FROM busybox
 RUN echo from baz`,
@@ -173,7 +170,7 @@ RUN echo from Dockerfile`,
 	c.Assert(out, checker.Contains, "from baz")
 }
 
-func (s *DockerSuite) TestBuildAPIDoubleDockerfile(c *check.C) {
+func (s *DockerSuite) TestBuildApiDoubleDockerfile(c *check.C) {
 	testRequires(c, UnixCli) // dockerfile overwrites Dockerfile on Windows
 	git, err := newFakeGit("repo", map[string]string{
 		"Dockerfile": `FROM busybox
@@ -196,7 +193,7 @@ RUN echo from dockerfile`,
 	c.Assert(out, checker.Contains, "from Dockerfile")
 }
 
-func (s *DockerSuite) TestBuildAPIUnnormalizedTarPaths(c *check.C) {
+func (s *DockerSuite) TestBuildApiUnnormalizedTarPaths(c *check.C) {
 	// Make sure that build context tars with entries of the form
 	// x/./y don't cause caching false positives.
 

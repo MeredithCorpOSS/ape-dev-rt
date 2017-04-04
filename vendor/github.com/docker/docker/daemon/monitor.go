@@ -6,14 +6,12 @@ import (
 	"io"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/daemon/exec"
 	"github.com/docker/docker/libcontainerd"
-	"github.com/docker/docker/restartmanager"
 	"github.com/docker/docker/runconfig"
+	"github.com/docker/engine-api/types"
 )
 
 // StateChanged updates daemon state changes from containerd
@@ -32,58 +30,44 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "oom")
 	case libcontainerd.StateExit:
-		// if container's AutoRemove flag is set, remove it after clean up
-		autoRemove := func() {
-			if c.HostConfig.AutoRemove {
+		// if containers AutoRemove flag is set, remove it after clean up
+		if c.HostConfig.AutoRemove {
+			defer func() {
 				if err := daemon.ContainerRm(c.ID, &types.ContainerRmConfig{ForceRemove: true, RemoveVolume: true}); err != nil {
 					logrus.Errorf("can't remove container %s: %v", c.ID, err)
 				}
-			}
+			}()
 		}
-
 		c.Lock()
+		defer c.Unlock()
 		c.Wait()
 		c.Reset(false)
-
-		restart, wait, err := c.RestartManager().ShouldRestart(e.ExitCode, false, time.Since(c.StartedAt))
-		if err == nil && restart {
-			c.RestartCount++
-			c.SetRestarting(platformConstructExitStatus(e))
-		} else {
-			c.SetStopped(platformConstructExitStatus(e))
-			defer autoRemove()
-		}
-
-		daemon.updateHealthMonitor(c)
+		c.SetStopped(platformConstructExitStatus(e))
 		attributes := map[string]string{
 			"exitCode": strconv.Itoa(int(e.ExitCode)),
 		}
+		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEventWithAttributes(c, "die", attributes)
 		daemon.Cleanup(c)
-
-		if err == nil && restart {
-			go func() {
-				err := <-wait
-				if err == nil {
-					if err = daemon.containerStart(c, "", false); err != nil {
-						logrus.Debugf("failed to restart contianer: %+v", err)
-					}
-				}
-				if err != nil {
-					c.SetStopped(platformConstructExitStatus(e))
-					defer autoRemove()
-					if err != restartmanager.ErrRestartCanceled {
-						logrus.Errorf("restartmanger wait error: %+v", err)
-					}
-				}
-			}()
-		}
-
-		defer c.Unlock()
+		// FIXME: here is race condition between two RUN instructions in Dockerfile
+		// because they share same runconfig and change image. Must be fixed
+		// in builder/builder.go
 		if err := c.ToDisk(); err != nil {
 			return err
 		}
 		return daemon.postRunProcessing(c, e)
+	case libcontainerd.StateRestart:
+		c.Lock()
+		defer c.Unlock()
+		c.Reset(false)
+		c.RestartCount++
+		c.SetRestarting(platformConstructExitStatus(e))
+		attributes := map[string]string{
+			"exitCode": strconv.Itoa(int(e.ExitCode)),
+		}
+		daemon.LogContainerEventWithAttributes(c, "die", attributes)
+		daemon.updateHealthMonitor(c)
+		return c.ToDisk()
 	case libcontainerd.StateExitProcess:
 		c.Lock()
 		defer c.Unlock()
@@ -106,7 +90,6 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 		// Container is already locked in this case
 		c.SetRunning(int(e.Pid), e.State == libcontainerd.StateStart)
 		c.HasBeenManuallyStopped = false
-		c.HasBeenStartedBefore = true
 		if err := c.ToDisk(); err != nil {
 			c.Reset(false)
 			return err
@@ -116,17 +99,11 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 	case libcontainerd.StatePause:
 		// Container is already locked in this case
 		c.Paused = true
-		if err := c.ToDisk(); err != nil {
-			return err
-		}
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "pause")
 	case libcontainerd.StateResume:
 		// Container is already locked in this case
 		c.Paused = false
-		if err := c.ToDisk(); err != nil {
-			return err
-		}
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "unpause")
 	}
@@ -178,9 +155,7 @@ func (daemon *Daemon) AttachStreams(id string, iop libcontainerd.IOPipe) error {
 		if iop.Stdin != nil {
 			go func() {
 				io.Copy(iop.Stdin, stdin)
-				if err := iop.Stdin.Close(); err != nil {
-					logrus.Error(err)
-				}
+				iop.Stdin.Close()
 			}()
 		}
 	} else {
@@ -190,9 +165,7 @@ func (daemon *Daemon) AttachStreams(id string, iop libcontainerd.IOPipe) error {
 		if (c != nil && !c.Config.Tty) || (ec != nil && !ec.Tty && runtime.GOOS == "windows") {
 			// tty is enabled, so dont close containerd's iopipe stdin.
 			if iop.Stdin != nil {
-				if err := iop.Stdin.Close(); err != nil {
-					logrus.Error(err)
-				}
+				iop.Stdin.Close()
 			}
 		}
 	}

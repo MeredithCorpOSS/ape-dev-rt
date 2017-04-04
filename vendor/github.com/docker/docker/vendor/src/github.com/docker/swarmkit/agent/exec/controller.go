@@ -2,11 +2,11 @@ package exec
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/swarmkit/api"
-	"github.com/docker/swarmkit/api/equality"
 	"github.com/docker/swarmkit/log"
 	"github.com/docker/swarmkit/protobuf/ptypes"
 	"github.com/pkg/errors"
@@ -147,7 +147,7 @@ func Do(ctx context.Context, task *api.Task, ctlr Controller) (*api.TaskStatus, 
 		if cs, ok := err.(ContainerStatuser); ok {
 			var err error
 			containerStatus, err = cs.ContainerStatus(ctx)
-			if err != nil && !contextDoneError(err) {
+			if err != nil {
 				log.G(ctx).WithError(err).Error("error resolving container status on fatal")
 			}
 		}
@@ -186,7 +186,7 @@ func Do(ctx context.Context, task *api.Task, ctlr Controller) (*api.TaskStatus, 
 	defer func() {
 		logStateChange(ctx, task.DesiredState, task.Status.State, status.State)
 
-		if !equality.TaskStatusesEqualStable(status, &task.Status) {
+		if !reflect.DeepEqual(status, task.Status) {
 			status.Timestamp = ptypes.MustTimestampProto(time.Now())
 		}
 	}()
@@ -207,7 +207,7 @@ func Do(ctx context.Context, task *api.Task, ctlr Controller) (*api.TaskStatus, 
 
 			var err error
 			containerStatus, err = cctlr.ContainerStatus(ctx)
-			if err != nil && !contextDoneError(err) {
+			if err != nil {
 				log.G(ctx).WithError(err).Error("container status unavailable")
 			}
 
@@ -296,9 +296,4 @@ func logStateChange(ctx context.Context, desired, previous, next api.TaskState) 
 		}
 		log.G(ctx).WithFields(fields).Debug("state changed")
 	}
-}
-
-func contextDoneError(err error) bool {
-	cause := errors.Cause(err)
-	return cause == context.Canceled || cause == context.DeadlineExceeded
 }

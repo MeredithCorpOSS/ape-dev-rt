@@ -1,17 +1,12 @@
----
-title: "service inspect"
-description: "The service inspect command description and usage"
-keywords: ["service, inspect"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "service inspect"
+description = "The service inspect command description and usage"
+keywords = ["service, inspect"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # service inspect
 
@@ -21,7 +16,7 @@ Usage:  docker service inspect [OPTIONS] SERVICE [SERVICE...]
 Display detailed information on one or more services
 
 Options:
-  -f, --format string   Format the output using the given Go template
+  -f, --format string   Format the output using the given go template
       --help            Print usage
       --pretty          Print the information in a human friendly format.
 ```
@@ -120,7 +115,7 @@ ID:		c8wgl7q4ndfd52ni6qftkvnnp
 Name:		frontend
 Labels:
  - org.example.projectname=demo-app
-Service Mode:	REPLICATED
+Mode:		REPLICATED
  Replicas:		5
 Placement:
 UpdateConfig:
@@ -128,15 +123,12 @@ UpdateConfig:
 ContainerSpec:
  Image:		nginx:alpine
 Resources:
-Endpoint Mode:  vip
 Ports:
  Name =
  Protocol = tcp
  TargetPort = 443
  PublishedPort = 4443
 ```
-
-You can also use `--format pretty` for the same effect.
 
 
 ### Finding the number of tasks running as part of a service
@@ -145,10 +137,10 @@ The `--format` option can be used to obtain specific information about a
 service. For example, the following command outputs the number of replicas
 of the "redis" service.
 
-```bash{% raw %}
+```bash
 $ docker service inspect --format='{{.Spec.Mode.Replicated.Replicas}}' redis
 10
-{% endraw %}```
+```
 
 
 ## Related information

@@ -16,10 +16,6 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/blkiodev"
-	pblkiodev "github.com/docker/docker/api/types/blkiodev"
-	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/idtools"
@@ -28,6 +24,10 @@ import (
 	"github.com/docker/docker/pkg/sysinfo"
 	"github.com/docker/docker/runconfig"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/blkiodev"
+	pblkiodev "github.com/docker/engine-api/types/blkiodev"
+	containertypes "github.com/docker/engine-api/types/container"
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/drivers/bridge"
@@ -37,10 +37,8 @@ import (
 	lntypes "github.com/docker/libnetwork/types"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/opencontainers/runc/libcontainer/label"
-	rsystem "github.com/opencontainers/runc/libcontainer/system"
 	"github.com/opencontainers/runc/libcontainer/user"
-	"github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/vishvananda/netlink"
+	"github.com/opencontainers/specs/specs-go"
 )
 
 const (
@@ -351,7 +349,7 @@ func verifyContainerResources(resources *containertypes.Resources, sysInfo *sysi
 		return warnings, fmt.Errorf("CPU cfs quota can not be less than 1ms (i.e. 1000)")
 	}
 	if resources.CPUPercent > 0 {
-		warnings = append(warnings, fmt.Sprintf("%s does not support CPU percent. Percent discarded.", runtime.GOOS))
+		warnings = append(warnings, "%s does not support CPU percent. Percent discarded.", runtime.GOOS)
 		logrus.Warnf("%s does not support CPU percent. Percent discarded.", runtime.GOOS)
 		resources.CPUPercent = 0
 	}
@@ -466,13 +464,10 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 	}
 
 	w, err := verifyContainerResources(&hostConfig.Resources, sysInfo, update)
-
-	// no matter err is nil or not, w could have data in itself.
-	warnings = append(warnings, w...)
-
 	if err != nil {
 		return warnings, err
 	}
+	warnings = append(warnings, w...)
 
 	if hostConfig.ShmSize < 0 {
 		return warnings, fmt.Errorf("SHM size can not be less than 0")
@@ -492,11 +487,14 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 		if hostConfig.Privileged {
 			return warnings, fmt.Errorf("Privileged mode is incompatible with user namespaces")
 		}
-		if hostConfig.NetworkMode.IsHost() && !hostConfig.UsernsMode.IsHost() {
+		if hostConfig.NetworkMode.IsHost() {
 			return warnings, fmt.Errorf("Cannot share the host's network namespace when user namespaces are enabled")
 		}
-		if hostConfig.PidMode.IsHost() && !hostConfig.UsernsMode.IsHost() {
+		if hostConfig.PidMode.IsHost() {
 			return warnings, fmt.Errorf("Cannot share the host PID namespace when user namespaces are enabled")
+		}
+		if hostConfig.ReadonlyRootfs {
+			return warnings, fmt.Errorf("Cannot use the --read-only option when user namespaces are enabled")
 		}
 	}
 	if hostConfig.CgroupParent != "" && UsingSystemd(daemon.configStore) {
@@ -517,7 +515,7 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 }
 
 // platformReload update configuration with platform specific options
-func (daemon *Daemon) platformReload(config *Config) map[string]string {
+func (daemon *Daemon) platformReload(config *Config, attributes *map[string]string) {
 	if config.IsValueSet("runtimes") {
 		daemon.configStore.Runtimes = config.Runtimes
 		// Always set the default one
@@ -537,10 +535,8 @@ func (daemon *Daemon) platformReload(config *Config) map[string]string {
 		runtimeList.WriteString(fmt.Sprintf("%s:%s", name, rt))
 	}
 
-	return map[string]string{
-		"runtimes":        runtimeList.String(),
-		"default-runtime": daemon.configStore.DefaultRuntime,
-	}
+	(*attributes)["runtimes"] = runtimeList.String()
+	(*attributes)["default-runtime"] = daemon.configStore.DefaultRuntime
 }
 
 // verifyDaemonSettings performs validation of daemon config struct
@@ -570,7 +566,11 @@ func verifyDaemonSettings(config *Config) error {
 	if config.Runtimes == nil {
 		config.Runtimes = make(map[string]types.Runtime)
 	}
-	config.Runtimes[stockRuntimeName] = types.Runtime{Path: DefaultRuntimeBinary}
+	stockRuntimeOpts := []string{}
+	if UsingSystemd(config) {
+		stockRuntimeOpts = append(stockRuntimeOpts, "--systemd-cgroup=true")
+	}
+	config.Runtimes[stockRuntimeName] = types.Runtime{Path: DefaultRuntimeBinary, Args: stockRuntimeOpts}
 
 	return nil
 }
@@ -603,7 +603,13 @@ func configureMaxThreads(config *Config) error {
 // configureKernelSecuritySupport configures and validates security support for the kernel
 func configureKernelSecuritySupport(config *Config, driverName string) error {
 	if config.EnableSelinuxSupport {
-		if !selinuxEnabled() {
+		if selinuxEnabled() {
+			// As Docker on overlayFS and SELinux are incompatible at present, error on overlayfs being enabled
+			if driverName == "overlay" {
+				return fmt.Errorf("SELinux is not supported with the %s graph driver", driverName)
+			}
+			logrus.Debug("SELinux enabled successfully")
+		} else {
 			logrus.Warn("Docker could not enable SELinux on the host system")
 		}
 	} else {
@@ -613,7 +619,7 @@ func configureKernelSecuritySupport(config *Config, driverName string) error {
 }
 
 func (daemon *Daemon) initNetworkController(config *Config, activeSandboxes map[string]interface{}) (libnetwork.NetworkController, error) {
-	netOptions, err := daemon.networkOptions(config, daemon.PluginStore, activeSandboxes)
+	netOptions, err := daemon.networkOptions(config, activeSandboxes)
 	if err != nil {
 		return nil, err
 	}
@@ -641,21 +647,11 @@ func (daemon *Daemon) initNetworkController(config *Config, activeSandboxes map[
 			return nil, fmt.Errorf("Error creating default \"host\" network: %v", err)
 		}
 	}
-
-	// Clear stale bridge network
-	if n, err := controller.NetworkByName("bridge"); err == nil {
-		if err = n.Delete(); err != nil {
-			return nil, fmt.Errorf("could not delete the default bridge network: %v", err)
-		}
-	}
-
 	if !config.DisableBridge {
 		// Initialize default driver "bridge"
 		if err := initBridgeDriver(controller, config); err != nil {
 			return nil, err
 		}
-	} else {
-		removeDefaultBridgeInterface()
 	}
 
 	return controller, nil
@@ -665,8 +661,7 @@ func driverOptions(config *Config) []nwconfig.Option {
 	bridgeConfig := options.Generic{
 		"EnableIPForwarding":  config.bridgeConfig.EnableIPForward,
 		"EnableIPTables":      config.bridgeConfig.EnableIPTables,
-		"EnableUserlandProxy": config.bridgeConfig.EnableUserlandProxy,
-		"UserlandProxyPath":   config.bridgeConfig.UserlandProxyPath}
+		"EnableUserlandProxy": config.bridgeConfig.EnableUserlandProxy}
 	bridgeOption := options.Generic{netlabel.GenericData: bridgeConfig}
 
 	dOptions := []nwconfig.Option{}
@@ -675,6 +670,12 @@ func driverOptions(config *Config) []nwconfig.Option {
 }
 
 func initBridgeDriver(controller libnetwork.NetworkController, config *Config) error {
+	if n, err := controller.NetworkByName("bridge"); err == nil {
+		if err = n.Delete(); err != nil {
+			return fmt.Errorf("could not delete the default bridge network: %v", err)
+		}
+	}
+
 	bridgeName := bridge.DefaultBridgeName
 	if config.bridgeConfig.Iface != "" {
 		bridgeName = config.bridgeConfig.Iface
@@ -786,19 +787,6 @@ func initBridgeDriver(controller libnetwork.NetworkController, config *Config) e
 		return fmt.Errorf("Error creating default \"bridge\" network: %v", err)
 	}
 	return nil
-}
-
-// Remove default bridge interface if present (--bridge=none use case)
-func removeDefaultBridgeInterface() {
-	if lnk, err := netlink.LinkByName(bridge.DefaultBridgeName); err == nil {
-		if err := netlink.LinkDel(lnk); err != nil {
-			logrus.Warnf("Failed to remove bridge interface (%s): %v", bridge.DefaultBridgeName, err)
-		}
-	}
-}
-
-func (daemon *Daemon) getLayerInit() func(string) error {
-	return daemon.setupInitLayer
 }
 
 // setupInitLayer populates a directory with mountpoints suitable
@@ -1016,20 +1004,6 @@ func setupDaemonRoot(config *Config, rootDir string, rootUID, rootGID int) error
 		if err := idtools.MkdirAllAs(config.Root, 0700, rootUID, rootGID); err != nil {
 			return fmt.Errorf("Cannot create daemon root: %s: %v", config.Root, err)
 		}
-		// we also need to verify that any pre-existing directories in the path to
-		// the graphroot won't block access to remapped root--if any pre-existing directory
-		// has strict permissions that don't allow "x", container start will fail, so
-		// better to warn and fail now
-		dirPath := config.Root
-		for {
-			dirPath = filepath.Dir(dirPath)
-			if dirPath == "/" {
-				break
-			}
-			if !idtools.CanAccess(dirPath, rootUID, rootGID) {
-				return fmt.Errorf("A subdirectory in your graphroot path (%s) restricts access to the remapped root uid/gid; please fix by allowing 'o+x' permissions on existing directories.", config.Root)
-			}
-		}
 	}
 	return nil
 }
@@ -1169,18 +1143,7 @@ func setupOOMScoreAdj(score int) error {
 	if err != nil {
 		return err
 	}
-
-	stringScore := strconv.Itoa(score)
-	_, err = f.WriteString(stringScore)
-	if os.IsPermission(err) {
-		// Setting oom_score_adj does not work in an
-		// unprivileged container. Ignore the error, but log
-		// it if we appear not to be in that situation.
-		if !rsystem.RunningInUserNS() {
-			logrus.Debugf("Permission denied writing %q to /proc/self/oom_score_adj", stringScore)
-		}
-		return nil
-	}
+	_, err = f.WriteString(strconv.Itoa(score))
 	f.Close()
 	return err
 }

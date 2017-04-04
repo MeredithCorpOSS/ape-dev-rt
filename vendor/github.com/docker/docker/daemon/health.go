@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/context"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/exec"
+	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/strslice"
 )
 
 const (
@@ -94,7 +93,7 @@ func (p *cmdProbe) run(ctx context.Context, d *Daemon, container *container.Cont
 		return nil, err
 	}
 	if info.ExitCode == nil {
-		return nil, fmt.Errorf("Healthcheck for container %s has no exit code!", container.ID)
+		return nil, fmt.Errorf("Healthcheck has no exit code!")
 	}
 	// Note: Go's json package will handle invalid UTF-8 for us
 	out := output.String()
@@ -149,17 +148,17 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 	for {
 		select {
 		case <-stop:
-			logrus.Debugf("Stop healthcheck monitoring for container %s (received while idle)", c.ID)
+			logrus.Debug("Stop healthcheck monitoring (received while idle)")
 			return
 		case <-time.After(probeInterval):
-			logrus.Debugf("Running health check for container %s ...", c.ID)
+			logrus.Debug("Running health check...")
 			startTime := time.Now()
 			ctx, cancelProbe := context.WithTimeout(context.Background(), probeTimeout)
 			results := make(chan *types.HealthcheckResult)
 			go func() {
 				result, err := probe.run(ctx, d, c)
 				if err != nil {
-					logrus.Warnf("Health check for container %s error: %v", c.ID, err)
+					logrus.Warnf("Health check error: %v", err)
 					results <- &types.HealthcheckResult{
 						ExitCode: -1,
 						Output:   err.Error(),
@@ -168,14 +167,14 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 					}
 				} else {
 					result.Start = startTime
-					logrus.Debugf("Health check for container %s done (exitCode=%d)", c.ID, result.ExitCode)
+					logrus.Debugf("Health check done (exitCode=%d)", result.ExitCode)
 					results <- result
 				}
 				close(results)
 			}()
 			select {
 			case <-stop:
-				logrus.Debugf("Stop healthcheck monitoring for container %s (received while probing)", c.ID)
+				logrus.Debug("Stop healthcheck monitoring (received while probing)")
 				// Stop timeout and kill probe, but don't wait for probe to exit.
 				cancelProbe()
 				return
@@ -184,7 +183,7 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 				// Stop timeout
 				cancelProbe()
 			case <-ctx.Done():
-				logrus.Debugf("Health check for container %s taking too long", c.ID)
+				logrus.Debug("Health check taking too long")
 				handleProbeResult(d, c, &types.HealthcheckResult{
 					ExitCode: -1,
 					Output:   fmt.Sprintf("Health check exceeded timeout (%v)", probeTimeout),
@@ -213,7 +212,7 @@ func getProbe(c *container.Container) probe {
 	case "CMD-SHELL":
 		return &cmdProbe{shell: true}
 	default:
-		logrus.Warnf("Unknown healthcheck type '%s' (expected 'CMD') in container %s", config.Test[0], c.ID)
+		logrus.Warnf("Unknown healthcheck type '%s' (expected 'CMD')", config.Test[0])
 		return nil
 	}
 }
@@ -251,10 +250,7 @@ func (d *Daemon) initHealthMonitor(c *container.Container) {
 	// This is needed in case we're auto-restarting
 	d.stopHealthchecks(c)
 
-	if h := c.State.Health; h != nil {
-		h.Status = types.Starting
-		h.FailingStreak = 0
-	} else {
+	if c.State.Health == nil {
 		h := &container.Health{}
 		h.Status = types.Starting
 		c.State.Health = h
@@ -275,15 +271,11 @@ func (d *Daemon) stopHealthchecks(c *container.Container) {
 // Buffer up to maxOutputLen bytes. Further data is discarded.
 type limitedBuffer struct {
 	buf       bytes.Buffer
-	mu        sync.Mutex
 	truncated bool // indicates that data has been lost
 }
 
 // Append to limitedBuffer while there is room.
 func (b *limitedBuffer) Write(data []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	bufLen := b.buf.Len()
 	dataLen := len(data)
 	keep := min(maxOutputLen-bufLen, dataLen)
@@ -298,9 +290,6 @@ func (b *limitedBuffer) Write(data []byte) (int, error) {
 
 // The contents of the buffer, with "..." appended if it overflowed.
 func (b *limitedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	out := b.buf.String()
 	if b.truncated {
 		out = out + "..."

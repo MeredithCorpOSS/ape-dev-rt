@@ -32,26 +32,12 @@ func GenerateRandomASCIIString(n int) string {
 	return string(res)
 }
 
-// Ellipsis truncates a string to fit within maxlen, and appends ellipsis (...).
-// For maxlen of 3 and lower, no ellipsis is appended.
-func Ellipsis(s string, maxlen int) string {
-	r := []rune(s)
-	if len(r) <= maxlen {
-		return s
-	}
-	if maxlen <= 3 {
-		return string(r[:maxlen])
-	}
-	return string(r[:maxlen-3]) + "..."
-}
-
 // Truncate truncates a string to maxlen.
 func Truncate(s string, maxlen int) string {
-	r := []rune(s)
-	if len(r) <= maxlen {
+	if len(s) <= maxlen {
 		return s
 	}
-	return string(r[:maxlen])
+	return s[:maxlen]
 }
 
 // InSlice tests whether a string is contained in a slice of strings or not.

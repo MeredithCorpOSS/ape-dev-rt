@@ -1,24 +1,19 @@
----
-title: "Volume plugins"
-description: "How to manage data with external volume plugins"
-keywords: ["Examples, Usage, volume, docker, data, volumes, plugin, api"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "Volume plugins"
+description = "How to manage data with external volume plugins"
+keywords = ["Examples, Usage, volume, docker, data, volumes, plugin, api"]
+[menu.main]
+parent = "engine_extend"
++++
+<![end-metadata]-->
 
 # Write a volume plugin
 
 Docker Engine volume plugins enable Engine deployments to be integrated with
 external storage systems, such as Amazon EBS, and enable data volumes to persist
-beyond the lifetime of a single Engine host. See the
-[plugin documentation](legacy_plugins.md) for more information.
+beyond the lifetime of a single Engine host. See the [plugin
+documentation](plugins.md) for more information.
 
 ## Changelog
 

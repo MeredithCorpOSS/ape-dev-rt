@@ -17,11 +17,11 @@ limitations under the License.
 package env
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
-
-	"golang.org/x/net/context"
+	"strings"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -60,12 +60,35 @@ func (cmd *env) Process(ctx context.Context) error {
 
 func (cmd *env) Description() string {
 	return `Output the environment variables for this client.
+
 If credentials are included in the url, they are split into separate variables.
 Useful as bash scripting helper to parse GOVC_URL.`
 }
 
 func (cmd *env) Run(ctx context.Context, f *flag.FlagSet) error {
 	env := envResult(cmd.ClientFlag.Environ(cmd.extra))
+
+	if f.NArg() > 1 {
+		return flag.ErrHelp
+	}
+
+	// Option to just output the value, example use:
+	// password=$(govc env GOVC_PASSWORD)
+	if f.NArg() == 1 {
+		var output []string
+
+		prefix := fmt.Sprintf("%s=", f.Arg(0))
+
+		for _, e := range env {
+			if strings.HasPrefix(e, prefix) {
+				output = append(output, e[len(prefix):])
+				break
+			}
+		}
+
+		return cmd.WriteResult(envResult(output))
+	}
+
 	return cmd.WriteResult(env)
 }
 

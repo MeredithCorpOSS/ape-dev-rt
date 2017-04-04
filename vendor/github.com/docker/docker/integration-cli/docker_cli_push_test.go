@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/docker/distribution/reference"
@@ -132,7 +131,6 @@ func testPushEmptyLayer(c *check.C) {
 
 	freader, err := os.Open(emptyTarball.Name())
 	c.Assert(err, check.IsNil, check.Commentf("Could not open test tarball"))
-	defer freader.Close()
 
 	importCmd := exec.Command(dockerBinary, "import", "-", repoName)
 	importCmd.Stdin = freader
@@ -631,26 +629,16 @@ func (s *DockerSuite) TestPushToCentralRegistryUnauthorized(c *check.C) {
 	c.Assert(out, check.Not(checker.Contains), "Retrying")
 }
 
-func getTestTokenService(status int, body string, retries int) *httptest.Server {
-	var mu sync.Mutex
+func getTestTokenService(status int, body string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		if retries > 0 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"errors":[{"code":"UNAVAILABLE","message":"cannot create token at this time"}]}`))
-			retries--
-		} else {
-			w.WriteHeader(status)
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(body))
-		}
-		mu.Unlock()
+		w.WriteHeader(status)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
 	}))
 }
 
 func (s *DockerRegistryAuthTokenSuite) TestPushTokenServiceUnauthResponse(c *check.C) {
-	ts := getTestTokenService(http.StatusUnauthorized, `{"errors": [{"Code":"UNAUTHORIZED", "message": "a message", "detail": null}]}`, 0)
+	ts := getTestTokenService(http.StatusUnauthorized, `{"errors": [{"Code":"UNAUTHORIZED", "message": "a message", "detail": null}]}`)
 	defer ts.Close()
 	s.setupRegistryWithTokenService(c, ts.URL)
 	repoName := fmt.Sprintf("%s/busybox", privateRegistryURL)
@@ -662,7 +650,7 @@ func (s *DockerRegistryAuthTokenSuite) TestPushTokenServiceUnauthResponse(c *che
 }
 
 func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponseUnauthorized(c *check.C) {
-	ts := getTestTokenService(http.StatusUnauthorized, `{"error": "unauthorized"}`, 0)
+	ts := getTestTokenService(http.StatusUnauthorized, `{"error": "unauthorized"}`)
 	defer ts.Close()
 	s.setupRegistryWithTokenService(c, ts.URL)
 	repoName := fmt.Sprintf("%s/busybox", privateRegistryURL)
@@ -675,7 +663,7 @@ func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponse
 }
 
 func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponseError(c *check.C) {
-	ts := getTestTokenService(http.StatusTooManyRequests, `{"errors": [{"code":"TOOMANYREQUESTS","message":"out of tokens"}]}`, 4)
+	ts := getTestTokenService(http.StatusInternalServerError, `{"error": "unexpected"}`)
 	defer ts.Close()
 	s.setupRegistryWithTokenService(c, ts.URL)
 	repoName := fmt.Sprintf("%s/busybox", privateRegistryURL)
@@ -683,13 +671,12 @@ func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponse
 	out, _, err := dockerCmdWithError("push", repoName)
 	c.Assert(err, check.NotNil, check.Commentf(out))
 	c.Assert(out, checker.Contains, "Retrying")
-	c.Assert(out, checker.Not(checker.Contains), "Retrying in 15")
 	split := strings.Split(out, "\n")
-	c.Assert(split[len(split)-2], check.Equals, "toomanyrequests: out of tokens")
+	c.Assert(split[len(split)-2], check.Equals, "received unexpected HTTP status: 500 Internal Server Error")
 }
 
 func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponseUnparsable(c *check.C) {
-	ts := getTestTokenService(http.StatusForbidden, `no way`, 0)
+	ts := getTestTokenService(http.StatusForbidden, `no way`)
 	defer ts.Close()
 	s.setupRegistryWithTokenService(c, ts.URL)
 	repoName := fmt.Sprintf("%s/busybox", privateRegistryURL)
@@ -702,7 +689,7 @@ func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponse
 }
 
 func (s *DockerRegistryAuthTokenSuite) TestPushMisconfiguredTokenServiceResponseNoToken(c *check.C) {
-	ts := getTestTokenService(http.StatusOK, `{"something": "wrong"}`, 0)
+	ts := getTestTokenService(http.StatusOK, `{"something": "wrong"}`)
 	defer ts.Close()
 	s.setupRegistryWithTokenService(c, ts.URL)
 	repoName := fmt.Sprintf("%s/busybox", privateRegistryURL)

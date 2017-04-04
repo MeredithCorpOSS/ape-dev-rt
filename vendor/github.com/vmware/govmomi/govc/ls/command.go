@@ -17,6 +17,7 @@ limitations under the License.
 package ls
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -27,14 +28,15 @@ import (
 	"github.com/vmware/govmomi/list"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type ls struct {
 	*flags.DatacenterFlag
 
-	Long bool
-	Type string
+	Long  bool
+	Type  string
+	ToRef bool
+	DeRef bool
 }
 
 func init() {
@@ -46,7 +48,18 @@ func (cmd *ls) Register(ctx context.Context, f *flag.FlagSet) {
 	cmd.DatacenterFlag.Register(ctx, f)
 
 	f.BoolVar(&cmd.Long, "l", false, "Long listing format")
+	f.BoolVar(&cmd.ToRef, "i", false, "Print the managed object reference")
+	f.BoolVar(&cmd.DeRef, "L", false, "Follow managed object references")
 	f.StringVar(&cmd.Type, "t", "", "Object type")
+}
+
+func (cmd *ls) Description() string {
+	return `List inventory items.
+
+Examples:
+  govc ls -l '*'
+  govc ls -t ClusterComputeResource host
+  govc ls -t Datastore host/ClusterA/* | grep -v local | xargs -n1 basename | sort | uniq`
 }
 
 func (cmd *ls) Process(ctx context.Context) error {
@@ -75,8 +88,8 @@ func (cmd *ls) Run(ctx context.Context, f *flag.FlagSet) error {
 	}
 
 	lr := listResult{
+		ls:       cmd,
 		Elements: nil,
-		Long:     cmd.Long,
 	}
 
 	args := f.Args()
@@ -84,8 +97,25 @@ func (cmd *ls) Run(ctx context.Context, f *flag.FlagSet) error {
 		args = []string{"."}
 	}
 
+	var ref = new(types.ManagedObjectReference)
+
 	for _, arg := range args {
-		es, err := finder.ManagedObjectListChildren(context.TODO(), arg)
+		if cmd.DeRef && ref.FromString(arg) {
+			e, err := finder.Element(ctx, *ref)
+			if err == nil {
+				if cmd.typeMatch(*ref) {
+					if e.Path == "/" && ref.Type != "Folder" {
+						// Special case: when given a moref with no ancestors,
+						// just echo the moref.
+						e.Path = ref.String()
+					}
+					lr.Elements = append(lr.Elements, *e)
+				}
+				continue
+			}
+		}
+
+		es, err := finder.ManagedObjectListChildren(ctx, arg)
 		if err != nil {
 			return err
 		}
@@ -101,15 +131,23 @@ func (cmd *ls) Run(ctx context.Context, f *flag.FlagSet) error {
 }
 
 type listResult struct {
+	*ls
 	Elements []list.Element `json:"elements"`
-
-	Long bool `json:"-"`
 }
 
 func (l listResult) Write(w io.Writer) error {
 	var err error
 
 	for _, e := range l.Elements {
+		if l.ToRef {
+			fmt.Fprint(w, e.Object.Reference().String())
+			if l.Long {
+				fmt.Fprintf(w, " %s", e.Path)
+			}
+			fmt.Fprintln(w)
+			continue
+		}
+
 		if !l.Long {
 			fmt.Fprintf(w, "%s\n", e.Path)
 			continue

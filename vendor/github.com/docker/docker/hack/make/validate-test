@@ -17,10 +17,7 @@ for f in "${files[@]}"; do
 
 	# we use "git show" here to validate that what's committed doesn't contain golang built-in testing
 	if git show "$VALIDATE_HEAD:$f" | grep -q testing.T; then
-		if [ "$(echo $f | grep '_test')" ]; then
-			# allow testing.T for non- _test files
-			badFiles+=( "$f" )
-		fi
+		badFiles+=( "$f" )
 	fi
 done
 

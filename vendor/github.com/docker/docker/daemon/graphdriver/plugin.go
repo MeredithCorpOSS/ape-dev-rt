@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/docker/pkg/plugingetter"
+	"github.com/docker/docker/pkg/plugins"
 )
 
 type pluginClient interface {
@@ -18,8 +18,8 @@ type pluginClient interface {
 	SendFile(string, io.Reader, interface{}) error
 }
 
-func lookupPlugin(name, home string, opts []string, pg plugingetter.PluginGetter) (Driver, error) {
-	pl, err := pg.Get(name, "GraphDriver", plugingetter.LOOKUP)
+func lookupPlugin(name, home string, opts []string) (Driver, error) {
+	pl, err := plugins.Get(name, "GraphDriver")
 	if err != nil {
 		return nil, fmt.Errorf("Error looking up graphdriver plugin %s: %v", name, err)
 	}

@@ -133,7 +133,7 @@ func TestNewRequest(t *testing.T) {
 	inBody, outBody := &DropletCreateRequest{Name: "l"},
 		`{"name":"l","region":"","size":"","image":0,`+
 			`"ssh_keys":null,"backups":false,"ipv6":false,`+
-			`"private_networking":false}`+"\n"
+			`"private_networking":false,"monitoring":false,"tags":null}`+"\n"
 	req, _ := c.NewRequest("GET", inURL, inBody)
 
 	// test relative URL was expanded
@@ -161,7 +161,7 @@ func TestNewRequest_withUserData(t *testing.T) {
 	inBody, outBody := &DropletCreateRequest{Name: "l", UserData: "u"},
 		`{"name":"l","region":"","size":"","image":0,`+
 			`"ssh_keys":null,"backups":false,"ipv6":false,`+
-			`"private_networking":false,"user_data":"u"}`+"\n"
+			`"private_networking":false,"monitoring":false,"user_data":"u","tags":null}`+"\n"
 	req, _ := c.NewRequest("GET", inURL, inBody)
 
 	// test relative URL was expanded
@@ -512,4 +512,25 @@ func TestCustomUserAgent(t *testing.T) {
 	if got := c.UserAgent; got != expected {
 		t.Errorf("New() UserAgent = %s; expected %s", got, expected)
 	}
+}
+
+func TestCustomBaseURL(t *testing.T) {
+	baseURL := "http://localhost/foo"
+	c, err := New(nil, SetBaseURL(baseURL))
+
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+
+	expected := baseURL
+	if got := c.BaseURL.String(); got != expected {
+		t.Errorf("New() BaseURL = %s; expected %s", got, expected)
+	}
+}
+
+func TestCustomBaseURL_badURL(t *testing.T) {
+	baseURL := ":"
+	_, err := New(nil, SetBaseURL(baseURL))
+
+	testURLParseError(t, err)
 }

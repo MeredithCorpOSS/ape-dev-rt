@@ -4,13 +4,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/credentials"
+
+	"golang.org/x/net/context"
 )
 
 var (
@@ -31,12 +33,12 @@ type MutableTLSCreds struct {
 	// TLS configuration
 	config *tls.Config
 	// TLS Credentials
-	tlsCreds credentials.TransportCredentials
+	tlsCreds credentials.TransportAuthenticator
 	// store the subject for easy access
 	subject pkix.Name
 }
 
-// Info implements the credentials.TransportCredentials interface
+// Info implements the credentials.TransportAuthenticator interface
 func (c *MutableTLSCreds) Info() credentials.ProtocolInfo {
 	return credentials.ProtocolInfo{
 		SecurityProtocol: "tls",
@@ -44,39 +46,26 @@ func (c *MutableTLSCreds) Info() credentials.ProtocolInfo {
 	}
 }
 
-// Clone returns new MutableTLSCreds created from underlying *tls.Config.
-// It panics if validation of underlying config fails.
-func (c *MutableTLSCreds) Clone() credentials.TransportCredentials {
-	c.Lock()
-	newCfg, err := NewMutableTLS(c.config)
-	if err != nil {
-		panic("validation error on Clone")
-	}
-	c.Unlock()
-	return newCfg
-}
-
-// OverrideServerName overrides *tls.Config.ServerName.
-func (c *MutableTLSCreds) OverrideServerName(name string) error {
-	c.Lock()
-	c.config.ServerName = name
-	c.Unlock()
-	return nil
-}
-
-// GetRequestMetadata implements the credentials.TransportCredentials interface
+// GetRequestMetadata implements the credentials.TransportAuthenticator interface
 func (c *MutableTLSCreds) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	return nil, nil
 }
 
-// RequireTransportSecurity implements the credentials.TransportCredentials interface
+// RequireTransportSecurity implements the credentials.TransportAuthenticator interface
 func (c *MutableTLSCreds) RequireTransportSecurity() bool {
 	return true
 }
 
-// ClientHandshake implements the credentials.TransportCredentials interface
-func (c *MutableTLSCreds) ClientHandshake(ctx context.Context, addr string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+// ClientHandshake implements the credentials.TransportAuthenticator interface
+func (c *MutableTLSCreds) ClientHandshake(addr string, rawConn net.Conn, timeout time.Duration) (net.Conn, credentials.AuthInfo, error) {
 	// borrow all the code from the original TLS credentials
+	var errChannel chan error
+	if timeout != 0 {
+		errChannel = make(chan error, 2)
+		time.AfterFunc(timeout, func() {
+			errChannel <- timeoutError{}
+		})
+	}
 	c.Lock()
 	if c.config.ServerName == "" {
 		colonPos := strings.LastIndex(addr, ":")
@@ -91,23 +80,23 @@ func (c *MutableTLSCreds) ClientHandshake(ctx context.Context, addr string, rawC
 	// would create a deadlock otherwise
 	c.Unlock()
 	var err error
-	errChannel := make(chan error, 1)
-	go func() {
-		errChannel <- conn.Handshake()
-	}()
-	select {
-	case err = <-errChannel:
-	case <-ctx.Done():
-		err = ctx.Err()
+	if timeout == 0 {
+		err = conn.Handshake()
+	} else {
+		go func() {
+			errChannel <- conn.Handshake()
+		}()
+		err = <-errChannel
 	}
 	if err != nil {
 		rawConn.Close()
 		return nil, nil, err
 	}
+
 	return conn, nil, nil
 }
 
-// ServerHandshake implements the credentials.TransportCredentials interface
+// ServerHandshake implements the credentials.TransportAuthenticator interface
 func (c *MutableTLSCreds) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	c.Lock()
 	conn := tls.Server(rawConn, c.config)
@@ -143,7 +132,7 @@ func (c *MutableTLSCreds) Config() *tls.Config {
 	return c.config
 }
 
-// Role returns the OU for the certificate encapsulated in this TransportCredentials
+// Role returns the OU for the certificate encapsulated in this TransportAuthenticator
 func (c *MutableTLSCreds) Role() string {
 	c.Lock()
 	defer c.Unlock()
@@ -151,7 +140,7 @@ func (c *MutableTLSCreds) Role() string {
 	return c.subject.OrganizationalUnit[0]
 }
 
-// Organization returns the O for the certificate encapsulated in this TransportCredentials
+// Organization returns the O for the certificate encapsulated in this TransportAuthenticator
 func (c *MutableTLSCreds) Organization() string {
 	c.Lock()
 	defer c.Unlock()
@@ -159,7 +148,7 @@ func (c *MutableTLSCreds) Organization() string {
 	return c.subject.Organization[0]
 }
 
-// NodeID returns the CN for the certificate encapsulated in this TransportCredentials
+// NodeID returns the CN for the certificate encapsulated in this TransportAuthenticator
 func (c *MutableTLSCreds) NodeID() string {
 	c.Lock()
 	defer c.Unlock()
@@ -167,12 +156,12 @@ func (c *MutableTLSCreds) NodeID() string {
 	return c.subject.CommonName
 }
 
-// NewMutableTLS uses c to construct a mutable TransportCredentials based on TLS.
+// NewMutableTLS uses c to construct a mutable TransportAuthenticator based on TLS.
 func NewMutableTLS(c *tls.Config) (*MutableTLSCreds, error) {
 	originalTC := credentials.NewTLS(c)
 
 	if len(c.Certificates) < 1 {
-		return nil, errors.New("invalid configuration: needs at least one certificate")
+		return nil, fmt.Errorf("invalid configuration: needs at least one certificate")
 	}
 
 	subject, err := GetAndValidateCertificateSubject(c.Certificates)
@@ -196,18 +185,18 @@ func GetAndValidateCertificateSubject(certs []tls.Certificate) (pkix.Name, error
 			continue
 		}
 		if len(x509Cert.Subject.OrganizationalUnit) < 1 {
-			return pkix.Name{}, errors.New("no OU found in certificate subject")
+			return pkix.Name{}, fmt.Errorf("no OU found in certificate subject")
 		}
 
 		if len(x509Cert.Subject.Organization) < 1 {
-			return pkix.Name{}, errors.New("no organization found in certificate subject")
+			return pkix.Name{}, fmt.Errorf("no organization found in certificate subject")
 		}
 		if x509Cert.Subject.CommonName == "" {
-			return pkix.Name{}, errors.New("no valid subject names found for TLS configuration")
+			return pkix.Name{}, fmt.Errorf("no valid subject names found for TLS configuration")
 		}
 
 		return x509Cert.Subject, nil
 	}
 
-	return pkix.Name{}, errors.New("no valid certificates found for TLS configuration")
+	return pkix.Name{}, fmt.Errorf("no valid certificates found for TLS configuration")
 }

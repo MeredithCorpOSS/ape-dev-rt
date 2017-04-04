@@ -7,13 +7,13 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 	"time"
 
 	"encoding/json"
 
-	"github.com/codegangsta/cli"
+	"github.com/opencontainers/runc/libcontainer/utils"
+	"github.com/urfave/cli"
 )
 
 const formatOptions = `table or json`
@@ -31,31 +31,51 @@ type containerState struct {
 	Bundle string `json:"bundle"`
 	// Created is the unix timestamp for the creation time of the container in UTC
 	Created time.Time `json:"created"`
+	// Annotations is the user defined annotations added to the config.
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 var listCommand = cli.Command{
 	Name:  "list",
 	Usage: "lists containers started by runc with the given root",
+	ArgsUsage: `
+
+Where the given root is specified via the global option "--root"
+(default: "/run/runc").
+
+EXAMPLE 1:
+To list containers created via the default "--root":
+       # runc list
+
+EXAMPLE 2:
+To list containers created using a non-default value for "--root":
+       # runc --root value list`,
 	Flags: []cli.Flag{
 		cli.StringFlag{
 			Name:  "format, f",
-			Value: "",
-			Usage: `select one of: ` + formatOptions + `.
-
-The default format is table.  The following will output the list of containers
-in json format:
-
-    # runc list -f json`,
+			Value: "table",
+			Usage: `select one of: ` + formatOptions,
+		},
+		cli.BoolFlag{
+			Name:  "quiet, q",
+			Usage: "display only container IDs",
 		},
 	},
-	Action: func(context *cli.Context) {
+	Action: func(context *cli.Context) error {
 		s, err := getContainers(context)
 		if err != nil {
-			fatal(err)
+			return err
+		}
+
+		if context.Bool("quiet") {
+			for _, item := range s {
+				fmt.Println(item.ID)
+			}
+			return nil
 		}
 
 		switch context.String("format") {
-		case "", "table":
+		case "table":
 			w := tabwriter.NewWriter(os.Stdout, 12, 1, 3, ' ', 0)
 			fmt.Fprint(w, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\n")
 			for _, item := range s {
@@ -67,18 +87,16 @@ in json format:
 					item.Created.Format(time.RFC3339Nano))
 			}
 			if err := w.Flush(); err != nil {
-				fatal(err)
+				return err
 			}
 		case "json":
-			data, err := json.Marshal(s)
-			if err != nil {
-				fatal(err)
+			if err := json.NewEncoder(os.Stdout).Encode(s); err != nil {
+				return err
 			}
-			os.Stdout.Write(data)
-
 		default:
-			fatalf("invalid format option")
+			return fmt.Errorf("invalid format option")
 		}
+		return nil
 	},
 }
 
@@ -112,26 +130,16 @@ func getContainers(context *cli.Context) ([]containerState, error) {
 			if err != nil {
 				return nil, err
 			}
+			bundle, annotations := utils.Annotations(state.Config.Labels)
 			s = append(s, containerState{
 				ID:             state.BaseState.ID,
 				InitProcessPid: state.BaseState.InitProcessPid,
 				Status:         containerStatus.String(),
-				Bundle:         searchLabels(state.Config.Labels, "bundle"),
-				Created:        state.BaseState.Created})
+				Bundle:         bundle,
+				Created:        state.BaseState.Created,
+				Annotations:    annotations,
+			})
 		}
 	}
 	return s, nil
-}
-
-func searchLabels(labels []string, query string) string {
-	for _, l := range labels {
-		parts := strings.SplitN(l, "=", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		if parts[0] == query {
-			return parts[1]
-		}
-	}
-	return ""
 }

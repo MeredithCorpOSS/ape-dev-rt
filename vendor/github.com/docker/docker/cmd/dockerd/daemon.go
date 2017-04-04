@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -30,10 +31,11 @@ import (
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/libcontainerd"
-	dopts "github.com/docker/docker/opts"
+	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/authorization"
 	"github.com/docker/docker/pkg/jsonlog"
 	"github.com/docker/docker/pkg/listeners"
+	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/pidfile"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/pkg/system"
@@ -41,27 +43,46 @@ import (
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
 	"github.com/docker/go-connections/tlsconfig"
-	"github.com/spf13/pflag"
 )
 
 const (
-	flagDaemonConfigFile = "config-file"
+	daemonConfigFileFlag = "-config-file"
 )
 
 // DaemonCli represents the daemon CLI.
 type DaemonCli struct {
 	*daemon.Config
-	configFile *string
-	flags      *pflag.FlagSet
+	commonFlags *cliflags.CommonFlags
+	configFile  *string
 
 	api             *apiserver.Server
 	d               *daemon.Daemon
 	authzMiddleware *authorization.Middleware // authzMiddleware enables to dynamically reload the authorization plugins
 }
 
-// NewDaemonCli returns a daemon CLI
+func presentInHelp(usage string) string { return usage }
+func absentFromHelp(string) string      { return "" }
+
+// NewDaemonCli returns a pre-configured daemon CLI
 func NewDaemonCli() *DaemonCli {
-	return &DaemonCli{}
+	// TODO(tiborvass): remove InstallFlags?
+	daemonConfig := new(daemon.Config)
+	daemonConfig.LogConfig.Config = make(map[string]string)
+	daemonConfig.ClusterOpts = make(map[string]string)
+
+	daemonConfig.InstallFlags(flag.CommandLine, presentInHelp)
+	configFile := flag.CommandLine.String([]string{daemonConfigFileFlag}, defaultDaemonConfigFile, "Daemon configuration file")
+	flag.CommandLine.Require(flag.Exact, 0)
+
+	if runtime.GOOS != "linux" {
+		daemonConfig.V2Only = true
+	}
+
+	return &DaemonCli{
+		Config:      daemonConfig,
+		commonFlags: cliflags.InitCommonFlags(),
+		configFile:  configFile,
+	}
 }
 
 func migrateKey() (err error) {
@@ -105,25 +126,24 @@ func migrateKey() (err error) {
 	return nil
 }
 
-func (cli *DaemonCli) start(opts daemonOptions) (err error) {
+func (cli *DaemonCli) start() (err error) {
 	stopc := make(chan bool)
 	defer close(stopc)
 
 	// warn from uuid package when running the daemon
 	uuid.Loggerf = logrus.Warnf
 
-	opts.common.SetDefaultOptions(opts.flags)
+	flags := flag.CommandLine
+	cli.commonFlags.PostParse()
 
-	if opts.common.TrustKey == "" {
-		opts.common.TrustKey = filepath.Join(
-			getDaemonConfDir(),
-			cliflags.DefaultTrustKeyFile)
+	if cli.commonFlags.TrustKey == "" {
+		cli.commonFlags.TrustKey = filepath.Join(getDaemonConfDir(), cliflags.DefaultTrustKeyFile)
 	}
-	if cli.Config, err = loadDaemonCliConfig(opts); err != nil {
+	cliConfig, err := loadDaemonCliConfig(cli.Config, flags, cli.commonFlags, *cli.configFile)
+	if err != nil {
 		return err
 	}
-	cli.configFile = &opts.configFile
-	cli.flags = opts.flags
+	cli.Config = cliConfig
 
 	if cli.Config.Debug {
 		utils.EnableDebug()
@@ -195,7 +215,7 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 
 	for i := 0; i < len(cli.Config.Hosts); i++ {
 		var err error
-		if cli.Config.Hosts[i], err = dopts.ParseHost(cli.Config.TLS, cli.Config.Hosts[i]); err != nil {
+		if cli.Config.Hosts[i], err = opts.ParseHost(cli.Config.TLS, cli.Config.Hosts[i]); err != nil {
 			return fmt.Errorf("error parsing -H %s : %v", cli.Config.Hosts[i], err)
 		}
 
@@ -223,15 +243,14 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 				return err
 			}
 		}
-		logrus.Debugf("Listener created for HTTP on %s (%s)", proto, addr)
-		api.Accept(addr, ls...)
+		logrus.Debugf("Listener created for HTTP on %s (%s)", protoAddrParts[0], protoAddrParts[1])
+		api.Accept(protoAddrParts[1], ls...)
 	}
 
 	if err := migrateKey(); err != nil {
 		return err
 	}
-	// FIXME: why is this down here instead of with the other TrustKey logic above?
-	cli.TrustKeyPath = opts.common.TrustKey
+	cli.TrustKeyPath = cli.commonFlags.TrustKey
 
 	registryService := registry.NewService(cli.Config.ServiceOptions)
 	containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), cli.getPlatformRemoteOptions()...)
@@ -256,16 +275,10 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 		Backend:                d,
 		NetworkSubnetsProvider: d,
 		DefaultAdvertiseAddr:   cli.Config.SwarmDefaultAdvertiseAddr,
-		RuntimeRoot:            cli.getSwarmRunRoot(),
 	})
 	if err != nil {
 		logrus.Fatalf("Error creating cluster component: %v", err)
 	}
-
-	// Restart all autostart containers which has a swarm endpoint
-	// and is not yet running now that we have successfully
-	// initialized the cluster.
-	d.RestartSwarmContainers()
 
 	logrus.Info("Daemon has completed initialization")
 
@@ -275,12 +288,10 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 		"graphdriver": d.GraphDriverName(),
 	}).Info("Docker daemon")
 
-	cli.d = d
-
-	// initMiddlewares needs cli.d to be populated. Dont change this init order.
 	cli.initMiddlewares(api, serverConfig)
 	initRouter(api, d, c)
 
+	cli.d = d
 	cli.setupConfigReloadTrap()
 
 	// The serve API routine never exits unless an error occurs
@@ -296,7 +307,7 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 	// Wait for serve API to complete
 	errAPI := <-serveAPIWait
 	c.Cleanup()
-	shutdownDaemon(d)
+	shutdownDaemon(d, 15)
 	containerdRemote.Cleanup()
 	if errAPI != nil {
 		return fmt.Errorf("Shutting down due to ServeAPI error: %v", errAPI)
@@ -330,7 +341,7 @@ func (cli *DaemonCli) reloadConfig() {
 		}
 	}
 
-	if err := daemon.ReloadConfiguration(*cli.configFile, cli.flags, reload); err != nil {
+	if err := daemon.ReloadConfiguration(*cli.configFile, flag.CommandLine, reload); err != nil {
 		logrus.Error(err)
 	}
 }
@@ -342,47 +353,39 @@ func (cli *DaemonCli) stop() {
 // shutdownDaemon just wraps daemon.Shutdown() to handle a timeout in case
 // d.Shutdown() is waiting too long to kill container or worst it's
 // blocked there
-func shutdownDaemon(d *daemon.Daemon) {
-	shutdownTimeout := d.ShutdownTimeout()
+func shutdownDaemon(d *daemon.Daemon, timeout time.Duration) {
 	ch := make(chan struct{})
 	go func() {
 		d.Shutdown()
 		close(ch)
 	}()
-	if shutdownTimeout < 0 {
-		<-ch
-		logrus.Debug("Clean shutdown succeeded")
-		return
-	}
 	select {
 	case <-ch:
 		logrus.Debug("Clean shutdown succeeded")
-	case <-time.After(time.Duration(shutdownTimeout) * time.Second):
+	case <-time.After(timeout * time.Second):
 		logrus.Error("Force shutdown daemon")
 	}
 }
 
-func loadDaemonCliConfig(opts daemonOptions) (*daemon.Config, error) {
-	config := opts.daemonConfig
-	flags := opts.flags
-	config.Debug = opts.common.Debug
-	config.Hosts = opts.common.Hosts
-	config.LogLevel = opts.common.LogLevel
-	config.TLS = opts.common.TLS
-	config.TLSVerify = opts.common.TLSVerify
+func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfig *cliflags.CommonFlags, configFile string) (*daemon.Config, error) {
+	config.Debug = commonConfig.Debug
+	config.Hosts = commonConfig.Hosts
+	config.LogLevel = commonConfig.LogLevel
+	config.TLS = commonConfig.TLS
+	config.TLSVerify = commonConfig.TLSVerify
 	config.CommonTLSOptions = daemon.CommonTLSOptions{}
 
-	if opts.common.TLSOptions != nil {
-		config.CommonTLSOptions.CAFile = opts.common.TLSOptions.CAFile
-		config.CommonTLSOptions.CertFile = opts.common.TLSOptions.CertFile
-		config.CommonTLSOptions.KeyFile = opts.common.TLSOptions.KeyFile
+	if commonConfig.TLSOptions != nil {
+		config.CommonTLSOptions.CAFile = commonConfig.TLSOptions.CAFile
+		config.CommonTLSOptions.CertFile = commonConfig.TLSOptions.CertFile
+		config.CommonTLSOptions.KeyFile = commonConfig.TLSOptions.KeyFile
 	}
 
-	if opts.configFile != "" {
-		c, err := daemon.MergeDaemonConfigurations(config, flags, opts.configFile)
+	if configFile != "" {
+		c, err := daemon.MergeDaemonConfigurations(config, flags, configFile)
 		if err != nil {
-			if flags.Changed(flagDaemonConfigFile) || !os.IsNotExist(err) {
-				return nil, fmt.Errorf("unable to configure the Docker daemon with file %s: %v\n", opts.configFile, err)
+			if flags.IsSet(daemonConfigFileFlag) || !os.IsNotExist(err) {
+				return nil, fmt.Errorf("unable to configure the Docker daemon with file %s: %v\n", configFile, err)
 			}
 		}
 		// the merged configuration can be nil if the config file didn't exist.
@@ -398,12 +401,12 @@ func loadDaemonCliConfig(opts daemonOptions) (*daemon.Config, error) {
 
 	// Regardless of whether the user sets it to true or false, if they
 	// specify TLSVerify at all then we need to turn on TLS
-	if config.IsValueSet(cliflags.FlagTLSVerify) {
+	if config.IsValueSet(cliflags.TLSVerifyKey) {
 		config.TLS = true
 	}
 
 	// ensure that the log level is the one set after merging configurations
-	cliflags.SetLogLevel(config.LogLevel)
+	cliflags.SetDaemonLogLevel(config.LogLevel)
 
 	return config, nil
 }
@@ -411,23 +414,18 @@ func loadDaemonCliConfig(opts daemonOptions) (*daemon.Config, error) {
 func initRouter(s *apiserver.Server, d *daemon.Daemon, c *cluster.Cluster) {
 	decoder := runconfig.ContainerDecoder{}
 
-	routers := []router.Router{}
-
-	// we need to add the checkpoint router before the container router or the DELETE gets masked
-	routers = addExperimentalRouters(routers, d, decoder)
-
-	routers = append(routers, []router.Router{
+	routers := []router.Router{
 		container.NewRouter(d, decoder),
 		image.NewRouter(d, decoder),
 		systemrouter.NewRouter(d, c),
 		volume.NewRouter(d),
 		build.NewRouter(dockerfile.NewBuildManager(d)),
 		swarmrouter.NewRouter(c),
-	}...)
-
+	}
 	if d.NetworkControllerEnabled() {
 		routers = append(routers, network.NewRouter(d, c))
 	}
+	routers = addExperimentalRouters(routers)
 
 	s.InitRouter(utils.IsDebugEnabled(), routers...)
 }
@@ -446,6 +444,6 @@ func (cli *DaemonCli) initMiddlewares(s *apiserver.Server, cfg *apiserver.Config
 	u := middleware.NewUserAgentMiddleware(v)
 	s.UseMiddleware(u)
 
-	cli.authzMiddleware = authorization.NewMiddleware(cli.Config.AuthorizationPlugins, cli.d.PluginStore)
+	cli.authzMiddleware = authorization.NewMiddleware(cli.Config.AuthorizationPlugins)
 	s.UseMiddleware(cli.authzMiddleware)
 }

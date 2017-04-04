@@ -8,8 +8,8 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/notary"
 	"github.com/docker/notary/client/changelist"
-	store "github.com/docker/notary/storage"
 	"github.com/docker/notary/tuf/data"
+	"github.com/docker/notary/tuf/store"
 	"github.com/docker/notary/tuf/utils"
 )
 
@@ -50,7 +50,7 @@ func (r *NotaryRepository) AddDelegationRoleAndKeys(name string, delegationKeys 
 		name, notary.MinThreshold, len(delegationKeys))
 
 	// Defaulting to threshold of 1, since we don't allow for larger thresholds at the moment.
-	tdJSON, err := json.Marshal(&changelist.TUFDelegation{
+	tdJSON, err := json.Marshal(&changelist.TufDelegation{
 		NewThreshold: notary.MinThreshold,
 		AddKeys:      data.KeyList(delegationKeys),
 	})
@@ -78,7 +78,7 @@ func (r *NotaryRepository) AddDelegationPaths(name string, paths []string) error
 
 	logrus.Debugf(`Adding %s paths to delegation %s\n`, paths, name)
 
-	tdJSON, err := json.Marshal(&changelist.TUFDelegation{
+	tdJSON, err := json.Marshal(&changelist.TufDelegation{
 		AddPaths: paths,
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func (r *NotaryRepository) RemoveDelegationPaths(name string, paths []string) er
 
 	logrus.Debugf(`Removing %s paths from delegation "%s"\n`, paths, name)
 
-	tdJSON, err := json.Marshal(&changelist.TUFDelegation{
+	tdJSON, err := json.Marshal(&changelist.TufDelegation{
 		RemovePaths: paths,
 	})
 	if err != nil {
@@ -155,11 +155,9 @@ func (r *NotaryRepository) RemoveDelegationPaths(name string, paths []string) er
 // RemoveDelegationKeys creates a changelist entry to remove provided keys from an existing delegation.
 // When this changelist is applied, if the specified keys are the only keys left in the role,
 // the role itself will be deleted in its entirety.
-// It can also delete a key from all delegations under a parent using a name
-// with a wildcard at the end.
 func (r *NotaryRepository) RemoveDelegationKeys(name string, keyIDs []string) error {
 
-	if !data.IsDelegation(name) && !data.IsWildDelegation(name) {
+	if !data.IsDelegation(name) {
 		return data.ErrInvalidRole{Role: name, Reason: "invalid delegation role name"}
 	}
 
@@ -171,7 +169,7 @@ func (r *NotaryRepository) RemoveDelegationKeys(name string, keyIDs []string) er
 
 	logrus.Debugf(`Removing %s keys from delegation "%s"\n`, keyIDs, name)
 
-	tdJSON, err := json.Marshal(&changelist.TUFDelegation{
+	tdJSON, err := json.Marshal(&changelist.TufDelegation{
 		RemoveKeys: keyIDs,
 	})
 	if err != nil {
@@ -197,7 +195,7 @@ func (r *NotaryRepository) ClearDelegationPaths(name string) error {
 
 	logrus.Debugf(`Removing all paths from delegation "%s"\n`, name)
 
-	tdJSON, err := json.Marshal(&changelist.TUFDelegation{
+	tdJSON, err := json.Marshal(&changelist.TufDelegation{
 		ClearAllPaths: true,
 	})
 	if err != nil {
@@ -208,8 +206,8 @@ func (r *NotaryRepository) ClearDelegationPaths(name string) error {
 	return addChange(cl, template, name)
 }
 
-func newUpdateDelegationChange(name string, content []byte) *changelist.TUFChange {
-	return changelist.NewTUFChange(
+func newUpdateDelegationChange(name string, content []byte) *changelist.TufChange {
+	return changelist.NewTufChange(
 		changelist.ActionUpdate,
 		name,
 		changelist.TypeTargetsDelegation,
@@ -218,8 +216,8 @@ func newUpdateDelegationChange(name string, content []byte) *changelist.TUFChang
 	)
 }
 
-func newCreateDelegationChange(name string, content []byte) *changelist.TUFChange {
-	return changelist.NewTUFChange(
+func newCreateDelegationChange(name string, content []byte) *changelist.TufChange {
+	return changelist.NewTufChange(
 		changelist.ActionCreate,
 		name,
 		changelist.TypeTargetsDelegation,
@@ -228,8 +226,8 @@ func newCreateDelegationChange(name string, content []byte) *changelist.TUFChang
 	)
 }
 
-func newDeleteDelegationChange(name string, content []byte) *changelist.TUFChange {
-	return changelist.NewTUFChange(
+func newDeleteDelegationChange(name string, content []byte) *changelist.TufChange {
+	return changelist.NewTufChange(
 		changelist.ActionDelete,
 		name,
 		changelist.TypeTargetsDelegation,
@@ -240,7 +238,7 @@ func newDeleteDelegationChange(name string, content []byte) *changelist.TUFChang
 
 // GetDelegationRoles returns the keys and roles of the repository's delegations
 // Also converts key IDs to canonical key IDs to keep consistent with signing prompts
-func (r *NotaryRepository) GetDelegationRoles() ([]data.Role, error) {
+func (r *NotaryRepository) GetDelegationRoles() ([]*data.Role, error) {
 	// Update state of the repo to latest
 	if err := r.Update(false); err != nil {
 		return nil, err
@@ -253,7 +251,7 @@ func (r *NotaryRepository) GetDelegationRoles() ([]data.Role, error) {
 	}
 
 	// make a copy for traversing nested delegations
-	allDelegations := []data.Role{}
+	allDelegations := []*data.Role{}
 
 	// Define a visitor function to populate the delegations list and translate their key IDs to canonical IDs
 	delegationCanonicalListVisitor := func(tgt *data.SignedTargets, validRole data.DelegationRole) interface{} {
@@ -273,23 +271,20 @@ func (r *NotaryRepository) GetDelegationRoles() ([]data.Role, error) {
 	return allDelegations, nil
 }
 
-func translateDelegationsToCanonicalIDs(delegationInfo data.Delegations) ([]data.Role, error) {
-	canonicalDelegations := make([]data.Role, len(delegationInfo.Roles))
-	// Do a copy by value to ensure local delegation metadata is untouched
-	for idx, origRole := range delegationInfo.Roles {
-		canonicalDelegations[idx] = *origRole
-	}
+func translateDelegationsToCanonicalIDs(delegationInfo data.Delegations) ([]*data.Role, error) {
+	canonicalDelegations := make([]*data.Role, len(delegationInfo.Roles))
+	copy(canonicalDelegations, delegationInfo.Roles)
 	delegationKeys := delegationInfo.Keys
 	for i, delegation := range canonicalDelegations {
 		canonicalKeyIDs := []string{}
 		for _, keyID := range delegation.KeyIDs {
 			pubKey, ok := delegationKeys[keyID]
 			if !ok {
-				return []data.Role{}, fmt.Errorf("Could not translate canonical key IDs for %s", delegation.Name)
+				return nil, fmt.Errorf("Could not translate canonical key IDs for %s", delegation.Name)
 			}
 			canonicalKeyID, err := utils.CanonicalKeyID(pubKey)
 			if err != nil {
-				return []data.Role{}, fmt.Errorf("Could not translate canonical key IDs for %s: %v", delegation.Name, err)
+				return nil, fmt.Errorf("Could not translate canonical key IDs for %s: %v", delegation.Name, err)
 			}
 			canonicalKeyIDs = append(canonicalKeyIDs, canonicalKeyID)
 		}

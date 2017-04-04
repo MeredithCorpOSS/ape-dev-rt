@@ -283,7 +283,6 @@ func (s *DockerSuite) TestSaveDirectoryPermissions(c *check.C) {
 
 			f, err := os.Open(layerPath)
 			c.Assert(err, checker.IsNil, check.Commentf("failed to open %s: %s", layerPath, err))
-			defer f.Close()
 
 			entries, err := listTar(f)
 			for _, e := range entries {

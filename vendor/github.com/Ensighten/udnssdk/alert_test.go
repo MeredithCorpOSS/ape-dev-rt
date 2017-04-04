@@ -84,8 +84,8 @@ func Test_Alerts_Select(t *testing.T) {
 	}
 	for i, a := range alerts {
 		w := want[i]
-		if a != w {
-			t.Errorf("alerts[%d]: %+v, want: %+v", i, a, w)
+		if !a.Equal(w) {
+			t.Errorf("alerts[%d]: %#v, want: %#v", i, a, w)
 		}
 	}
 }

@@ -21,9 +21,6 @@ const (
 	logLabelsKey  = "labels"
 	logEnvKey     = "env"
 	logCmdKey     = "gcp-log-cmd"
-	logZoneKey    = "gcp-meta-zone"
-	logNameKey    = "gcp-meta-name"
-	logIDKey      = "gcp-meta-id"
 )
 
 var (
@@ -145,12 +142,6 @@ func New(ctx logger.Context) (logger.Logger, error) {
 			Name: instanceName,
 			ID:   instanceID,
 		}
-	} else if ctx.Config[logZoneKey] != "" || ctx.Config[logNameKey] != "" || ctx.Config[logIDKey] != "" {
-		l.instance = &instanceInfo{
-			Zone: ctx.Config[logZoneKey],
-			Name: ctx.Config[logNameKey],
-			ID:   ctx.Config[logIDKey],
-		}
 	}
 
 	// The logger "overflows" at a rate of 10,000 logs per second and this
@@ -172,7 +163,7 @@ func New(ctx logger.Context) (logger.Logger, error) {
 func ValidateLogOpts(cfg map[string]string) error {
 	for k := range cfg {
 		switch k {
-		case projectOptKey, logLabelsKey, logEnvKey, logCmdKey, logZoneKey, logNameKey, logIDKey:
+		case projectOptKey, logLabelsKey, logEnvKey, logCmdKey:
 		default:
 			return fmt.Errorf("%q is not a valid option for the gcplogs driver", k)
 		}

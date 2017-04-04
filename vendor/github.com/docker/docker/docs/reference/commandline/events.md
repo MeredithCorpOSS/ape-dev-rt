@@ -1,17 +1,12 @@
----
-title: "events"
-description: "The events command description and usage"
-keywords: ["events, container, report"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "events"
+description = "The events command description and usage"
+keywords = ["events, container, report"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # events
 
@@ -22,7 +17,6 @@ Get real time events from the server
 
 Options:
   -f, --filter value   Filter output based on conditions provided (default [])
-      --format string  Format the output using the given Go template
       --help           Print usage
       --since string   Show all events created since timestamp
       --until string   Stream events until this timestamp
@@ -30,7 +24,7 @@ Options:
 
 Docker containers report the following events:
 
-    attach, commit, copy, create, destroy, detach, die, exec_create, exec_detach, exec_start, export, health_status, kill, oom, pause, rename, resize, restart, start, stop, top, unpause, update
+    attach, commit, copy, create, destroy, detach, die, exec_create, exec_detach, exec_start, export, kill, oom, pause, rename, resize, restart, start, stop, top, unpause, update
 
 Docker images report the following events:
 
@@ -90,16 +84,6 @@ The currently supported filters are:
 * volume (`volume=<name or id>`)
 * network (`network=<name or id>`)
 * daemon (`daemon=<name or id>`)
-
-## Format
-
-If a format (`--format`) is specified, the given template will be executed
-instead of the default
-format. Go's [text/template](http://golang.org/pkg/text/template/) package
-describes all the details of the format.
-
-If a format is set to `{{json .}}`, the events are streamed as valid JSON
-Lines. For information about JSON Lines, please refer to http://jsonlines.org/ .
 
 ## Examples
 
@@ -196,22 +180,3 @@ relative to the current time on the client machine:
     $ docker events --filter 'type=plugin' (experimental)
     2016-07-25T17:30:14.825557616Z plugin pull ec7b87f2ce84330fe076e666f17dfc049d2d7ae0b8190763de94e1f2d105993f (name=tiborvass/no-remove:latest)
     2016-07-25T17:30:14.888127370Z plugin enable ec7b87f2ce84330fe076e666f17dfc049d2d7ae0b8190763de94e1f2d105993f (name=tiborvass/no-remove:latest)
-
-**Format:**
-
-    $ docker events --filter 'type=container' --format 'Type={{.Type}}  Status={{.Status}}  ID={{.ID}}'
-    Type=container  Status=create  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-    Type=container  Status=attach  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-    Type=container  Status=start  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-    Type=container  Status=resize  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-    Type=container  Status=die  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-    Type=container  Status=destroy  ID=2ee349dac409e97974ce8d01b70d250b85e0ba8189299c126a87812311951e26
-
-**Format (as JSON Lines):**
-
-    $ docker events --format '{{json .}}'
-    {"status":"create","id":"196016a57679bf42424484918746a9474cd905dd993c4d0f4..
-    {"status":"attach","id":"196016a57679bf42424484918746a9474cd905dd993c4d0f4..
-    {"Type":"network","Action":"connect","Actor":{"ID":"1b50a5bf755f6021dfa78e..
-    {"status":"start","id":"196016a57679bf42424484918746a9474cd905dd993c4d0f42..
-    {"status":"resize","id":"196016a57679bf42424484918746a9474cd905dd993c4d0f4..

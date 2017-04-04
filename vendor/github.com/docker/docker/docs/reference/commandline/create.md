@@ -1,17 +1,12 @@
----
-title: "create"
-description: "The create command description and usage"
-keywords: ["docker, create, container"]
----
-
-<!-- This file is maintained within the docker/docker Github
-     repository at https://github.com/docker/docker/. Make all
-     pull requests against that repo. If you see this file in
-     another repository, consider it read-only there, as it will
-     periodically be overwritten by the definitive file. Pull
-     requests which include edits to this file in other repositories
-     will be rejected.
--->
+<!--[metadata]>
++++
+title = "create"
+description = "The create command description and usage"
+keywords = ["docker, create, container"]
+[menu.main]
+parent = "smn_cli"
++++
+<![end-metadata]-->
 
 # create
 
@@ -95,7 +90,6 @@ Options:
       --read-only                   Mount the container's root filesystem as read only
       --restart string              Restart policy to apply when a container exits (default "no")
                                     Possible values are: no, on-failure[:max-retry], always, unless-stopped
-      --rm                          Automatically remove the container when it exits
       --runtime string              Runtime to use for this container
       --security-opt value          Security Options (default [])
       --shm-size string             Size of /dev/shm, default value is 64MB.
@@ -103,7 +97,6 @@ Options:
                                     Unit is optional and can be `b` (bytes), `k` (kilobytes), `m` (megabytes),
                                     or `g` (gigabytes). If you omit the unit, the system uses bytes.
       --stop-signal string          Signal to stop a container, SIGTERM by default (default "SIGTERM")
-      --stop-timeout=10             Timeout (in seconds) to stop a container
       --storage-opt value           Storage driver options for the container (default [])
       --sysctl value                Sysctl options (default map[])
       --tmpfs value                 Mount a tmpfs directory (default [])
@@ -114,10 +107,9 @@ Options:
                                     'host': Use the Docker host user namespace
                                     '': Use the Docker daemon user namespace specified by `--userns-remap` option.
       --uts string                  UTS namespace to use
-  -v, --volume value                Bind mount a volume (default []). The format
-                                    is `[host-src:]container-dest[:<options>]`.
-                                    The comma-delimited `options` are [rw|ro],
-                                    [z|Z], [[r]shared|[r]slave|[r]private], and
+  -v, --volume value                Bind mount a volume (default []). The comma-delimited
+                                    `options` are [rw|ro], [z|Z],
+                                    [[r]shared|[r]slave|[r]private], and
                                     [nocopy]. The 'host-src' is an absolute path
                                     or a name value.
       --volume-driver string        Optional volume driver for the container
@@ -176,14 +168,9 @@ Set storage driver options per container.
 
     $ docker create -it --storage-opt size=120G fedora /bin/bash
 
-This (size) will allow to set the container rootfs size to 120G at creation time.
-This option is only available for the `devicemapper`, `btrfs`, `overlay2`,
-`windowsfilter` and `zfs` graph drivers.
-For the `devicemapper`, `btrfs`, `windowsfilter` and `zfs` graph drivers,
-user cannot pass a size less than the Default BaseFS Size.
-For the `overlay2` storage driver, the size option is only available if the
-backing fs is `xfs` and mounted with the `pquota` mount option.
-Under these conditions, user can pass any size less then the backing fs size.
+This (size) will allow to set the container rootfs size to 120G at creation time. 
+User cannot pass a size less than the Default BaseFS Size. This option is only 
+available for the `devicemapper`, `btrfs`, `windowsfilter`, and `zfs` graph drivers.
 
 ### Specify isolation technology for container (--isolation)
 

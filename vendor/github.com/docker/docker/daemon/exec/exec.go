@@ -27,8 +27,6 @@ type Config struct {
 	Tty         bool
 	Privileged  bool
 	User        string
-	Env         []string
-	Pid         int
 }
 
 // NewConfig initializes the a new exec configuration
