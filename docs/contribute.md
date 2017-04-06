@@ -40,7 +40,7 @@ cd $GOPATH/src/github.com/TimeInc/ape-dev-rt
 ```
 
 **Dependency management**
-- We use [glide](https://github.com/Masterminds/glide) to manage dependencies
+- We currently use a custom patch of [glide](https://github.com/Masterminds/glide/pull/710) to manage dependencies as the official Glide manager currently has difficulties parsing govendor dependencies which Hashicorp uses. We also ignore the transitive dependency of [CoreOS Ignition](github.com/coreos/ignition) as it uses C source files and is not vital to the current use cases of RT.
 - Versions are specified in `glide.yaml`
 - When committing dependencies, split your PR into multiple commits; one with the vendored dependency and another commit with the actual code
 - Most use cases are covered on the [home page of Glide](https://glide.sh)
@@ -52,6 +52,8 @@ cd $GOPATH/src/github.com/TimeInc/ape-dev-rt
       - `glide update`
   - To add a new dependency:
       - `glide get github.com/user/repo/package`
+  - To clear the Glide cache:
+      - `glide cc`
 
 # Debugging
 
