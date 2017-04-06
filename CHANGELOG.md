@@ -1,15 +1,26 @@
-## 0.8.1 (Unreleased)
+## 0.8.2 (Unreleased)
 
 BREAKING CHANGES:
 
 IMPROVEMENTS:
+
+## 0.8.1 (April 6, 2017)
+
+BREAKING CHANGES:
+
+IMPROVEMENTS:
+ - Upgraded to Terraform v0.8.8
+
+BUG FIXES:
+- Fixed RDS graphing bug [GH-294]
+- Fixed parsing error for computed values [GH-294]
 
 ## 0.8.0 (December 19, 2016)
 
 BREAKING CHANGES:
 
 IMPROVEMENTS:
- - Upgraded to Terraform v0.8
+ - Upgraded to Terraform v0.8.0
 
 ## 0.7.0 (December 16, 2016)
 
