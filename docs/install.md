@@ -6,3 +6,9 @@ We use Homebrew Cask for [distribution](https://github.com/TimeInc/homebrew-cask
 brew tap timeinc/cask-tap git@github.com:timeinc/homebrew-cask-tap.git
 brew cask install ape-dev-rt
 ```
+
+To upgrade to a new version, run:
+
+```
+brew update && brew cask reinstall ape-dev-rt
+```
