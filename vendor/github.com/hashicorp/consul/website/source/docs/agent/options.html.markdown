@@ -115,10 +115,8 @@ will exit with an error at startup.
   [`-bind` command-line flag](#_bind), and if this is not specified, the `-bind` option is used. This is available in Consul 0.7.1 and later.
 
 * <a name="_client"></a><a href="#_client">`-client`</a> - The address to which
-  Consul will bind client interfaces,
-  including the HTTP, DNS, and RPC servers. By default, this is "127.0.0.1",
-  allowing only loopback connections. The RPC address is used by other Consul
-  commands, such as `consul members`, in order to query a running Consul agent.
+  Consul will bind client interfaces, including the HTTP and DNS servers. By default,
+  this is "127.0.0.1", allowing only loopback connections.
 
 * <a name="_config_file"></a><a href="#_config_file">`-config-file`</a> - A configuration file
   to load. For more information on
@@ -313,6 +311,11 @@ will exit with an error at startup.
   use. This defaults to the latest version. This should be set only when [upgrading](/docs/upgrading.html).
   You can view the protocol versions supported by Consul by running `consul -v`.
 
+* <a name="_raft_protocol"></a><a href="#_raft_protocol">`-raft-protocol`</a> - This controls the internal
+  version of the Raft consensus protocol used for server communications. This defaults to 2 but must
+  be set to 3 in order to gain access to Autopilot features, with the exception of
+  [`cleanup_dead_servers`](#cleanup_dead_servers).
+
 * <a name="_recursor"></a><a href="#_recursor">`-recursor`</a> - Specifies the address of an upstream DNS
   server. This option may be provided multiple times, and is functionally
   equivalent to the [`recursors` configuration option](#recursors).
@@ -492,16 +495,15 @@ Consul will not enable TLS for the HTTP API unless the `https` port has been ass
 * <a name="addresses"></a><a href="#addresses">`addresses`</a> - This is a nested object that allows
   setting bind addresses.
   <br><br>
-  Both `rpc` and `http` support binding to Unix domain sockets. A socket can be
+  `http` supports binding to a Unix domain socket. A socket can be
   specified in the form `unix:///path/to/socket`. A new domain socket will be
   created at the given path. If the specified file path already exists, Consul
   will attempt to clear the file and create the domain socket in its place. The
   permissions of the socket file are tunable via the [`unix_sockets` config construct](#unix_sockets).
   <br><br>
   When running Consul agent commands against Unix socket interfaces, use the
-  `-rpc-addr` or `-http-addr` arguments to specify the path to the socket. You
-  can also place the desired values in `CONSUL_RPC_ADDR` and `CONSUL_HTTP_ADDR`
-  environment variables.
+  `-http-addr` argument to specify the path to the socket. You can also place
+  the desired values in the `CONSUL_HTTP_ADDR` environment variable.
   <br><br>
   For TCP addresses, the variable values should be an IP address with the port. For
   example: `10.0.0.1:8500` and not `10.0.0.1`. However, ports are set separately in the
@@ -511,7 +513,6 @@ Consul will not enable TLS for the HTTP API unless the `https` port has been ass
   * `dns` - The DNS server. Defaults to `client_addr`
   * `http` - The HTTP API. Defaults to `client_addr`
   * `https` - The HTTPS API. Defaults to `client_addr`
-  * `rpc` - The CLI RPC endpoint. Defaults to `client_addr`
 * <a name="advertise_addr"></a><a href="#advertise_addr">`advertise_addr`</a> Equivalent to
   the [`-advertise` command-line flag](#_advertise).
 
@@ -554,6 +555,29 @@ Consul will not enable TLS for the HTTP API unless the `https` port has been ass
 
 * <a name="atlas_endpoint"></a><a href="#atlas_endpoint">`atlas_endpoint`</a> Equivalent to the
   [`-atlas-endpoint` command-line flag](#_atlas_endpoint).
+
+* <a name="autopilot"></a><a href="#autopilot">`autopilot`</a> Added in Consul 0.8, this object
+  allows a number of sub-keys to be set which can configure operator-friendly settings for Consul servers.
+  For more information about Autopilot, see the [Autopilot Guide](/docs/guides/autopilot.html).
+  <br><br>
+  The following sub-keys are available:
+
+  * <a name="cleanup_dead_servers"></a><a href="#cleanup_dead_servers">`cleanup_dead_servers`</a> - This controls
+  the automatic removal of dead server nodes periodically and whenever a new server is added to the cluster.
+  Defaults to `true`.
+
+  * <a name="last_contact_threshold"></a><a href="#last_contact_threshold">`last_contact_threshold`</a> - Controls
+  the maximum amount of time a server can go without contact from the leader before being considered unhealthy.
+  Must be a duration value such as `10s`. Defaults to `200ms`.
+
+  * <a name="max_trailing_threshold"></a><a href="#max_trailing_threshold">`max_trailing_threshold`</a> - Controls
+  the maximum number of log entries that a server can trail the leader by before being considered unhealthy. Defaults
+  to 250.
+
+  * <a name="server_stabilization_time"></a><a href="#server_stabilization_time">`server_stabilization_time`</a> -
+  Controls the minimum amount of time a server must be stable in the 'healthy' state before being added to the
+  cluster. Only takes effect if all servers are running Raft protocol version 3 or higher. Must be a duration value
+  such as `30s`. Defaults to `10s`.
 
 * <a name="bootstrap"></a><a href="#bootstrap">`bootstrap`</a> Equivalent to the
   [`-bootstrap` command-line flag](#_bootstrap).
@@ -753,13 +777,15 @@ Consul will not enable TLS for the HTTP API unless the `https` port has been ass
     * <a name="dns_port"></a><a href="#dns_port">`dns`</a> - The DNS server, -1 to disable. Default 8600.
     * <a name="http_port"></a><a href="#http_port">`http`</a> - The HTTP API, -1 to disable. Default 8500.
     * <a name="https_port"></a><a href="#https_port">`https`</a> - The HTTPS API, -1 to disable. Default -1 (disabled).
-    * <a name="rpc_port"></a><a href="#rpc_port">`rpc`</a> - The CLI RPC endpoint. Default 8400.
     * <a name="serf_lan_port"></a><a href="#serf_lan_port">`serf_lan`</a> - The Serf LAN port. Default 8301.
     * <a name="serf_wan_port"></a><a href="#serf_wan_port">`serf_wan`</a> - The Serf WAN port. Default 8302.
     * <a name="server_rpc_port"></a><a href="#server_rpc_port">`server`</a> - Server RPC address. Default 8300.
 
 * <a name="protocol"></a><a href="#protocol">`protocol`</a> Equivalent to the
   [`-protocol` command-line flag](#_protocol).
+
+* <a name="raft_protocol"></a><a href="#raft_protocol">`raft_protocol`</a> Equivalent to the
+  [`-raft-protocol` command-line flag](#_raft_protocol).
 
 * <a name="reap"></a><a href="#reap">`reap`</a> This controls Consul's automatic reaping of child processes,
   which is useful if Consul is running as PID 1 in a Docker container. If this isn't specified, then Consul will
@@ -998,7 +1024,7 @@ Consul will not enable TLS for the HTTP API unless the `https` port has been ass
 * <a name="unix_sockets"></a><a href="#unix_sockets">`unix_sockets`</a> - This
   allows tuning the ownership and permissions of the
   Unix domain socket files created by Consul. Domain sockets are only used if
-  the HTTP or RPC addresses are configured with the `unix://` prefix.
+  the HTTP address is configured with the `unix://` prefix.
   <br>
   <br>
   It is important to note that this option may have different effects on
@@ -1060,9 +1086,6 @@ port.
 
 * Serf WAN (Default 8302). This is used by servers to gossip over the
   WAN to other servers. TCP and UDP.
-
-* CLI RPC (Default 8400). This is used by all agents to handle RPC
-  from the CLI. TCP only.
 
 * HTTP API (Default 8500). This is used by clients to talk to the HTTP
   API. TCP only.

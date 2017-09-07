@@ -11,5 +11,20 @@ func TestGetRequestStatus(t *testing.T) {
 	if resp.StatusCode != want {
 		t.Errorf(bad_status(want, resp.StatusCode))
 	}
+}
 
+
+func TestListRequests(t *testing.T) {
+	setupTestEnv()
+	want := 200
+	resp := ListRequests()
+
+	if resp.StatusCode != want {
+		t.Errorf(bad_status(want, resp.StatusCode))
+	}
+
+	req := GetRequest(resp.Items[0].ID)
+	if req.StatusCode != want {
+		t.Errorf(bad_status(want, req.StatusCode))
+	}
 }

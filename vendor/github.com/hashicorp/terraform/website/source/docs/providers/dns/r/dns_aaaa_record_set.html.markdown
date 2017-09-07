@@ -1,24 +1,27 @@
 ---
 layout: "dns"
 page_title: "DNS: dns_aaaa_record_set"
-sidebar_current: "docs-dns-record"
+sidebar_current: "docs-dns-aaaa-record-set"
 description: |-
   Creates a AAAA type DNS record set.
 ---
 
-# dns\_a\_record\_set
+# dns_aaaa_record_set
 
 Creates a AAAA type DNS record set.
 
 ## Example Usage
 
-```
-  resource "dns_aaaa_record_set" "www" {
-    zone = "example.com."
-    name = "www"
-    addresses = ["fdd5:e282:43b8:5303:dead:beef:cafe:babe", "fdd5:e282:43b8:5303:cafe:babe:dead:beef"]
-    ttl = 300
-  }
+```hcl
+resource "dns_aaaa_record_set" "www" {
+  zone = "example.com."
+  name = "www"
+  addresses = [
+    "fdd5:e282:43b8:5303:dead:beef:cafe:babe",
+    "fdd5:e282:43b8:5303:cafe:babe:dead:beef",
+  ]
+  ttl = 300
+}
 ```
 
 ## Argument Reference
@@ -38,4 +41,3 @@ The following attributes are exported:
 * `name` - See Argument Reference above.
 * `addresses` - See Argument Reference above.
 * `ttl` - See Argument Reference above.
-

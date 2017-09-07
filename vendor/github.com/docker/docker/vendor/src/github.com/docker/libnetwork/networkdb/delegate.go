@@ -25,6 +25,10 @@ func (nDB *NetworkDB) handleNetworkEvent(nEvent *NetworkEvent) bool {
 	nDB.Lock()
 	defer nDB.Unlock()
 
+	if nEvent.NodeName == nDB.config.NodeName {
+		return false
+	}
+
 	nodeNetworks, ok := nDB.networks[nEvent.NodeName]
 	if !ok {
 		// We haven't heard about this node at all.  Ignore the leave
@@ -49,6 +53,7 @@ func (nDB *NetworkDB) handleNetworkEvent(nEvent *NetworkEvent) bool {
 			n.leaveTime = time.Now()
 		}
 
+		nDB.addNetworkNode(nEvent.NetworkID, nEvent.NodeName)
 		return true
 	}
 
@@ -62,7 +67,7 @@ func (nDB *NetworkDB) handleNetworkEvent(nEvent *NetworkEvent) bool {
 		ltime: nEvent.LTime,
 	}
 
-	nDB.networkNodes[nEvent.NetworkID] = append(nDB.networkNodes[nEvent.NetworkID], nEvent.NodeName)
+	nDB.addNetworkNode(nEvent.NetworkID, nEvent.NodeName)
 	return true
 }
 
@@ -71,28 +76,43 @@ func (nDB *NetworkDB) handleTableEvent(tEvent *TableEvent) bool {
 	// time.
 	nDB.tableClock.Witness(tEvent.LTime)
 
-	if entry, err := nDB.getEntry(tEvent.TableName, tEvent.NetworkID, tEvent.Key); err == nil {
+	// Ignore the table events for networks that are in the process of going away
+	nDB.RLock()
+	networks := nDB.networks[nDB.config.NodeName]
+	network, ok := networks[tEvent.NetworkID]
+	nDB.RUnlock()
+	if !ok || network.leaving {
+		return true
+	}
+
+	e, err := nDB.getEntry(tEvent.TableName, tEvent.NetworkID, tEvent.Key)
+	if err != nil && tEvent.Type == TableEventTypeDelete {
+		// If it is a delete event and we don't have the entry here nothing to do.
+		return false
+	}
+
+	if err == nil {
 		// We have the latest state. Ignore the event
 		// since it is stale.
-		if entry.ltime >= tEvent.LTime {
+		if e.ltime >= tEvent.LTime {
 			return false
 		}
 	}
 
-	entry := &entry{
+	e = &entry{
 		ltime:    tEvent.LTime,
 		node:     tEvent.NodeName,
 		value:    tEvent.Value,
 		deleting: tEvent.Type == TableEventTypeDelete,
 	}
 
-	if entry.deleting {
-		entry.deleteTime = time.Now()
+	if e.deleting {
+		e.deleteTime = time.Now()
 	}
 
 	nDB.Lock()
-	nDB.indexes[byTable].Insert(fmt.Sprintf("/%s/%s/%s", tEvent.TableName, tEvent.NetworkID, tEvent.Key), entry)
-	nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", tEvent.NetworkID, tEvent.TableName, tEvent.Key), entry)
+	nDB.indexes[byTable].Insert(fmt.Sprintf("/%s/%s/%s", tEvent.TableName, tEvent.NetworkID, tEvent.Key), e)
+	nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", tEvent.NetworkID, tEvent.TableName, tEvent.Key), e)
 	nDB.Unlock()
 
 	var op opType
@@ -217,9 +237,11 @@ func (nDB *NetworkDB) handleBulkSync(buf []byte) {
 	}
 
 	var nodeAddr net.IP
+	nDB.RLock()
 	if node, ok := nDB.nodes[bsm.NodeName]; ok {
 		nodeAddr = node.Addr
 	}
+	nDB.RUnlock()
 
 	if err := nDB.bulkSyncNode(bsm.Networks, bsm.NodeName, false); err != nil {
 		logrus.Errorf("Error in responding to bulk sync from node %s: %v", nodeAddr, err)

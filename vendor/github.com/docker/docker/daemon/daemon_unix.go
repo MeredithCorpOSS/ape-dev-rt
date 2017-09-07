@@ -16,6 +16,10 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/blkiodev"
+	pblkiodev "github.com/docker/docker/api/types/blkiodev"
+	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/idtools"
@@ -24,10 +28,6 @@ import (
 	"github.com/docker/docker/pkg/sysinfo"
 	"github.com/docker/docker/runconfig"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
-	"github.com/docker/engine-api/types"
-	"github.com/docker/engine-api/types/blkiodev"
-	pblkiodev "github.com/docker/engine-api/types/blkiodev"
-	containertypes "github.com/docker/engine-api/types/container"
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/drivers/bridge"
@@ -38,7 +38,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/opencontainers/runc/libcontainer/label"
 	"github.com/opencontainers/runc/libcontainer/user"
-	"github.com/opencontainers/specs/specs-go"
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const (
@@ -464,10 +464,13 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 	}
 
 	w, err := verifyContainerResources(&hostConfig.Resources, sysInfo, update)
+
+	// no matter err is nil or not, w could have data in itself.
+	warnings = append(warnings, w...)
+
 	if err != nil {
 		return warnings, err
 	}
-	warnings = append(warnings, w...)
 
 	if hostConfig.ShmSize < 0 {
 		return warnings, fmt.Errorf("SHM size can not be less than 0")
@@ -487,14 +490,11 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 		if hostConfig.Privileged {
 			return warnings, fmt.Errorf("Privileged mode is incompatible with user namespaces")
 		}
-		if hostConfig.NetworkMode.IsHost() {
+		if hostConfig.NetworkMode.IsHost() && !hostConfig.UsernsMode.IsHost() {
 			return warnings, fmt.Errorf("Cannot share the host's network namespace when user namespaces are enabled")
 		}
-		if hostConfig.PidMode.IsHost() {
+		if hostConfig.PidMode.IsHost() && !hostConfig.UsernsMode.IsHost() {
 			return warnings, fmt.Errorf("Cannot share the host PID namespace when user namespaces are enabled")
-		}
-		if hostConfig.ReadonlyRootfs {
-			return warnings, fmt.Errorf("Cannot use the --read-only option when user namespaces are enabled")
 		}
 	}
 	if hostConfig.CgroupParent != "" && UsingSystemd(daemon.configStore) {
@@ -566,11 +566,7 @@ func verifyDaemonSettings(config *Config) error {
 	if config.Runtimes == nil {
 		config.Runtimes = make(map[string]types.Runtime)
 	}
-	stockRuntimeOpts := []string{}
-	if UsingSystemd(config) {
-		stockRuntimeOpts = append(stockRuntimeOpts, "--systemd-cgroup=true")
-	}
-	config.Runtimes[stockRuntimeName] = types.Runtime{Path: DefaultRuntimeBinary, Args: stockRuntimeOpts}
+	config.Runtimes[stockRuntimeName] = types.Runtime{Path: DefaultRuntimeBinary}
 
 	return nil
 }
@@ -603,13 +599,7 @@ func configureMaxThreads(config *Config) error {
 // configureKernelSecuritySupport configures and validates security support for the kernel
 func configureKernelSecuritySupport(config *Config, driverName string) error {
 	if config.EnableSelinuxSupport {
-		if selinuxEnabled() {
-			// As Docker on overlayFS and SELinux are incompatible at present, error on overlayfs being enabled
-			if driverName == "overlay" {
-				return fmt.Errorf("SELinux is not supported with the %s graph driver", driverName)
-			}
-			logrus.Debug("SELinux enabled successfully")
-		} else {
+		if !selinuxEnabled() {
 			logrus.Warn("Docker could not enable SELinux on the host system")
 		}
 	} else {
@@ -1003,6 +993,20 @@ func setupDaemonRoot(config *Config, rootDir string, rootUID, rootGID int) error
 		// Create the root directory if it doesn't exist
 		if err := idtools.MkdirAllAs(config.Root, 0700, rootUID, rootGID); err != nil {
 			return fmt.Errorf("Cannot create daemon root: %s: %v", config.Root, err)
+		}
+		// we also need to verify that any pre-existing directories in the path to
+		// the graphroot won't block access to remapped root--if any pre-existing directory
+		// has strict permissions that don't allow "x", container start will fail, so
+		// better to warn and fail now
+		dirPath := config.Root
+		for {
+			dirPath = filepath.Dir(dirPath)
+			if dirPath == "/" {
+				break
+			}
+			if !idtools.CanAccess(dirPath, rootUID, rootGID) {
+				return fmt.Errorf("A subdirectory in your graphroot path (%s) restricts access to the remapped root uid/gid; please fix by allowing 'o+x' permissions on existing directories.", config.Root)
+			}
 		}
 	}
 	return nil

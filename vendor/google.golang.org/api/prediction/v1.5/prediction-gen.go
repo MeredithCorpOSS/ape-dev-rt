@@ -71,9 +71,10 @@ func New(client *http.Client) (*Service, error) {
 }
 
 type Service struct {
-	client    *http.Client
-	BasePath  string // API endpoint base URL
-	UserAgent string // optional additional User-Agent fragment
+	client                    *http.Client
+	BasePath                  string // API endpoint base URL
+	UserAgent                 string // optional additional User-Agent fragment
+	GoogleClientHeaderElement string // client header fragment, for Google use only
 
 	Hostedmodels *HostedmodelsService
 
@@ -85,6 +86,10 @@ func (s *Service) userAgent() string {
 		return googleapi.UserAgent
 	}
 	return googleapi.UserAgent + " " + s.UserAgent
+}
+
+func (s *Service) clientHeader() string {
+	return gensupport.GoogleClientHeader("20170210", s.GoogleClientHeaderElement)
 }
 
 func NewHostedmodelsService(s *Service) *HostedmodelsService {
@@ -318,6 +323,22 @@ func (s *AnalyzeDataDescriptionFeaturesNumeric) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *AnalyzeDataDescriptionFeaturesNumeric) UnmarshalJSON(data []byte) error {
+	type noMethod AnalyzeDataDescriptionFeaturesNumeric
+	var s1 struct {
+		Mean     gensupport.JSONFloat64 `json:"mean"`
+		Variance gensupport.JSONFloat64 `json:"variance"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Mean = float64(s1.Mean)
+	s.Variance = float64(s1.Variance)
+	return nil
+}
+
 // AnalyzeDataDescriptionFeaturesText: Description of multiple-word text
 // values of this feature.
 type AnalyzeDataDescriptionFeaturesText struct {
@@ -412,6 +433,22 @@ func (s *AnalyzeDataDescriptionOutputFeatureNumeric) MarshalJSON() ([]byte, erro
 	type noMethod AnalyzeDataDescriptionOutputFeatureNumeric
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
+}
+
+func (s *AnalyzeDataDescriptionOutputFeatureNumeric) UnmarshalJSON(data []byte) error {
+	type noMethod AnalyzeDataDescriptionOutputFeatureNumeric
+	var s1 struct {
+		Mean     gensupport.JSONFloat64 `json:"mean"`
+		Variance gensupport.JSONFloat64 `json:"variance"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Mean = float64(s1.Mean)
+	s.Variance = float64(s1.Variance)
+	return nil
 }
 
 type AnalyzeDataDescriptionOutputFeatureText struct {
@@ -629,6 +666,20 @@ func (s *Output) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *Output) UnmarshalJSON(data []byte) error {
+	type noMethod Output
+	var s1 struct {
+		OutputValue gensupport.JSONFloat64 `json:"outputValue"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.OutputValue = float64(s1.OutputValue)
+	return nil
+}
+
 type OutputOutputMulti struct {
 	// Label: The class label.
 	Label string `json:"label,omitempty"`
@@ -657,6 +708,20 @@ func (s *OutputOutputMulti) MarshalJSON() ([]byte, error) {
 	type noMethod OutputOutputMulti
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
+}
+
+func (s *OutputOutputMulti) UnmarshalJSON(data []byte) error {
+	type noMethod OutputOutputMulti
+	var s1 struct {
+		Score gensupport.JSONFloat64 `json:"score"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Score = float64(s1.Score)
+	return nil
 }
 
 type Training struct {
@@ -786,6 +851,24 @@ func (s *TrainingModelInfo) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *TrainingModelInfo) UnmarshalJSON(data []byte) error {
+	type noMethod TrainingModelInfo
+	var s1 struct {
+		ClassWeightedAccuracy  gensupport.JSONFloat64 `json:"classWeightedAccuracy"`
+		ClassificationAccuracy gensupport.JSONFloat64 `json:"classificationAccuracy"`
+		MeanSquaredError       gensupport.JSONFloat64 `json:"meanSquaredError"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.ClassWeightedAccuracy = float64(s1.ClassWeightedAccuracy)
+	s.ClassificationAccuracy = float64(s1.ClassificationAccuracy)
+	s.MeanSquaredError = float64(s1.MeanSquaredError)
+	return nil
+}
+
 type TrainingTrainingInstances struct {
 	// CsvInstance: The input features for this instance
 	CsvInstance []interface{} `json:"csvInstance,omitempty"`
@@ -900,6 +983,7 @@ func (c *HostedmodelsPredictCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.input)
 	if err != nil {
@@ -1043,6 +1127,7 @@ func (c *TrainedmodelsAnalyzeCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -1169,6 +1254,7 @@ func (c *TrainedmodelsDeleteCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "trainedmodels/{id}")
@@ -1275,6 +1361,7 @@ func (c *TrainedmodelsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -1401,6 +1488,7 @@ func (c *TrainedmodelsInsertCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.training)
 	if err != nil {
@@ -1543,6 +1631,7 @@ func (c *TrainedmodelsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -1692,6 +1781,7 @@ func (c *TrainedmodelsPredictCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.input)
 	if err != nil {
@@ -1825,6 +1915,7 @@ func (c *TrainedmodelsUpdateCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.update)
 	if err != nil {

@@ -34,6 +34,31 @@ func TestCreateVolume(t *testing.T) {
 	}
 }
 
+func TestCreateVolumeFail(t *testing.T) {
+	setupTestEnv()
+	want := 422
+	var request = Volume{
+		Properties: VolumeProperties{
+			Size:             5,
+			Name:             "Volume Test",
+			Image:            "rewar",
+			Type:             "HDD",
+			ImagePassword:    "test1234",
+			AvailabilityZone: "ZONE_3",
+		},
+	}
+
+	dcID = mkdcid("GO SDK VOLUME DC")
+	resp := CreateVolume(dcID, request)
+
+	volumeId = resp.Id
+	fmt.Println(resp.Properties.AvailabilityZone)
+	if resp.StatusCode != want {
+		fmt.Println(string(resp.Response))
+		t.Errorf(bad_status(want, resp.StatusCode))
+	}
+}
+
 func TestListVolumes(t *testing.T) {
 	want := 200
 	resp := ListVolumes(dcID)

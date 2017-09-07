@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -22,98 +23,98 @@ func resourceLibratoSpaceChart() *schema.Resource {
 		Delete: resourceLibratoSpaceChartDelete,
 
 		Schema: map[string]*schema.Schema{
-			"space_id": &schema.Schema{
+			"space_id": {
 				Type:     schema.TypeInt,
 				Required: true,
 				ForceNew: true,
 			},
-			"name": &schema.Schema{
+			"name": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"type": &schema.Schema{
+			"type": {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
 			},
-			"min": &schema.Schema{
+			"min": {
 				Type:     schema.TypeFloat,
 				Default:  math.NaN(),
 				Optional: true,
 			},
-			"max": &schema.Schema{
+			"max": {
 				Type:     schema.TypeFloat,
 				Default:  math.NaN(),
 				Optional: true,
 			},
-			"label": &schema.Schema{
+			"label": {
 				Type:     schema.TypeString,
 				Optional: true,
 			},
-			"related_space": &schema.Schema{
+			"related_space": {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
-			"stream": &schema.Schema{
+			"stream": {
 				Type:     schema.TypeSet,
 				Optional: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"metric": &schema.Schema{
+						"metric": {
 							Type:          schema.TypeString,
 							Optional:      true,
 							ConflictsWith: []string{"stream.composite"},
 						},
-						"source": &schema.Schema{
+						"source": {
 							Type:          schema.TypeString,
 							Optional:      true,
 							ConflictsWith: []string{"stream.composite"},
 						},
-						"group_function": &schema.Schema{
+						"group_function": {
 							Type:          schema.TypeString,
 							Optional:      true,
 							ConflictsWith: []string{"stream.composite"},
 						},
-						"composite": &schema.Schema{
+						"composite": {
 							Type:          schema.TypeString,
 							Optional:      true,
 							ConflictsWith: []string{"stream.metric", "stream.source", "stream.group_function"},
 						},
-						"summary_function": &schema.Schema{
+						"summary_function": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"name": &schema.Schema{
+						"name": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"color": &schema.Schema{
+						"color": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"units_short": &schema.Schema{
+						"units_short": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"units_long": &schema.Schema{
+						"units_long": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"min": &schema.Schema{
+						"min": {
 							Type:     schema.TypeFloat,
 							Default:  math.NaN(),
 							Optional: true,
 						},
-						"max": &schema.Schema{
+						"max": {
 							Type:     schema.TypeFloat,
 							Default:  math.NaN(),
 							Optional: true,
 						},
-						"transform_function": &schema.Schema{
+						"transform_function": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"period": &schema.Schema{
+						"period": {
 							Type:     schema.TypeInt,
 							Optional: true,
 						},
@@ -339,9 +340,16 @@ func resourceLibratoSpaceChartUpdate(d *schema.ResourceData, meta interface{}) e
 		return err
 	}
 
+	// Just to have whole object for comparison before/after update
+	fullChart, _, err := client.Spaces.GetChart(spaceID, uint(chartID))
+	if err != nil {
+		return err
+	}
+
 	spaceChart := new(librato.SpaceChart)
 	if d.HasChange("name") {
 		spaceChart.Name = librato.String(d.Get("name").(string))
+		fullChart.Name = spaceChart.Name
 	}
 	if d.HasChange("min") {
 		if math.IsNaN(d.Get("min").(float64)) {
@@ -349,6 +357,7 @@ func resourceLibratoSpaceChartUpdate(d *schema.ResourceData, meta interface{}) e
 		} else {
 			spaceChart.Min = librato.Float(d.Get("min").(float64))
 		}
+		fullChart.Min = spaceChart.Min
 	}
 	if d.HasChange("max") {
 		if math.IsNaN(d.Get("max").(float64)) {
@@ -356,12 +365,15 @@ func resourceLibratoSpaceChartUpdate(d *schema.ResourceData, meta interface{}) e
 		} else {
 			spaceChart.Max = librato.Float(d.Get("max").(float64))
 		}
+		fullChart.Max = spaceChart.Max
 	}
 	if d.HasChange("label") {
 		spaceChart.Label = librato.String(d.Get("label").(string))
+		fullChart.Label = spaceChart.Label
 	}
 	if d.HasChange("related_space") {
 		spaceChart.RelatedSpace = librato.Uint(d.Get("related_space").(uint))
+		fullChart.RelatedSpace = spaceChart.RelatedSpace
 	}
 	if d.HasChange("stream") {
 		vs := d.Get("stream").(*schema.Set)
@@ -405,11 +417,36 @@ func resourceLibratoSpaceChartUpdate(d *schema.ResourceData, meta interface{}) e
 			streams[i] = stream
 		}
 		spaceChart.Streams = streams
+		fullChart.Streams = streams
 	}
 
-	_, err = client.Spaces.EditChart(spaceID, uint(chartID), spaceChart)
+	_, err = client.Spaces.UpdateChart(spaceID, uint(chartID), spaceChart)
 	if err != nil {
 		return fmt.Errorf("Error updating Librato space chart %s: %s", *spaceChart.Name, err)
+	}
+
+	// Wait for propagation since Librato updates are eventually consistent
+	wait := resource.StateChangeConf{
+		Pending:                   []string{fmt.Sprintf("%t", false)},
+		Target:                    []string{fmt.Sprintf("%t", true)},
+		Timeout:                   5 * time.Minute,
+		MinTimeout:                2 * time.Second,
+		ContinuousTargetOccurence: 5,
+		Refresh: func() (interface{}, string, error) {
+			log.Printf("[DEBUG] Checking if Librato Space Chart %d was updated yet", chartID)
+			changedChart, _, getErr := client.Spaces.GetChart(spaceID, uint(chartID))
+			if getErr != nil {
+				return changedChart, "", getErr
+			}
+			isEqual := reflect.DeepEqual(*fullChart, *changedChart)
+			log.Printf("[DEBUG] Updated Librato Space Chart %d match: %t", chartID, isEqual)
+			return changedChart, fmt.Sprintf("%t", isEqual), nil
+		},
+	}
+
+	_, err = wait.WaitForState()
+	if err != nil {
+		return fmt.Errorf("Failed updating Librato Space Chart %d: %s", chartID, err)
 	}
 
 	return resourceLibratoSpaceChartRead(d, meta)

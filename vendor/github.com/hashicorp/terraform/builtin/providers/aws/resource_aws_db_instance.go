@@ -25,6 +25,12 @@ func resourceAwsDbInstance() *schema.Resource {
 			State: resourceAwsDbInstanceImport,
 		},
 
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(40 * time.Minute),
+			Update: schema.DefaultTimeout(80 * time.Minute),
+			Delete: schema.DefaultTimeout(40 * time.Minute),
+		},
+
 		Schema: map[string]*schema.Schema{
 			"name": {
 				Type:     schema.TypeString,
@@ -95,11 +101,19 @@ func resourceAwsDbInstance() *schema.Resource {
 			},
 
 			"identifier": {
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ForceNew:      true,
+				ConflictsWith: []string{"identifier_prefix"},
+				ValidateFunc:  validateRdsIdentifier,
+			},
+			"identifier_prefix": {
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
 				ForceNew:     true,
-				ValidateFunc: validateRdsId,
+				ValidateFunc: validateRdsIdentifierPrefix,
 			},
 
 			"instance_class": {
@@ -207,7 +221,7 @@ func resourceAwsDbInstance() *schema.Resource {
 			"skip_final_snapshot": {
 				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  true,
+				Default:  false,
 			},
 
 			"copy_tags_to_snapshot": {
@@ -321,6 +335,16 @@ func resourceAwsDbInstance() *schema.Resource {
 				ForceNew: true,
 			},
 
+			"iam_database_authentication_enabled": {
+				Type:     schema.TypeBool,
+				Optional: true,
+			},
+
+			"resource_id": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+
 			"tags": tagsSchema(),
 		},
 	}
@@ -330,10 +354,16 @@ func resourceAwsDbInstanceCreate(d *schema.ResourceData, meta interface{}) error
 	conn := meta.(*AWSClient).rdsconn
 	tags := tagsFromMapRDS(d.Get("tags").(map[string]interface{}))
 
-	identifier := d.Get("identifier").(string)
-	// Generate a unique ID for the user
-	if identifier == "" {
-		identifier = resource.PrefixedUniqueId("tf-")
+	var identifier string
+	if v, ok := d.GetOk("identifier"); ok {
+		identifier = v.(string)
+	} else {
+		if v, ok := d.GetOk("identifier_prefix"); ok {
+			identifier = resource.PrefixedUniqueId(v.(string))
+		} else {
+			identifier = resource.UniqueId()
+		}
+
 		// SQL Server identifier size is max 15 chars, so truncate
 		if engine := d.Get("engine").(string); engine != "" {
 			if strings.Contains(strings.ToLower(engine), "sqlserver") {
@@ -401,7 +431,14 @@ func resourceAwsDbInstanceCreate(d *schema.ResourceData, meta interface{}) error
 		}
 
 		if attr, ok := d.GetOk("name"); ok {
-			opts.DBName = aws.String(attr.(string))
+			// "Note: This parameter [DBName] doesn't apply to the MySQL, PostgreSQL, or MariaDB engines."
+			// https://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_RestoreDBInstanceFromDBSnapshot.html
+			switch strings.ToLower(d.Get("engine").(string)) {
+			case "mysql", "postgres", "mariadb":
+				// skip
+			default:
+				opts.DBName = aws.String(attr.(string))
+			}
 		}
 
 		if attr, ok := d.GetOk("availability_zone"); ok {
@@ -480,7 +517,7 @@ func resourceAwsDbInstanceCreate(d *schema.ResourceData, meta interface{}) error
 					"maintenance", "renaming", "rebooting", "upgrading"},
 				Target:     []string{"available"},
 				Refresh:    resourceAwsDbInstanceStateRefreshFunc(d, meta),
-				Timeout:    40 * time.Minute,
+				Timeout:    d.Timeout(schema.TimeoutCreate),
 				MinTimeout: 10 * time.Second,
 				Delay:      30 * time.Second, // Wait 30 secs before starting
 			}
@@ -607,6 +644,10 @@ func resourceAwsDbInstanceCreate(d *schema.ResourceData, meta interface{}) error
 			opts.KmsKeyId = aws.String(attr.(string))
 		}
 
+		if attr, ok := d.GetOk("iam_database_authentication_enabled"); ok {
+			opts.EnableIAMDatabaseAuthentication = aws.Bool(attr.(bool))
+		}
+
 		log.Printf("[DEBUG] DB Instance create configuration: %#v", opts)
 		var err error
 		err = resource.Retry(5*time.Minute, func() *resource.RetryError {
@@ -638,7 +679,7 @@ func resourceAwsDbInstanceCreate(d *schema.ResourceData, meta interface{}) error
 			"maintenance", "renaming", "rebooting", "upgrading", "configuring-enhanced-monitoring"},
 		Target:     []string{"available"},
 		Refresh:    resourceAwsDbInstanceStateRefreshFunc(d, meta),
-		Timeout:    40 * time.Minute,
+		Timeout:    d.Timeout(schema.TimeoutCreate),
 		MinTimeout: 10 * time.Second,
 		Delay:      30 * time.Second, // Wait 30 secs before starting
 	}
@@ -665,6 +706,7 @@ func resourceAwsDbInstanceRead(d *schema.ResourceData, meta interface{}) error {
 
 	d.Set("name", v.DBName)
 	d.Set("identifier", v.DBInstanceIdentifier)
+	d.Set("resource_id", v.DbiResourceId)
 	d.Set("username", v.MasterUsername)
 	d.Set("engine", v.Engine)
 	d.Set("engine_version", v.EngineVersion)
@@ -683,6 +725,7 @@ func resourceAwsDbInstanceRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("multi_az", v.MultiAZ)
 	d.Set("kms_key_id", v.KmsKeyId)
 	d.Set("port", v.DbInstancePort)
+	d.Set("iam_database_authentication_enabled", v.IAMDatabaseAuthenticationEnabled)
 	if v.DBSubnetGroup != nil {
 		d.Set("db_subnet_group_name", v.DBSubnetGroup.DBSubnetGroupName)
 	}
@@ -811,7 +854,7 @@ func resourceAwsDbInstanceDelete(d *schema.ResourceData, meta interface{}) error
 			"modifying", "deleting", "available"},
 		Target:     []string{},
 		Refresh:    resourceAwsDbInstanceStateRefreshFunc(d, meta),
-		Timeout:    40 * time.Minute,
+		Timeout:    d.Timeout(schema.TimeoutDelete),
 		MinTimeout: 10 * time.Second,
 		Delay:      30 * time.Second, // Wait 30 secs before starting
 	}
@@ -832,6 +875,10 @@ func resourceAwsDbInstanceUpdate(d *schema.ResourceData, meta interface{}) error
 		DBInstanceIdentifier: aws.String(d.Id()),
 	}
 	d.SetPartial("apply_immediately")
+
+	if !d.Get("apply_immediately").(bool) {
+		log.Println("[INFO] Only settings updating, instance changes will be applied in next maintenance window")
+	}
 
 	requestUpdate := false
 	if d.HasChange("allocated_storage") || d.HasChange("iops") {
@@ -963,6 +1010,11 @@ func resourceAwsDbInstanceUpdate(d *schema.ResourceData, meta interface{}) error
 		requestUpdate = true
 	}
 
+	if d.HasChange("iam_database_authentication_enabled") {
+		req.EnableIAMDatabaseAuthentication = aws.Bool(d.Get("iam_database_authentication_enabled").(bool))
+		requestUpdate = true
+	}
+
 	log.Printf("[DEBUG] Send DB Instance Modification request: %t", requestUpdate)
 	if requestUpdate {
 		log.Printf("[DEBUG] DB Instance Modification request: %s", req)
@@ -978,7 +1030,7 @@ func resourceAwsDbInstanceUpdate(d *schema.ResourceData, meta interface{}) error
 				"maintenance", "renaming", "rebooting", "upgrading", "configuring-enhanced-monitoring", "moving-to-vpc"},
 			Target:     []string{"available"},
 			Refresh:    resourceAwsDbInstanceStateRefreshFunc(d, meta),
-			Timeout:    80 * time.Minute,
+			Timeout:    d.Timeout(schema.TimeoutUpdate),
 			MinTimeout: 10 * time.Second,
 			Delay:      30 * time.Second, // Wait 30 secs before starting
 		}

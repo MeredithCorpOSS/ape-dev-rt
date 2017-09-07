@@ -3,11 +3,14 @@ package agent
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/consul/structs"
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/raft"
-	"strconv"
+	"strings"
 )
 
 // OperatorRaftConfiguration is used to inspect the current Raft configuration.
@@ -105,7 +108,7 @@ func (s *HTTPServer) OperatorKeyringEndpoint(resp http.ResponseWriter, req *http
 	case "DELETE":
 		return s.KeyringRemove(resp, req, &args)
 	default:
-		resp.WriteHeader(405)
+		resp.WriteHeader(http.StatusMethodNotAllowed)
 		return nil, nil
 	}
 }
@@ -154,8 +157,155 @@ func keyringErrorsOrNil(responses []*structs.KeyringResponse) error {
 	var errs error
 	for _, response := range responses {
 		if response.Error != "" {
-			errs = multierror.Append(errs, fmt.Errorf(response.Error))
+			pool := response.Datacenter + " (LAN)"
+			if response.WAN {
+				pool = "WAN"
+			}
+			errs = multierror.Append(errs, fmt.Errorf("%s error: %s", pool, response.Error))
+			for key, message := range response.Messages {
+				errs = multierror.Append(errs, fmt.Errorf("%s: %s", key, message))
+			}
 		}
 	}
 	return errs
+}
+
+// OperatorAutopilotConfiguration is used to inspect the current Autopilot configuration.
+// This supports the stale query mode in case the cluster doesn't have a leader.
+func (s *HTTPServer) OperatorAutopilotConfiguration(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	// Switch on the method
+	switch req.Method {
+	case "GET":
+		var args structs.DCSpecificRequest
+		if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
+			return nil, nil
+		}
+
+		var reply structs.AutopilotConfig
+		if err := s.agent.RPC("Operator.AutopilotGetConfiguration", &args, &reply); err != nil {
+			return nil, err
+		}
+
+		out := api.AutopilotConfiguration{
+			CleanupDeadServers:      reply.CleanupDeadServers,
+			LastContactThreshold:    api.NewReadableDuration(reply.LastContactThreshold),
+			MaxTrailingLogs:         reply.MaxTrailingLogs,
+			ServerStabilizationTime: api.NewReadableDuration(reply.ServerStabilizationTime),
+			CreateIndex:             reply.CreateIndex,
+			ModifyIndex:             reply.ModifyIndex,
+		}
+
+		return out, nil
+	case "PUT":
+		var args structs.AutopilotSetConfigRequest
+		s.parseDC(req, &args.Datacenter)
+		s.parseToken(req, &args.Token)
+
+		var conf api.AutopilotConfiguration
+		if err := decodeBody(req, &conf, FixupConfigDurations); err != nil {
+			resp.WriteHeader(400)
+			resp.Write([]byte(fmt.Sprintf("Error parsing autopilot config: %v", err)))
+			return nil, nil
+		}
+
+		args.Config = structs.AutopilotConfig{
+			CleanupDeadServers:      conf.CleanupDeadServers,
+			LastContactThreshold:    conf.LastContactThreshold.Duration(),
+			MaxTrailingLogs:         conf.MaxTrailingLogs,
+			ServerStabilizationTime: conf.ServerStabilizationTime.Duration(),
+		}
+
+		// Check for cas value
+		params := req.URL.Query()
+		if _, ok := params["cas"]; ok {
+			casVal, err := strconv.ParseUint(params.Get("cas"), 10, 64)
+			if err != nil {
+				resp.WriteHeader(400)
+				resp.Write([]byte(fmt.Sprintf("Error parsing cas value: %v", err)))
+				return nil, nil
+			}
+			args.Config.ModifyIndex = casVal
+			args.CAS = true
+		}
+
+		var reply bool
+		if err := s.agent.RPC("Operator.AutopilotSetConfiguration", &args, &reply); err != nil {
+			return nil, err
+		}
+
+		// Only use the out value if this was a CAS
+		if !args.CAS {
+			return true, nil
+		} else {
+			return reply, nil
+		}
+	default:
+		resp.WriteHeader(http.StatusMethodNotAllowed)
+		return nil, nil
+	}
+}
+
+// FixupConfigDurations is used to handle parsing the duration fields in
+// the Autopilot config struct
+func FixupConfigDurations(raw interface{}) error {
+	rawMap, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	for key, val := range rawMap {
+		if strings.ToLower(key) == "lastcontactthreshold" ||
+			strings.ToLower(key) == "serverstabilizationtime" {
+			// Convert a string value into an integer
+			if vStr, ok := val.(string); ok {
+				dur, err := time.ParseDuration(vStr)
+				if err != nil {
+					return err
+				}
+				rawMap[key] = dur
+			}
+		}
+	}
+	return nil
+}
+
+// OperatorServerHealth is used to get the health of the servers in the local DC
+func (s *HTTPServer) OperatorServerHealth(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	if req.Method != "GET" {
+		resp.WriteHeader(http.StatusMethodNotAllowed)
+		return nil, nil
+	}
+
+	var args structs.DCSpecificRequest
+	if done := s.parse(resp, req, &args.Datacenter, &args.QueryOptions); done {
+		return nil, nil
+	}
+
+	var reply structs.OperatorHealthReply
+	if err := s.agent.RPC("Operator.ServerHealth", &args, &reply); err != nil {
+		return nil, err
+	}
+
+	// Reply with status 429 if something is unhealthy
+	if !reply.Healthy {
+		resp.WriteHeader(http.StatusTooManyRequests)
+	}
+
+	out := &api.OperatorHealthReply{
+		Healthy:          reply.Healthy,
+		FailureTolerance: reply.FailureTolerance,
+	}
+	for _, server := range reply.Servers {
+		out.Servers = append(out.Servers, api.ServerHealth{
+			ID:          server.ID,
+			Name:        server.Name,
+			SerfStatus:  server.SerfStatus.String(),
+			LastContact: api.NewReadableDuration(server.LastContact),
+			LastTerm:    server.LastTerm,
+			LastIndex:   server.LastIndex,
+			Healthy:     server.Healthy,
+			StableSince: server.StableSince.Round(time.Second).UTC(),
+		})
+	}
+
+	return out, nil
 }

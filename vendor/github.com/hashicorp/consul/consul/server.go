@@ -76,6 +76,18 @@ type Server struct {
 	// aclCache is the non-authoritative ACL cache.
 	aclCache *aclCache
 
+	// autopilotPolicy controls the behavior of Autopilot for certain tasks.
+	autopilotPolicy AutopilotPolicy
+
+	// autopilotRemoveDeadCh is used to trigger a check for dead server removals.
+	autopilotRemoveDeadCh chan struct{}
+
+	// autopilotShutdownCh is used to stop the Autopilot loop.
+	autopilotShutdownCh chan struct{}
+
+	// autopilotWaitGroup is used to block until Autopilot shuts down.
+	autopilotWaitGroup sync.WaitGroup
+
 	// Consul configuration
 	config *Config
 
@@ -144,6 +156,10 @@ type Server struct {
 	// destroy the session via standard session destroy processing
 	sessionTimers     map[string]*time.Timer
 	sessionTimersLock sync.Mutex
+
+	// serverHealths stores the current view of server healths.
+	serverHealths    map[string]*structs.ServerHealth
+	serverHealthLock sync.RWMutex
 
 	// tombstoneGC is used to track the pending GC invocations
 	// for the KV tombstones
@@ -222,19 +238,22 @@ func NewServer(config *Config) (*Server, error) {
 
 	// Create server.
 	s := &Server{
-		config:        config,
-		connPool:      NewPool(config.LogOutput, serverRPCCache, serverMaxStreams, tlsWrap),
-		eventChLAN:    make(chan serf.Event, 256),
-		eventChWAN:    make(chan serf.Event, 256),
-		localConsuls:  make(map[raft.ServerAddress]*agent.Server),
-		logger:        logger,
-		reconcileCh:   make(chan serf.Member, 32),
-		remoteConsuls: make(map[string][]*agent.Server, 4),
-		rpcServer:     rpc.NewServer(),
-		rpcTLS:        incomingTLS,
-		tombstoneGC:   gc,
-		shutdownCh:    make(chan struct{}),
+		autopilotRemoveDeadCh: make(chan struct{}),
+		autopilotShutdownCh:   make(chan struct{}),
+		config:                config,
+		connPool:              NewPool(config.LogOutput, serverRPCCache, serverMaxStreams, tlsWrap),
+		eventChLAN:            make(chan serf.Event, 256),
+		eventChWAN:            make(chan serf.Event, 256),
+		localConsuls:          make(map[raft.ServerAddress]*agent.Server),
+		logger:                logger,
+		reconcileCh:           make(chan serf.Member, 32),
+		remoteConsuls:         make(map[string][]*agent.Server, 4),
+		rpcServer:             rpc.NewServer(),
+		rpcTLS:                incomingTLS,
+		tombstoneGC:           gc,
+		shutdownCh:            make(chan struct{}),
 	}
+	s.autopilotPolicy = &BasicAutopilot{s}
 
 	// Initialize the authoritative ACL cache.
 	s.aclAuthCache, err = acl.NewCache(aclCacheSize, s.aclLocalFault)
@@ -299,6 +318,9 @@ func NewServer(config *Config) (*Server, error) {
 	// Start the metrics handlers.
 	go s.sessionStats()
 
+	// Start the server health checking.
+	go s.serverHealthLoop()
+
 	return s, nil
 }
 
@@ -317,6 +339,7 @@ func (s *Server) setupSerf(conf *serf.Config, ch chan serf.Event, path string, w
 	conf.Tags["vsn"] = fmt.Sprintf("%d", s.config.ProtocolVersion)
 	conf.Tags["vsn_min"] = fmt.Sprintf("%d", ProtocolVersionMin)
 	conf.Tags["vsn_max"] = fmt.Sprintf("%d", ProtocolVersionMax)
+	conf.Tags["raft_vsn"] = fmt.Sprintf("%d", s.config.RaftConfig.ProtocolVersion)
 	conf.Tags["build"] = s.config.Build
 	conf.Tags["port"] = fmt.Sprintf("%d", addr.Port)
 	if s.config.Bootstrap {
@@ -378,9 +401,12 @@ func (s *Server) setupRaft() error {
 	// Make sure we set the LogOutput.
 	s.config.RaftConfig.LogOutput = s.config.LogOutput
 
-	// Our version of Raft protocol requires the LocalID to match the network
+	// Versions of the Raft protocol below 3 require the LocalID to match the network
 	// address of the transport.
 	s.config.RaftConfig.LocalID = raft.ServerID(trans.LocalAddr())
+	if s.config.RaftConfig.ProtocolVersion >= 3 {
+		s.config.RaftConfig.LocalID = raft.ServerID(s.config.NodeID)
+	}
 
 	// Build an all in-memory setup for dev mode, otherwise prepare a full
 	// disk-based setup.
@@ -478,7 +504,7 @@ func (s *Server) setupRaft() error {
 			configuration := raft.Configuration{
 				Servers: []raft.Server{
 					raft.Server{
-						ID:      raft.ServerID(trans.LocalAddr()),
+						ID:      s.config.RaftConfig.LocalID,
 						Address: trans.LocalAddr(),
 					},
 				},

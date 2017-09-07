@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/consul/types"
 	"github.com/hashicorp/go-sockaddr/template"
 	"github.com/hashicorp/go-uuid"
+	"github.com/hashicorp/raft"
 	"github.com/hashicorp/serf/coordinate"
 	"github.com/hashicorp/serf/serf"
 	"github.com/shirou/gopsutil/host"
@@ -382,6 +383,9 @@ func (a *Agent) consulConfig() *consul.Config {
 	if a.config.Protocol > 0 {
 		base.ProtocolVersion = uint8(a.config.Protocol)
 	}
+	if a.config.RaftProtocol != 0 {
+		base.RaftConfig.ProtocolVersion = raft.ProtocolVersion(a.config.RaftProtocol)
+	}
 	if a.config.ACLToken != "" {
 		base.ACLToken = a.config.ACLToken
 	}
@@ -411,6 +415,18 @@ func (a *Agent) consulConfig() *consul.Config {
 	}
 	if a.config.SessionTTLMinRaw != "" {
 		base.SessionTTLMin = a.config.SessionTTLMin
+	}
+	if a.config.Autopilot.CleanupDeadServers != nil {
+		base.AutopilotConfig.CleanupDeadServers = *a.config.Autopilot.CleanupDeadServers
+	}
+	if a.config.Autopilot.LastContactThreshold != nil {
+		base.AutopilotConfig.LastContactThreshold = *a.config.Autopilot.LastContactThreshold
+	}
+	if a.config.Autopilot.MaxTrailingLogs != nil {
+		base.AutopilotConfig.MaxTrailingLogs = *a.config.Autopilot.MaxTrailingLogs
+	}
+	if a.config.Autopilot.ServerStabilizationTime != nil {
+		base.AutopilotConfig.ServerStabilizationTime = *a.config.Autopilot.ServerStabilizationTime
 	}
 
 	// Format the build string
@@ -501,14 +517,6 @@ func (a *Agent) resolveTmplAddrs() error {
 			return fmt.Errorf("HTTPS address resolution failed: %v", err)
 		}
 		a.config.Addresses.HTTPS = ipStr
-	}
-
-	if a.config.Addresses.RPC != "" {
-		ipStr, err := parseSingleIPTemplate(a.config.Addresses.RPC)
-		if err != nil {
-			return fmt.Errorf("RPC address resolution failed: %v", err)
-		}
-		a.config.Addresses.RPC = ipStr
 	}
 
 	if a.config.AdvertiseAddrWan != "" {

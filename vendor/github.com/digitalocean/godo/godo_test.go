@@ -11,10 +11,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/digitalocean/godo/context"
 )
 
 var (
 	mux *http.ServeMux
+
+	ctx = context.TODO()
 
 	client *Client
 
@@ -134,7 +138,7 @@ func TestNewRequest(t *testing.T) {
 		`{"name":"l","region":"","size":"","image":0,`+
 			`"ssh_keys":null,"backups":false,"ipv6":false,`+
 			`"private_networking":false,"monitoring":false,"tags":null}`+"\n"
-	req, _ := c.NewRequest("GET", inURL, inBody)
+	req, _ := c.NewRequest(ctx, "GET", inURL, inBody)
 
 	// test relative URL was expanded
 	if req.URL.String() != outURL {
@@ -162,7 +166,7 @@ func TestNewRequest_withUserData(t *testing.T) {
 		`{"name":"l","region":"","size":"","image":0,`+
 			`"ssh_keys":null,"backups":false,"ipv6":false,`+
 			`"private_networking":false,"monitoring":false,"user_data":"u","tags":null}`+"\n"
-	req, _ := c.NewRequest("GET", inURL, inBody)
+	req, _ := c.NewRequest(ctx, "GET", inURL, inBody)
 
 	// test relative URL was expanded
 	if req.URL.String() != outURL {
@@ -184,7 +188,7 @@ func TestNewRequest_withUserData(t *testing.T) {
 
 func TestNewRequest_badURL(t *testing.T) {
 	c := NewClient(nil)
-	_, err := c.NewRequest("GET", ":", nil)
+	_, err := c.NewRequest(ctx, "GET", ":", nil)
 	testURLParseError(t, err)
 }
 
@@ -196,7 +200,7 @@ func TestNewRequest_withCustomUserAgent(t *testing.T) {
 		t.Fatalf("New() unexpected error: %v", err)
 	}
 
-	req, _ := c.NewRequest("GET", "/foo", nil)
+	req, _ := c.NewRequest(ctx, "GET", "/foo", nil)
 
 	expected := fmt.Sprintf("%s+%s", ua, userAgent)
 	if got := req.Header.Get("User-Agent"); got != expected {
@@ -219,9 +223,9 @@ func TestDo(t *testing.T) {
 		fmt.Fprint(w, `{"A":"a"}`)
 	})
 
-	req, _ := client.NewRequest("GET", "/", nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
 	body := new(foo)
-	_, err := client.Do(req, body)
+	_, err := client.Do(context.Background(), req, body)
 	if err != nil {
 		t.Fatalf("Do(): %v", err)
 	}
@@ -240,8 +244,8 @@ func TestDo_httpError(t *testing.T) {
 		http.Error(w, "Bad Request", 400)
 	})
 
-	req, _ := client.NewRequest("GET", "/", nil)
-	_, err := client.Do(req, nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
+	_, err := client.Do(context.Background(), req, nil)
 
 	if err == nil {
 		t.Error("Expected HTTP 400 error.")
@@ -258,8 +262,8 @@ func TestDo_redirectLoop(t *testing.T) {
 		http.Redirect(w, r, "/", http.StatusFound)
 	})
 
-	req, _ := client.NewRequest("GET", "/", nil)
-	_, err := client.Do(req, nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
+	_, err := client.Do(context.Background(), req, nil)
 
 	if err == nil {
 		t.Error("Expected error to be returned.")
@@ -343,8 +347,8 @@ func TestDo_rateLimit(t *testing.T) {
 		t.Errorf("Client rate reset not initialized to zero value")
 	}
 
-	req, _ := client.NewRequest("GET", "/", nil)
-	_, err := client.Do(req, nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
+	_, err := client.Do(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("Do(): %v", err)
 	}
@@ -374,8 +378,8 @@ func TestDo_rateLimit_errorResponse(t *testing.T) {
 
 	var expected int
 
-	req, _ := client.NewRequest("GET", "/", nil)
-	_, _ = client.Do(req, nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
+	_, _ = client.Do(context.Background(), req, nil)
 
 	if expected = 60; client.Rate.Limit != expected {
 		t.Errorf("Client rate limit = %v, expected %v", client.Rate.Limit, expected)
@@ -416,7 +420,7 @@ func TestDo_completion_callback(t *testing.T) {
 		fmt.Fprint(w, `{"A":"a"}`)
 	})
 
-	req, _ := client.NewRequest("GET", "/", nil)
+	req, _ := client.NewRequest(ctx, "GET", "/", nil)
 	body := new(foo)
 	var completedReq *http.Request
 	var completedResp string
@@ -428,7 +432,7 @@ func TestDo_completion_callback(t *testing.T) {
 		}
 		completedResp = string(b)
 	})
-	_, err := client.Do(req, body)
+	_, err := client.Do(context.Background(), req, body)
 	if err != nil {
 		t.Fatalf("Do(): %v", err)
 	}

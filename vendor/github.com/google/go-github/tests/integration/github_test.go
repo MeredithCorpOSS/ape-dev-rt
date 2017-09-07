@@ -3,13 +3,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// These tests call the live GitHub API, and therefore require a little more
-// setup to run.  See https://github.com/google/go-github/tree/master/tests/integration
-// for more information
+// +build integration
 
 package tests
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -30,15 +29,26 @@ var (
 func init() {
 	token := os.Getenv("GITHUB_AUTH_TOKEN")
 	if token == "" {
-		print("!!! No OAuth token.  Some tests won't run. !!!\n\n")
+		print("!!! No OAuth token. Some tests won't run. !!!\n\n")
 		client = github.NewClient(nil)
 	} else {
-		tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(
+		tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(
 			&oauth2.Token{AccessToken: token},
 		))
 		client = github.NewClient(tc)
 		auth = true
 	}
+
+	// Environment variables required for Authorization integration tests
+	vars := []string{envKeyGitHubUsername, envKeyGitHubPassword, envKeyClientID, envKeyClientSecret}
+
+	for _, v := range vars {
+		value := os.Getenv(v)
+		if value == "" {
+			print("!!! " + fmt.Sprintf(msgEnvMissing, v) + " !!!\n\n")
+		}
+	}
+
 }
 
 func checkAuth(name string) bool {

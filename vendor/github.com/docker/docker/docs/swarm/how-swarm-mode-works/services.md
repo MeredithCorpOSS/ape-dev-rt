@@ -61,7 +61,7 @@ that spawns a new container.
 
 A task is a one-directional mechanism. It progresses monotonically through a
 series of states: assigned, prepared, running, etc.  If the task fails the
-scheduler removes the task and its container and then creates a new task to
+orchestrator removes the task and its container and then creates a new task to
 replace it according to the desired state specified by the service.
 
 The underlying logic of Docker swarm mode is a general purpose scheduler and
@@ -95,3 +95,8 @@ The diagram below shows a three-service replica in yellow and a global service
 in gray.
 
 ![global vs replicated services](../images/replicated-vs-global.png)
+
+## Learn More
+
+* Read about how swarm mode [nodes](services.md) work.
+* Learn how [PKI](pki.md) works in swarm mode.

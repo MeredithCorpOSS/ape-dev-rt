@@ -1,24 +1,24 @@
 ---
 layout: "dns"
 page_title: "DNS: dns_cname_record"
-sidebar_current: "docs-dns-record"
+sidebar_current: "docs-dns-cname-record"
 description: |-
   Creates a CNAME type DNS record.
 ---
 
-# dns\_ptr\_record
+# dns_cname_record
 
 Creates a CNAME type DNS record.
 
 ## Example Usage
 
-```
-  resource "dns_cname_record" "foo" {
-    zone = "example.com."
-    name = "foo"
-    cname = "bar.example.com."
-    ttl = 300
-  }
+```hcl
+resource "dns_cname_record" "foo" {
+  zone  = "example.com."
+  name  = "foo"
+  cname = "bar.example.com."
+  ttl   = 300
+}
 ```
 
 ## Argument Reference
@@ -38,4 +38,3 @@ The following attributes are exported:
 * `name` - See Argument Reference above.
 * `cname` - See Argument Reference above.
 * `ttl` - See Argument Reference above.
-

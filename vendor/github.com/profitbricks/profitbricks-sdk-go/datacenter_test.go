@@ -17,6 +17,13 @@ func TestListDatacenters(t *testing.T) {
 	}
 }
 
+func TestGetDatacenterFail(t *testing.T) {
+	want := 404
+	resp := GetDatacenter("231")
+	if resp.StatusCode != want {
+		t.Errorf(bad_status(want, resp.StatusCode))
+	}
+}
 func TestCreateDatacenter(t *testing.T) {
 	want := 202
 	var obj = Datacenter{

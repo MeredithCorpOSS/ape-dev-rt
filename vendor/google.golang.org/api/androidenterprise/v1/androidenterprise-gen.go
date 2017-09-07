@@ -56,8 +56,6 @@ func New(client *http.Client) (*Service, error) {
 		return nil, errors.New("client is nil")
 	}
 	s := &Service{client: client, BasePath: basePath}
-	s.Collections = NewCollectionsService(s)
-	s.Collectionviewers = NewCollectionviewersService(s)
 	s.Devices = NewDevicesService(s)
 	s.Enterprises = NewEnterprisesService(s)
 	s.Entitlements = NewEntitlementsService(s)
@@ -76,13 +74,10 @@ func New(client *http.Client) (*Service, error) {
 }
 
 type Service struct {
-	client    *http.Client
-	BasePath  string // API endpoint base URL
-	UserAgent string // optional additional User-Agent fragment
-
-	Collections *CollectionsService
-
-	Collectionviewers *CollectionviewersService
+	client                    *http.Client
+	BasePath                  string // API endpoint base URL
+	UserAgent                 string // optional additional User-Agent fragment
+	GoogleClientHeaderElement string // client header fragment, for Google use only
 
 	Devices *DevicesService
 
@@ -120,22 +115,8 @@ func (s *Service) userAgent() string {
 	return googleapi.UserAgent + " " + s.UserAgent
 }
 
-func NewCollectionsService(s *Service) *CollectionsService {
-	rs := &CollectionsService{s: s}
-	return rs
-}
-
-type CollectionsService struct {
-	s *Service
-}
-
-func NewCollectionviewersService(s *Service) *CollectionviewersService {
-	rs := &CollectionviewersService{s: s}
-	return rs
-}
-
-type CollectionviewersService struct {
-	s *Service
+func (s *Service) clientHeader() string {
+	return gensupport.GoogleClientHeader("20170210", s.GoogleClientHeaderElement)
 }
 
 func NewDevicesService(s *Service) *DevicesService {
@@ -264,10 +245,10 @@ type UsersService struct {
 	s *Service
 }
 
-// Administrator: This represents an enterprise administrator who can
-// manage the enterprise in the Google Play for Work Store.
+// Administrator: This represents an enterprise admin who can manage the
+// enterprise in the managed Google Play store.
 type Administrator struct {
-	// Email: The administrator's email address.
+	// Email: The admin's email address.
 	Email string `json:"email,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "Email") to
@@ -293,8 +274,8 @@ func (s *Administrator) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// AdministratorWebToken: A token authorizing an administrator to access
-// an iframe.
+// AdministratorWebToken: A token authorizing an admin to access an
+// iframe.
 type AdministratorWebToken struct {
 	// Kind: Identifies what kind of resource this is. Value: the fixed
 	// string "androidenterprise#administratorWebToken".
@@ -588,7 +569,7 @@ type AppVersion struct {
 	// VersionCode: Unique increasing identifier for the app version.
 	VersionCode int64 `json:"versionCode,omitempty"`
 
-	// VersionString: The string used in the Play Store by the app developer
+	// VersionString: The string used in the Play store by the app developer
 	// to identify the version. The string is not necessarily unique or
 	// localized (for example, the string could be "1.4").
 	VersionString string `json:"versionString,omitempty"`
@@ -689,153 +670,14 @@ func (s *AuthenticationToken) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// Collection: A collection resource defines a named set of apps that is
-// visible to a set of users in the Google Play Store app running on
-// those users' managed devices. Those users can then install any of
-// those apps if they wish (which will trigger creation of install and
-// entitlement resources). A user cannot install an app on a managed
-// device unless the app is listed in at least one collection that is
-// visible to that user.
-//
-// Note that the API can be used to directly install an app regardless
-// of whether it is in any collection - so an enterprise has a choice of
-// either directly pushing apps to users, or allowing users to install
-// apps if they want. Which is appropriate will depend on the
-// enterprise's policies and the purpose of the apps concerned.
-type Collection struct {
-	// CollectionId: Arbitrary unique ID, allocated by the API on creation.
-	CollectionId string `json:"collectionId,omitempty"`
-
-	// Kind: Identifies what kind of resource this is. Value: the fixed
-	// string "androidenterprise#collection".
-	Kind string `json:"kind,omitempty"`
-
-	// Name: A user-friendly name for the collection (should be unique),
-	// e.g. "Accounting apps".
-	Name string `json:"name,omitempty"`
-
-	// ProductId: The IDs of the products in the collection, in the order in
-	// which they should be displayed.
-	ProductId []string `json:"productId,omitempty"`
-
-	// Visibility: Whether this collection is visible to all users, or only
-	// to the users that have been granted access through the
-	// "Collectionviewers" API. With the launch of the
-	// "setAvailableProductSet" API, this property should always be set to
-	// "viewersOnly", as the "allUsers" option will bypass the
-	// "availableProductSet" for all users within a domain.
-	//
-	// The "allUsers" setting is deprecated, and will be removed.
-	Visibility string `json:"visibility,omitempty"`
-
-	// ServerResponse contains the HTTP response code and headers from the
-	// server.
-	googleapi.ServerResponse `json:"-"`
-
-	// ForceSendFields is a list of field names (e.g. "CollectionId") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "CollectionId") to include
-	// in API requests with the JSON null value. By default, fields with
-	// empty values are omitted from API requests. However, any field with
-	// an empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *Collection) MarshalJSON() ([]byte, error) {
-	type noMethod Collection
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// CollectionViewersListResponse: The user resources for the collection.
-type CollectionViewersListResponse struct {
-	// Kind: Identifies what kind of resource this is. Value: the fixed
-	// string "androidenterprise#collectionViewersListResponse".
-	Kind string `json:"kind,omitempty"`
-
-	// User: A user of an enterprise.
-	User []*User `json:"user,omitempty"`
-
-	// ServerResponse contains the HTTP response code and headers from the
-	// server.
-	googleapi.ServerResponse `json:"-"`
-
-	// ForceSendFields is a list of field names (e.g. "Kind") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "Kind") to include in API
-	// requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *CollectionViewersListResponse) MarshalJSON() ([]byte, error) {
-	type noMethod CollectionViewersListResponse
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// CollectionsListResponse: The collection resources for the enterprise.
-type CollectionsListResponse struct {
-	// Collection: An ordered collection of products which can be made
-	// visible on the Google Play Store to a selected group of users.
-	Collection []*Collection `json:"collection,omitempty"`
-
-	// Kind: Identifies what kind of resource this is. Value: the fixed
-	// string "androidenterprise#collectionsListResponse".
-	Kind string `json:"kind,omitempty"`
-
-	// ServerResponse contains the HTTP response code and headers from the
-	// server.
-	googleapi.ServerResponse `json:"-"`
-
-	// ForceSendFields is a list of field names (e.g. "Collection") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "Collection") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *CollectionsListResponse) MarshalJSON() ([]byte, error) {
-	type noMethod CollectionsListResponse
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// Device: A device resource represents a mobile device managed by the
+// Device: A Devices resource represents a mobile device managed by the
 // EMM and belonging to a specific enterprise user.
 //
-// This collection cannot be modified via the API; it is automatically
+// This collection cannot be modified via the API. It is automatically
 // populated as devices are set up to be managed.
 type Device struct {
 	// AndroidId: The Google Play Services Android ID for the device encoded
-	// as a lowercase hex string, e.g. "123456789abcdef0".
+	// as a lowercase hex string. For example, "123456789abcdef0".
 	AndroidId string `json:"androidId,omitempty"`
 
 	// Kind: Identifies what kind of resource this is. Value: the fixed
@@ -843,21 +685,20 @@ type Device struct {
 	Kind string `json:"kind,omitempty"`
 
 	// ManagementType: Identifies the extent to which the device is
-	// controlled by an Android for Work EMM in various deployment
+	// controlled by a managed Google Play EMM in various deployment
 	// configurations.
 	//
 	// Possible values include:
 	// - "managedDevice", a device that has the EMM's device policy
 	// controller (DPC) as the device owner,
-	// - "managedProfile", a device that has a work profile managed by the
-	// DPC (DPC is profile owner) in addition to a separate, personal
-	// profile that is unavailable to the DPC,
-	// - "containerApp", a device running the Android for Work App. The
-	// Android for Work App is managed by the DPC,
+	// - "managedProfile", a device that has a profile managed by the DPC
+	// (DPC is profile owner) in addition to a separate, personal profile
+	// that is unavailable to the DPC,
+	// - "containerApp", a device running the container App. The container
+	// App is managed by the DPC,
 	// - "unmanagedProfile", a device that has been allowed (by the domain's
 	// admin, using the Admin Console to enable the privilege) to use
-	// Android for Work apps or Google Apps for Work, but the profile is
-	// itself not owned by a DPC.
+	// managed Google Play, but the profile is itself not owned by a DPC.
 	ManagementType string `json:"managementType,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the
@@ -971,15 +812,15 @@ func (s *DevicesListResponse) MarshalJSON() ([]byte, error) {
 // Enterprises.enroll and Enterprises.setAccount (in conjunction with
 // artifacts obtained from the Admin console and the Google API Console)
 // and submitted to the EMM through a more-or-less manual process.
-// - For Android for Work Accounts customers, the process involves using
-// Enterprises.generateSignupUrl and Enterprises.completeSignup in
-// conjunction with the Android for Work Sign-up UI (Google-provided
+// - For managed Google Play Accounts customers, the process involves
+// using Enterprises.generateSignupUrl and Enterprises.completeSignup in
+// conjunction with the managed Google Play sign-up UI (Google-provided
 // mechanism) to create the binding without manual steps. As an EMM, you
 // can support either or both approaches in your EMM console. See Create
 // an Enterprise for details.
 type Enterprise struct {
-	// Administrator: Administrators of the enterprise. This is only
-	// supported for enterprises created via the EMM-initiated flow.
+	// Administrator: Admins of the enterprise. This is only supported for
+	// enterprises created via the EMM-initiated flow.
 	Administrator []*Administrator `json:"administrator,omitempty"`
 
 	// Id: The unique ID for the enterprise.
@@ -1132,50 +973,45 @@ func (s *EnterprisesSendTestPushNotificationResponse) MarshalJSON() ([]byte, err
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// Entitlement: The existence of an entitlement resource means that a
-// user has the right to use a particular app on any of their devices.
-// This might be because the app is free or because they have been
-// allocated a license to the app from a group license purchased by the
-// enterprise.
+// Entitlement: The presence of an Entitlements resource indicates that
+// a user has the right to use a particular app. Entitlements are user
+// specific, not device specific. This allows a user with an entitlement
+// to an app to install the app on all their devices. It's also possible
+// for a user to hold an entitlement to an app without installing the
+// app on any device.
 //
-// It should always be true that a user has an app installed on one of
-// their devices only if they have an entitlement to it. So if an
-// entitlement is deleted, the app will be uninstalled from all devices.
-// Similarly if the user installs an app (and is permitted to do so), or
-// the EMM triggers an install of the app, an entitlement to that app is
-// automatically created. If this is impossible - e.g. the enterprise
-// has not purchased sufficient licenses - then installation
-// fails.
+// The API can be used to create an entitlement. As an option, you can
+// also use the API to trigger the installation of an app on all a
+// user's managed devices at the same time the entitlement is
+// created.
 //
-// Note that entitlements are always user specific, not device specific;
-// a user may have an entitlement even though they have not installed
-// the app anywhere. Once they have an entitlement they can install the
-// app on multiple devices.
+// If the app is free, creating the entitlement also creates a group
+// license for that app. For paid apps, creating the entitlement
+// consumes one license, and that license remains consumed until the
+// entitlement is removed. If the enterprise hasn't purchased enough
+// licenses, then no entitlement is created and the installation fails.
+// An entitlement is also not created for an app if the app requires
+// permissions that the enterprise hasn't accepted.
 //
-// The API can be used to create an entitlement. If the app is a free
-// app, a group license for that app is created. If it's a paid app,
-// creating the entitlement consumes one license; it remains consumed
-// until the entitlement is removed. Optionally an installation of the
-// app on all the user's managed devices can be triggered at the time
-// the entitlement is created. An entitlement cannot be created for an
-// app if the app requires permissions that the enterprise has not yet
-// accepted.
+// If an entitlement is deleted, the app may be uninstalled from a
+// user's device. As a best practice, uninstall the app by calling
+// Installs.delete() before deleting the entitlement.
 //
-// Entitlements for paid apps that are due to purchases by the user on a
-// non-managed profile will have "userPurchase" as entitlement reason;
-// those entitlements cannot be removed via the API.
+// Entitlements for apps that a user pays for on an unmanaged profile
+// have "userPurchase" as the entitlement reason. These entitlements
+// cannot be removed via the API.
 type Entitlement struct {
 	// Kind: Identifies what kind of resource this is. Value: the fixed
 	// string "androidenterprise#entitlement".
 	Kind string `json:"kind,omitempty"`
 
-	// ProductId: The ID of the product that the entitlement is for, e.g.
-	// "app:com.google.android.gm".
+	// ProductId: The ID of the product that the entitlement is for. For
+	// example, "app:com.google.android.gm".
 	ProductId string `json:"productId,omitempty"`
 
-	// Reason: The reason for the entitlement, e.g. "free" for free apps.
-	// This is temporary, it will be replaced by the acquisition kind field
-	// of group licenses.
+	// Reason: The reason for the entitlement. For example, "free" for free
+	// apps. This property is temporary: it will be replaced by the
+	// acquisition kind field of group licenses.
 	Reason string `json:"reason,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the
@@ -1267,18 +1103,17 @@ func (s *EntitlementsListResponse) MarshalJSON() ([]byte, error) {
 // Play.
 type GroupLicense struct {
 	// AcquisitionKind: How this group license was acquired. "bulkPurchase"
-	// means that this group license object was created because the
-	// enterprise purchased licenses for this product; this is "free"
-	// otherwise (for free products).
+	// means that this Grouplicenses resource was created because the
+	// enterprise purchased licenses for this product; otherwise, the value
+	// is "free" (for free products).
 	AcquisitionKind string `json:"acquisitionKind,omitempty"`
 
 	// Approval: Whether the product to which this group license relates is
-	// currently approved by the enterprise, as either "approved" or
-	// "unapproved". Products are approved when a group license is first
-	// created, but this approval may be revoked by an enterprise admin via
-	// Google Play. Unapproved products will not be visible to end users in
-	// collections and new entitlements to them should not normally be
-	// created.
+	// currently approved by the enterprise. Products are approved when a
+	// group license is first created, but this approval may be revoked by
+	// an enterprise admin via Google Play. Unapproved products will not be
+	// visible to end users in collections, and new entitlements to them
+	// should not normally be created.
 	Approval string `json:"approval,omitempty"`
 
 	// Kind: Identifies what kind of resource this is. Value: the fixed
@@ -1291,13 +1126,13 @@ type GroupLicense struct {
 	NumProvisioned int64 `json:"numProvisioned,omitempty"`
 
 	// NumPurchased: The number of purchased licenses (possibly in multiple
-	// purchases). If this field is omitted then there is no limit on the
-	// number of licenses that can be provisioned (e.g. if the acquisition
-	// kind is "free").
+	// purchases). If this field is omitted, then there is no limit on the
+	// number of licenses that can be provisioned (for example, if the
+	// acquisition kind is "free").
 	NumPurchased int64 `json:"numPurchased,omitempty"`
 
-	// ProductId: The ID of the product that the license is for, e.g.
-	// "app:com.google.android.gm".
+	// ProductId: The ID of the product that the license is for. For
+	// example, "app:com.google.android.gm".
 	ProductId string `json:"productId,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the
@@ -1403,23 +1238,23 @@ func (s *GroupLicensesListResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// Install: The existence of an install resource indicates that an app
+// Install: The existence of an Installs resource indicates that an app
 // is installed on a particular device (or that an install is
 // pending).
 //
 // The API can be used to create an install resource using the update
 // method. This triggers the actual install of the app on the device. If
-// the user does not already have an entitlement for the app then an
-// attempt is made to create one. If this fails (e.g. because the app is
-// not free and there is no available license) then the creation of the
-// install fails.
+// the user does not already have an entitlement for the app, then an
+// attempt is made to create one. If this fails (for example, because
+// the app is not free and there is no available license), then the
+// creation of the install fails.
 //
-// The API can also be used to update an installed app. If the update
-// method is used on an existing install then the app will be updated to
-// the latest available version.
+// The API can also be used to update an installed app. If
+// the update method is used on an existing install, then the app will
+// be updated to the latest available version.
 //
 // Note that it is not possible to force the installation of a specific
-// version of an app; the version code is read-only.
+// version of an app: the version code is read-only.
 //
 // If a user installs an app themselves (as permitted by the
 // enterprise), then again an install resource and possibly an
@@ -1442,8 +1277,8 @@ type Install struct {
 	// string "androidenterprise#install".
 	Kind string `json:"kind,omitempty"`
 
-	// ProductId: The ID of the product that the install is for, e.g.
-	// "app:com.google.android.gm".
+	// ProductId: The ID of the product that the install is for. For
+	// example, "app:com.google.android.gm".
 	ProductId string `json:"productId,omitempty"`
 
 	// VersionCode: The version of the installed product. Guaranteed to be
@@ -1797,6 +1632,48 @@ func (s *ManagedPropertyBundle) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+// NewDeviceEvent: An event generated when a new device is ready to be
+// managed.
+type NewDeviceEvent struct {
+	// DeviceId: The Android ID of the device. This field will always be
+	// present.
+	DeviceId string `json:"deviceId,omitempty"`
+
+	// ManagementType: Identifies the extent to which the device is
+	// controlled by an Android EMM in various deployment
+	// configurations.
+	//
+	// Possible values include:
+	// - "managedDevice", a device where the DPC is set as device owner,
+	// - "managedProfile", a device where the DPC is set as profile owner.
+	ManagementType string `json:"managementType,omitempty"`
+
+	// UserId: The ID of the user. This field will always be present.
+	UserId string `json:"userId,omitempty"`
+
+	// ForceSendFields is a list of field names (e.g. "DeviceId") to
+	// unconditionally include in API requests. By default, fields with
+	// empty values are omitted from API requests. However, any non-pointer,
+	// non-interface field appearing in ForceSendFields will be sent to the
+	// server regardless of whether the field is empty or not. This may be
+	// used to include empty fields in Patch requests.
+	ForceSendFields []string `json:"-"`
+
+	// NullFields is a list of field names (e.g. "DeviceId") to include in
+	// API requests with the JSON null value. By default, fields with empty
+	// values are omitted from API requests. However, any field with an
+	// empty value appearing in NullFields will be sent to the server as
+	// null. It is an error if a field in this list has a non-empty value.
+	// This may be used to include null fields in Patch requests.
+	NullFields []string `json:"-"`
+}
+
+func (s *NewDeviceEvent) MarshalJSON() ([]byte, error) {
+	type noMethod NewDeviceEvent
+	raw := noMethod(*s)
+	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
+}
+
 // NewPermissionsEvent: An event generated when new permissions are
 // added to an app.
 type NewPermissionsEvent struct {
@@ -1854,6 +1731,9 @@ type Notification struct {
 
 	// InstallFailureEvent: Notifications about an app installation failure.
 	InstallFailureEvent *InstallFailureEvent `json:"installFailureEvent,omitempty"`
+
+	// NewDeviceEvent: Notifications about new devices.
+	NewDeviceEvent *NewDeviceEvent `json:"newDeviceEvent,omitempty"`
 
 	// NewPermissionsEvent: Notifications about new app permissions.
 	NewPermissionsEvent *NewPermissionsEvent `json:"newPermissionsEvent,omitempty"`
@@ -1969,18 +1849,18 @@ func (s *PageInfo) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// Permission: A permission represents some extra capability, to be
-// granted to an Android app, which requires explicit consent. An
+// Permission: A Permissions resource represents some extra capability,
+// to be granted to an Android app, which requires explicit consent. An
 // enterprise admin must consent to these permissions on behalf of their
 // users before an entitlement for the app can be created.
 //
 // The permissions collection is read-only. The information provided for
 // each permission (localized name and description) is intended to be
-// used in the EMM user interface when obtaining consent from the
+// used in the MDM user interface when obtaining consent from the
 // enterprise.
 type Permission struct {
-	// Description: A longer description of the permissions giving more
-	// details of what it affects.
+	// Description: A longer description of the Permissions resource, giving
+	// more details of what it affects.
 	Description string `json:"description,omitempty"`
 
 	// Kind: Identifies what kind of resource this is. Value: the fixed
@@ -2021,7 +1901,7 @@ func (s *Permission) MarshalJSON() ([]byte, error) {
 }
 
 // Product: A Products resource represents an app in the Google Play
-// Store that is available to at least some users in the enterprise.
+// store that is available to at least some users in the enterprise.
 // (Some apps are restricted to a single enterprise, and no information
 // about them is made available outside that enterprise.)
 //
@@ -2034,8 +1914,8 @@ type Product struct {
 	// are not included.
 	AppVersion []*AppVersion `json:"appVersion,omitempty"`
 
-	// AuthorName: The name of the author of the product (e.g. the app
-	// developer).
+	// AuthorName: The name of the author of the product (for example, the
+	// app developer).
 	AuthorName string `json:"authorName,omitempty"`
 
 	// DetailsUrl: A link to the (consumer) Google Play details page for the
@@ -2044,7 +1924,7 @@ type Product struct {
 
 	// DistributionChannel: How and to whom the package is made available.
 	// The value publicGoogleHosted means that the package is available
-	// through the Play Store and not restricted to a specific enterprise.
+	// through the Play store and not restricted to a specific enterprise.
 	// The value privateGoogleHosted means that the package is a private app
 	// (restricted to an enterprise) but hosted by Google. The value
 	// privateSelfHosted means that the package is a private app (restricted
@@ -2070,7 +1950,7 @@ type Product struct {
 	ProductPricing string `json:"productPricing,omitempty"`
 
 	// RequiresContainerApp: Whether this app can only be installed on
-	// devices using the Android for Work container app.
+	// devices using the Android container app.
 	RequiresContainerApp bool `json:"requiresContainerApp,omitempty"`
 
 	// SmallIconUrl: A link to a smaller image that can be used as an icon
@@ -2081,8 +1961,8 @@ type Product struct {
 	// Title: The name of the product.
 	Title string `json:"title,omitempty"`
 
-	// WorkDetailsUrl: A link to the Google Play for Work details page for
-	// the product, for use by an Enterprise administrator.
+	// WorkDetailsUrl: A link to the managed Google Play details page for
+	// the product, for use by an Enterprise admin.
 	WorkDetailsUrl string `json:"workDetailsUrl,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the
@@ -2270,13 +2150,13 @@ type ProductSet struct {
 	ProductId []string `json:"productId,omitempty"`
 
 	// ProductSetBehavior: The interpretation of this product set. "unknown"
-	// should never be sent and ignored if received. "whitelist" means that
-	// this product set constitutes a whitelist. "includeAll" means that all
-	// products are accessible, including products that are approved, not
-	// approved, and even products where approval has been revoked. If the
-	// value is "includeAll", the value of the productId field is therefore
-	// ignored. If a value is not supplied, it is interpreted to be
-	// "whitelist" for backwards compatibility.
+	// should never be sent and is ignored if received. "whitelist" means
+	// that this product set constitutes a whitelist. "includeAll" means
+	// that all products are accessible, including products that are
+	// approved, products with revoked approval, and products that have
+	// never been approved. If the value is "includeAll", the value of the
+	// productId field is therefore ignored. If a value is not supplied, it
+	// is interpreted to be "whitelist" for backwards compatibility.
 	ProductSetBehavior string `json:"productSetBehavior,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the
@@ -2388,7 +2268,7 @@ type ProductsListResponse struct {
 	PageInfo *PageInfo `json:"pageInfo,omitempty"`
 
 	// Product: Information about a product (e.g. an app) in the Google Play
-	// Store, for display to an enterprise admin.
+	// store, for display to an enterprise admin.
 	Product []*Product `json:"product,omitempty"`
 
 	// TokenPagination: Pagination information for token pagination.
@@ -2478,6 +2358,12 @@ type ServiceAccountKey struct {
 	// Kind: Identifies what kind of resource this is. Value: the fixed
 	// string "androidenterprise#serviceAccountKey".
 	Kind string `json:"kind,omitempty"`
+
+	// PublicData: Public key data for the credentials file. This is an
+	// X.509 cert. If you are using the googleCredentials key type, this is
+	// identical to the cert that can be retrieved by using the X.509 cert
+	// url inside of the credentials file.
+	PublicData string `json:"publicData,omitempty"`
 
 	// Type: The file format of the generated key data.
 	Type string `json:"type,omitempty"`
@@ -2585,7 +2471,7 @@ func (s *SignupInfo) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// StoreCluster: Definition of a Google Play for Work store cluster, a
+// StoreCluster: Definition of a managed Google Play store cluster, a
 // list of products displayed as part of a store page.
 type StoreCluster struct {
 	// Id: Unique ID of this cluster. Assigned by the server. Immutable once
@@ -2643,13 +2529,13 @@ func (s *StoreCluster) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// StoreLayout: General setting for the Google Play for Work store
+// StoreLayout: General setting for the managed Google Play store
 // layout, currently only specifying the page to display the first time
 // the store is opened.
 type StoreLayout struct {
 	// HomepageId: The ID of the store page to be used as the homepage. The
-	// homepage will be used as the first page shown in the Google Play for
-	// Work store.
+	// homepage will be used as the first page shown in the managed Google
+	// Play store.
 	//
 	// If a homepage has not been set, the Play store shown on devices will
 	// be empty. Not specifying a homepage on a store layout effectively
@@ -2774,7 +2660,7 @@ func (s *StoreLayoutPagesListResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// StorePage: Definition of a Google Play for Work store page, made of a
+// StorePage: Definition of a managed Google Play store page, made of a
 // localized name and links to other pages. A page also contains
 // clusters defined as a subcollection.
 type StorePage struct {
@@ -2860,14 +2746,13 @@ func (s *TokenPagination) MarshalJSON() ([]byte, error) {
 // User: A Users resource represents an account associated with an
 // enterprise. The account may be specific to a device or to an
 // individual user (who can then use the account across multiple
-// devices). The account may provide access to Google Play for Work
-// only, or to other Google services, depending on the identity model:
-//
-// - Google managed domain identity model requires synchronization to
-// Google account sources (via primaryEmail).
-// - Android for Work Accounts identity model provides a dynamic means
-// for enterprises to create user or device accounts as needed. These
-// accounts provide access to Google Play for Work only.
+// devices). The account may provide access to managed Google Play only,
+// or to other Google services, depending on the identity model:
+// - The Google managed domain identity model requires synchronization
+// to Google account sources (via primaryEmail).
+// - The managed Google Play Accounts identity model provides a dynamic
+// means for enterprises to create user or device accounts as needed.
+// These accounts provide access to managed Google Play.
 type User struct {
 	// AccountIdentifier: A unique identifier you create for this user, such
 	// as "user342" or "asset#44418". Do not use personally identifiable
@@ -2936,9 +2821,9 @@ func (s *User) MarshalJSON() ([]byte, error) {
 }
 
 // UserToken: A UserToken is used by a user when setting up a managed
-// device or profile with their work account on a device. When the user
-// enters their email address and token (activation code) the
-// appropriate EMM app can be automatically downloaded.
+// device or profile with their managed Google Play account on a device.
+// When the user enters their email address and token (activation code)
+// the appropriate EMM app can be automatically downloaded.
 type UserToken struct {
 	// Kind: Identifies what kind of resource this is. Value: the fixed
 	// string "androidenterprise#userToken".
@@ -3015,1550 +2900,6 @@ func (s *UsersListResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// method id "androidenterprise.collections.delete":
-
-type CollectionsDeleteCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Delete: Deletes a collection.
-func (r *CollectionsService) Delete(enterpriseId string, collectionId string) *CollectionsDeleteCall {
-	c := &CollectionsDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsDeleteCall) Fields(s ...googleapi.Field) *CollectionsDeleteCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsDeleteCall) Context(ctx context.Context) *CollectionsDeleteCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsDeleteCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsDeleteCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("DELETE", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.delete" call.
-func (c *CollectionsDeleteCall) Do(opts ...googleapi.CallOption) error {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if err != nil {
-		return err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return err
-	}
-	return nil
-	// {
-	//   "description": "Deletes a collection.",
-	//   "httpMethod": "DELETE",
-	//   "id": "androidenterprise.collections.delete",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}",
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collections.get":
-
-type CollectionsGetCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	urlParams_   gensupport.URLParams
-	ifNoneMatch_ string
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Get: Retrieves the details of a collection.
-func (r *CollectionsService) Get(enterpriseId string, collectionId string) *CollectionsGetCall {
-	c := &CollectionsGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsGetCall) Fields(s ...googleapi.Field) *CollectionsGetCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// IfNoneMatch sets the optional parameter which makes the operation
-// fail if the object's ETag matches the given value. This is useful for
-// getting updates only after the object has changed since the last
-// request. Use googleapi.IsNotModified to check whether the response
-// error from Do is the result of In-None-Match.
-func (c *CollectionsGetCall) IfNoneMatch(entityTag string) *CollectionsGetCall {
-	c.ifNoneMatch_ = entityTag
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsGetCall) Context(ctx context.Context) *CollectionsGetCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsGetCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsGetCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	if c.ifNoneMatch_ != "" {
-		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
-	}
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("GET", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.get" call.
-// Exactly one of *Collection or error will be non-nil. Any non-2xx
-// status code is an error. Response headers are in either
-// *Collection.ServerResponse.Header or (if a response was returned at
-// all) in error.(*googleapi.Error).Header. Use googleapi.IsNotModified
-// to check whether the returned error was because
-// http.StatusNotModified was returned.
-func (c *CollectionsGetCall) Do(opts ...googleapi.CallOption) (*Collection, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Collection{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Retrieves the details of a collection.",
-	//   "httpMethod": "GET",
-	//   "id": "androidenterprise.collections.get",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}",
-	//   "response": {
-	//     "$ref": "Collection"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collections.insert":
-
-type CollectionsInsertCall struct {
-	s            *Service
-	enterpriseId string
-	collection   *Collection
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Insert: Creates a new collection.
-func (r *CollectionsService) Insert(enterpriseId string, collection *Collection) *CollectionsInsertCall {
-	c := &CollectionsInsertCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collection = collection
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsInsertCall) Fields(s ...googleapi.Field) *CollectionsInsertCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsInsertCall) Context(ctx context.Context) *CollectionsInsertCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsInsertCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsInsertCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.collection)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("POST", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.insert" call.
-// Exactly one of *Collection or error will be non-nil. Any non-2xx
-// status code is an error. Response headers are in either
-// *Collection.ServerResponse.Header or (if a response was returned at
-// all) in error.(*googleapi.Error).Header. Use googleapi.IsNotModified
-// to check whether the returned error was because
-// http.StatusNotModified was returned.
-func (c *CollectionsInsertCall) Do(opts ...googleapi.CallOption) (*Collection, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Collection{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Creates a new collection.",
-	//   "httpMethod": "POST",
-	//   "id": "androidenterprise.collections.insert",
-	//   "parameterOrder": [
-	//     "enterpriseId"
-	//   ],
-	//   "parameters": {
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections",
-	//   "request": {
-	//     "$ref": "Collection"
-	//   },
-	//   "response": {
-	//     "$ref": "Collection"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collections.list":
-
-type CollectionsListCall struct {
-	s            *Service
-	enterpriseId string
-	urlParams_   gensupport.URLParams
-	ifNoneMatch_ string
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// List: Retrieves the IDs of all the collections for an enterprise.
-func (r *CollectionsService) List(enterpriseId string) *CollectionsListCall {
-	c := &CollectionsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsListCall) Fields(s ...googleapi.Field) *CollectionsListCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// IfNoneMatch sets the optional parameter which makes the operation
-// fail if the object's ETag matches the given value. This is useful for
-// getting updates only after the object has changed since the last
-// request. Use googleapi.IsNotModified to check whether the response
-// error from Do is the result of In-None-Match.
-func (c *CollectionsListCall) IfNoneMatch(entityTag string) *CollectionsListCall {
-	c.ifNoneMatch_ = entityTag
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsListCall) Context(ctx context.Context) *CollectionsListCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsListCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsListCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	if c.ifNoneMatch_ != "" {
-		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
-	}
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("GET", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.list" call.
-// Exactly one of *CollectionsListResponse or error will be non-nil. Any
-// non-2xx status code is an error. Response headers are in either
-// *CollectionsListResponse.ServerResponse.Header or (if a response was
-// returned at all) in error.(*googleapi.Error).Header. Use
-// googleapi.IsNotModified to check whether the returned error was
-// because http.StatusNotModified was returned.
-func (c *CollectionsListCall) Do(opts ...googleapi.CallOption) (*CollectionsListResponse, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &CollectionsListResponse{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Retrieves the IDs of all the collections for an enterprise.",
-	//   "httpMethod": "GET",
-	//   "id": "androidenterprise.collections.list",
-	//   "parameterOrder": [
-	//     "enterpriseId"
-	//   ],
-	//   "parameters": {
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections",
-	//   "response": {
-	//     "$ref": "CollectionsListResponse"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collections.patch":
-
-type CollectionsPatchCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	collection   *Collection
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Patch: Updates a collection. This method supports patch semantics.
-func (r *CollectionsService) Patch(enterpriseId string, collectionId string, collection *Collection) *CollectionsPatchCall {
-	c := &CollectionsPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.collection = collection
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsPatchCall) Fields(s ...googleapi.Field) *CollectionsPatchCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsPatchCall) Context(ctx context.Context) *CollectionsPatchCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsPatchCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsPatchCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.collection)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("PATCH", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.patch" call.
-// Exactly one of *Collection or error will be non-nil. Any non-2xx
-// status code is an error. Response headers are in either
-// *Collection.ServerResponse.Header or (if a response was returned at
-// all) in error.(*googleapi.Error).Header. Use googleapi.IsNotModified
-// to check whether the returned error was because
-// http.StatusNotModified was returned.
-func (c *CollectionsPatchCall) Do(opts ...googleapi.CallOption) (*Collection, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Collection{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Updates a collection. This method supports patch semantics.",
-	//   "httpMethod": "PATCH",
-	//   "id": "androidenterprise.collections.patch",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}",
-	//   "request": {
-	//     "$ref": "Collection"
-	//   },
-	//   "response": {
-	//     "$ref": "Collection"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collections.update":
-
-type CollectionsUpdateCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	collection   *Collection
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Update: Updates a collection.
-func (r *CollectionsService) Update(enterpriseId string, collectionId string, collection *Collection) *CollectionsUpdateCall {
-	c := &CollectionsUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.collection = collection
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionsUpdateCall) Fields(s ...googleapi.Field) *CollectionsUpdateCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionsUpdateCall) Context(ctx context.Context) *CollectionsUpdateCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionsUpdateCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionsUpdateCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.collection)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("PUT", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collections.update" call.
-// Exactly one of *Collection or error will be non-nil. Any non-2xx
-// status code is an error. Response headers are in either
-// *Collection.ServerResponse.Header or (if a response was returned at
-// all) in error.(*googleapi.Error).Header. Use googleapi.IsNotModified
-// to check whether the returned error was because
-// http.StatusNotModified was returned.
-func (c *CollectionsUpdateCall) Do(opts ...googleapi.CallOption) (*Collection, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Collection{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Updates a collection.",
-	//   "httpMethod": "PUT",
-	//   "id": "androidenterprise.collections.update",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}",
-	//   "request": {
-	//     "$ref": "Collection"
-	//   },
-	//   "response": {
-	//     "$ref": "Collection"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collectionviewers.delete":
-
-type CollectionviewersDeleteCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	userId       string
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Delete: Removes the user from the list of those specifically allowed
-// to see the collection. If the collection's visibility is set to
-// viewersOnly then only such users will see the collection.
-func (r *CollectionviewersService) Delete(enterpriseId string, collectionId string, userId string) *CollectionviewersDeleteCall {
-	c := &CollectionviewersDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.userId = userId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionviewersDeleteCall) Fields(s ...googleapi.Field) *CollectionviewersDeleteCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionviewersDeleteCall) Context(ctx context.Context) *CollectionviewersDeleteCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionviewersDeleteCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionviewersDeleteCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("DELETE", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-		"userId":       c.userId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collectionviewers.delete" call.
-func (c *CollectionviewersDeleteCall) Do(opts ...googleapi.CallOption) error {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if err != nil {
-		return err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return err
-	}
-	return nil
-	// {
-	//   "description": "Removes the user from the list of those specifically allowed to see the collection. If the collection's visibility is set to viewersOnly then only such users will see the collection.",
-	//   "httpMethod": "DELETE",
-	//   "id": "androidenterprise.collectionviewers.delete",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId",
-	//     "userId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "userId": {
-	//       "description": "The ID of the user.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}",
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collectionviewers.get":
-
-type CollectionviewersGetCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	userId       string
-	urlParams_   gensupport.URLParams
-	ifNoneMatch_ string
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Get: Retrieves the ID of the user if they have been specifically
-// allowed to see the collection. If the collection's visibility is set
-// to viewersOnly then only these users will see the collection.
-func (r *CollectionviewersService) Get(enterpriseId string, collectionId string, userId string) *CollectionviewersGetCall {
-	c := &CollectionviewersGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.userId = userId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionviewersGetCall) Fields(s ...googleapi.Field) *CollectionviewersGetCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// IfNoneMatch sets the optional parameter which makes the operation
-// fail if the object's ETag matches the given value. This is useful for
-// getting updates only after the object has changed since the last
-// request. Use googleapi.IsNotModified to check whether the response
-// error from Do is the result of In-None-Match.
-func (c *CollectionviewersGetCall) IfNoneMatch(entityTag string) *CollectionviewersGetCall {
-	c.ifNoneMatch_ = entityTag
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionviewersGetCall) Context(ctx context.Context) *CollectionviewersGetCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionviewersGetCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionviewersGetCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	if c.ifNoneMatch_ != "" {
-		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
-	}
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("GET", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-		"userId":       c.userId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collectionviewers.get" call.
-// Exactly one of *User or error will be non-nil. Any non-2xx status
-// code is an error. Response headers are in either
-// *User.ServerResponse.Header or (if a response was returned at all) in
-// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
-// whether the returned error was because http.StatusNotModified was
-// returned.
-func (c *CollectionviewersGetCall) Do(opts ...googleapi.CallOption) (*User, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &User{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Retrieves the ID of the user if they have been specifically allowed to see the collection. If the collection's visibility is set to viewersOnly then only these users will see the collection.",
-	//   "httpMethod": "GET",
-	//   "id": "androidenterprise.collectionviewers.get",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId",
-	//     "userId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "userId": {
-	//       "description": "The ID of the user.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}",
-	//   "response": {
-	//     "$ref": "User"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collectionviewers.list":
-
-type CollectionviewersListCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	urlParams_   gensupport.URLParams
-	ifNoneMatch_ string
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// List: Retrieves the IDs of the users who have been specifically
-// allowed to see the collection. If the collection's visibility is set
-// to viewersOnly then only these users will see the collection.
-func (r *CollectionviewersService) List(enterpriseId string, collectionId string) *CollectionviewersListCall {
-	c := &CollectionviewersListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionviewersListCall) Fields(s ...googleapi.Field) *CollectionviewersListCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// IfNoneMatch sets the optional parameter which makes the operation
-// fail if the object's ETag matches the given value. This is useful for
-// getting updates only after the object has changed since the last
-// request. Use googleapi.IsNotModified to check whether the response
-// error from Do is the result of In-None-Match.
-func (c *CollectionviewersListCall) IfNoneMatch(entityTag string) *CollectionviewersListCall {
-	c.ifNoneMatch_ = entityTag
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionviewersListCall) Context(ctx context.Context) *CollectionviewersListCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionviewersListCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionviewersListCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	if c.ifNoneMatch_ != "" {
-		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
-	}
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}/users")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("GET", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collectionviewers.list" call.
-// Exactly one of *CollectionViewersListResponse or error will be
-// non-nil. Any non-2xx status code is an error. Response headers are in
-// either *CollectionViewersListResponse.ServerResponse.Header or (if a
-// response was returned at all) in error.(*googleapi.Error).Header. Use
-// googleapi.IsNotModified to check whether the returned error was
-// because http.StatusNotModified was returned.
-func (c *CollectionviewersListCall) Do(opts ...googleapi.CallOption) (*CollectionViewersListResponse, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &CollectionViewersListResponse{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Retrieves the IDs of the users who have been specifically allowed to see the collection. If the collection's visibility is set to viewersOnly then only these users will see the collection.",
-	//   "httpMethod": "GET",
-	//   "id": "androidenterprise.collectionviewers.list",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}/users",
-	//   "response": {
-	//     "$ref": "CollectionViewersListResponse"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collectionviewers.patch":
-
-type CollectionviewersPatchCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	userId       string
-	user         *User
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Patch: Adds the user to the list of those specifically allowed to see
-// the collection. If the collection's visibility is set to viewersOnly
-// then only such users will see the collection. This method supports
-// patch semantics.
-func (r *CollectionviewersService) Patch(enterpriseId string, collectionId string, userId string, user *User) *CollectionviewersPatchCall {
-	c := &CollectionviewersPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.userId = userId
-	c.user = user
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionviewersPatchCall) Fields(s ...googleapi.Field) *CollectionviewersPatchCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionviewersPatchCall) Context(ctx context.Context) *CollectionviewersPatchCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionviewersPatchCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionviewersPatchCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("PATCH", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-		"userId":       c.userId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collectionviewers.patch" call.
-// Exactly one of *User or error will be non-nil. Any non-2xx status
-// code is an error. Response headers are in either
-// *User.ServerResponse.Header or (if a response was returned at all) in
-// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
-// whether the returned error was because http.StatusNotModified was
-// returned.
-func (c *CollectionviewersPatchCall) Do(opts ...googleapi.CallOption) (*User, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &User{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Adds the user to the list of those specifically allowed to see the collection. If the collection's visibility is set to viewersOnly then only such users will see the collection. This method supports patch semantics.",
-	//   "httpMethod": "PATCH",
-	//   "id": "androidenterprise.collectionviewers.patch",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId",
-	//     "userId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "userId": {
-	//       "description": "The ID of the user.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}",
-	//   "request": {
-	//     "$ref": "User"
-	//   },
-	//   "response": {
-	//     "$ref": "User"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.collectionviewers.update":
-
-type CollectionviewersUpdateCall struct {
-	s            *Service
-	enterpriseId string
-	collectionId string
-	userId       string
-	user         *User
-	urlParams_   gensupport.URLParams
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// Update: Adds the user to the list of those specifically allowed to
-// see the collection. If the collection's visibility is set to
-// viewersOnly then only such users will see the collection.
-func (r *CollectionviewersService) Update(enterpriseId string, collectionId string, userId string, user *User) *CollectionviewersUpdateCall {
-	c := &CollectionviewersUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.collectionId = collectionId
-	c.userId = userId
-	c.user = user
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *CollectionviewersUpdateCall) Fields(s ...googleapi.Field) *CollectionviewersUpdateCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *CollectionviewersUpdateCall) Context(ctx context.Context) *CollectionviewersUpdateCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *CollectionviewersUpdateCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *CollectionviewersUpdateCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("PUT", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"collectionId": c.collectionId,
-		"userId":       c.userId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.collectionviewers.update" call.
-// Exactly one of *User or error will be non-nil. Any non-2xx status
-// code is an error. Response headers are in either
-// *User.ServerResponse.Header or (if a response was returned at all) in
-// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
-// whether the returned error was because http.StatusNotModified was
-// returned.
-func (c *CollectionviewersUpdateCall) Do(opts ...googleapi.CallOption) (*User, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &User{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Adds the user to the list of those specifically allowed to see the collection. If the collection's visibility is set to viewersOnly then only such users will see the collection.",
-	//   "httpMethod": "PUT",
-	//   "id": "androidenterprise.collectionviewers.update",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "collectionId",
-	//     "userId"
-	//   ],
-	//   "parameters": {
-	//     "collectionId": {
-	//       "description": "The ID of the collection.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "userId": {
-	//       "description": "The ID of the user.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/collections/{collectionId}/users/{userId}",
-	//   "request": {
-	//     "$ref": "User"
-	//   },
-	//   "response": {
-	//     "$ref": "User"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
 // method id "androidenterprise.devices.get":
 
 type DevicesGetCall struct {
@@ -4622,6 +2963,7 @@ func (c *DevicesGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -4784,6 +3126,7 @@ func (c *DevicesGetStateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -4939,6 +3282,7 @@ func (c *DevicesListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -5084,6 +3428,7 @@ func (c *DevicesSetStateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.devicestate)
 	if err != nil {
@@ -5239,6 +3584,7 @@ func (c *EnterprisesAcknowledgeNotificationSetCall) doRequest(alt string) (*http
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/acknowledgeNotificationSet")
@@ -5341,6 +3687,7 @@ func (c *EnterprisesCompleteSignupCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/completeSignup")
@@ -5426,9 +3773,10 @@ type EnterprisesCreateWebTokenCall struct {
 }
 
 // CreateWebToken: Returns a unique token to access an embeddable UI. To
-// generate a web UI, pass the generated token into the Play for Work
-// javascript API. Each token may only be used to start one UI session.
-// See the javascript API documentation for further information.
+// generate a web UI, pass the generated token into the managed Google
+// Play javascript API. Each token may only be used to start one UI
+// session. See the javascript API documentation for further
+// information.
 func (r *EnterprisesService) CreateWebToken(enterpriseId string, administratorwebtokenspec *AdministratorWebTokenSpec) *EnterprisesCreateWebTokenCall {
 	c := &EnterprisesCreateWebTokenCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.enterpriseId = enterpriseId
@@ -5467,6 +3815,7 @@ func (c *EnterprisesCreateWebTokenCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.administratorwebtokenspec)
 	if err != nil {
@@ -5522,7 +3871,7 @@ func (c *EnterprisesCreateWebTokenCall) Do(opts ...googleapi.CallOption) (*Admin
 	}
 	return ret, nil
 	// {
-	//   "description": "Returns a unique token to access an embeddable UI. To generate a web UI, pass the generated token into the Play for Work javascript API. Each token may only be used to start one UI session. See the javascript API documentation for further information.",
+	//   "description": "Returns a unique token to access an embeddable UI. To generate a web UI, pass the generated token into the managed Google Play javascript API. Each token may only be used to start one UI session. See the javascript API documentation for further information.",
 	//   "httpMethod": "POST",
 	//   "id": "androidenterprise.enterprises.createWebToken",
 	//   "parameterOrder": [
@@ -5561,9 +3910,9 @@ type EnterprisesDeleteCall struct {
 }
 
 // Delete: Deletes the binding between the EMM and enterprise. This is
-// now deprecated; use this to unenroll customers that were previously
-// enrolled with the 'insert' call, then enroll them again with the
-// 'enroll' call.
+// now deprecated. Use this method only to unenroll customers that were
+// previously enrolled with the insert call, then enroll them again with
+// the enroll call.
 func (r *EnterprisesService) Delete(enterpriseId string) *EnterprisesDeleteCall {
 	c := &EnterprisesDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.enterpriseId = enterpriseId
@@ -5601,6 +3950,7 @@ func (c *EnterprisesDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}")
@@ -5626,7 +3976,7 @@ func (c *EnterprisesDeleteCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Deletes the binding between the EMM and enterprise. This is now deprecated; use this to unenroll customers that were previously enrolled with the 'insert' call, then enroll them again with the 'enroll' call.",
+	//   "description": "Deletes the binding between the EMM and enterprise. This is now deprecated. Use this method only to unenroll customers that were previously enrolled with the insert call, then enroll them again with the enroll call.",
 	//   "httpMethod": "DELETE",
 	//   "id": "androidenterprise.enterprises.delete",
 	//   "parameterOrder": [
@@ -5697,6 +4047,7 @@ func (c *EnterprisesEnrollCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.enterprise)
 	if err != nil {
@@ -5838,6 +4189,7 @@ func (c *EnterprisesGenerateSignupUrlCall) doRequest(alt string) (*http.Response
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/signupUrl")
@@ -5965,6 +4317,7 @@ func (c *EnterprisesGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -6128,6 +4481,7 @@ func (c *EnterprisesGetServiceAccountCall) doRequest(alt string) (*http.Response
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -6280,6 +4634,7 @@ func (c *EnterprisesGetStoreLayoutCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -6408,6 +4763,7 @@ func (c *EnterprisesInsertCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.enterprise)
 	if err != nil {
@@ -6550,6 +4906,7 @@ func (c *EnterprisesListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -6639,8 +4996,8 @@ type EnterprisesPullNotificationSetCall struct {
 // request. The notification set may be empty if no notification are
 // pending.
 // A notification set returned needs to be acknowledged within 20
-// seconds by calling Enterprises​.AcknowledgeNotificationSet, unless
-// the notification set is empty.
+// seconds by calling Enterprises.AcknowledgeNotificationSet, unless the
+// notification set is empty.
 // Notifications that are not acknowledged within the 20 seconds will
 // eventually be included again in the response to another
 // PullNotificationSet request, and those that are never acknowledged
@@ -6707,6 +5064,7 @@ func (c *EnterprisesPullNotificationSetCall) doRequest(alt string) (*http.Respon
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/pullNotificationSet")
@@ -6754,7 +5112,7 @@ func (c *EnterprisesPullNotificationSetCall) Do(opts ...googleapi.CallOption) (*
 	}
 	return ret, nil
 	// {
-	//   "description": "Pulls and returns a notification set for the enterprises associated with the service account authenticated for the request. The notification set may be empty if no notification are pending.\nA notification set returned needs to be acknowledged within 20 seconds by calling Enterprises​.AcknowledgeNotificationSet, unless the notification set is empty.\nNotifications that are not acknowledged within the 20 seconds will eventually be included again in the response to another PullNotificationSet request, and those that are never acknowledged will ultimately be deleted according to the Google Cloud Platform Pub/Sub system policy.\nMultiple requests might be performed concurrently to retrieve notifications, in which case the pending notifications (if any) will be split among each caller, if any are pending.\nIf no notifications are present, an empty notification list is returned. Subsequent requests may return more notifications once they become available.",
+	//   "description": "Pulls and returns a notification set for the enterprises associated with the service account authenticated for the request. The notification set may be empty if no notification are pending.\nA notification set returned needs to be acknowledged within 20 seconds by calling Enterprises.AcknowledgeNotificationSet, unless the notification set is empty.\nNotifications that are not acknowledged within the 20 seconds will eventually be included again in the response to another PullNotificationSet request, and those that are never acknowledged will ultimately be deleted according to the Google Cloud Platform Pub/Sub system policy.\nMultiple requests might be performed concurrently to retrieve notifications, in which case the pending notifications (if any) will be split among each caller, if any are pending.\nIf no notifications are present, an empty notification list is returned. Subsequent requests may return more notifications once they become available.",
 	//   "httpMethod": "POST",
 	//   "id": "androidenterprise.enterprises.pullNotificationSet",
 	//   "parameters": {
@@ -6833,6 +5191,7 @@ func (c *EnterprisesSendTestPushNotificationCall) doRequest(alt string) (*http.R
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/sendTestPushNotification")
@@ -6921,7 +5280,7 @@ type EnterprisesSetAccountCall struct {
 	header_           http.Header
 }
 
-// SetAccount: Set the account that will be used to authenticate to the
+// SetAccount: Sets the account that will be used to authenticate to the
 // API as the enterprise.
 func (r *EnterprisesService) SetAccount(enterpriseId string, enterpriseaccount *EnterpriseAccount) *EnterprisesSetAccountCall {
 	c := &EnterprisesSetAccountCall{s: r.s, urlParams_: make(gensupport.URLParams)}
@@ -6961,6 +5320,7 @@ func (c *EnterprisesSetAccountCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.enterpriseaccount)
 	if err != nil {
@@ -7016,7 +5376,7 @@ func (c *EnterprisesSetAccountCall) Do(opts ...googleapi.CallOption) (*Enterpris
 	}
 	return ret, nil
 	// {
-	//   "description": "Set the account that will be used to authenticate to the API as the enterprise.",
+	//   "description": "Sets the account that will be used to authenticate to the API as the enterprise.",
 	//   "httpMethod": "PUT",
 	//   "id": "androidenterprise.enterprises.setAccount",
 	//   "parameterOrder": [
@@ -7057,11 +5417,11 @@ type EnterprisesSetStoreLayoutCall struct {
 
 // SetStoreLayout: Sets the store layout for the enterprise. By default,
 // storeLayoutType is set to "basic" and the basic store layout is
-// enabled. The basic layout only contains apps approved by the
-// administrator, and that have been added to the available product set
-// for a user (using the  setAvailableProductSet call). Apps on the page
-// are sorted in order of their product ID value. If you create a custom
-// store layout (by setting storeLayoutType = "custom"), the basic store
+// enabled. The basic layout only contains apps approved by the admin,
+// and that have been added to the available product set for a user
+// (using the  setAvailableProductSet call). Apps on the page are sorted
+// in order of their product ID value. If you create a custom store
+// layout (by setting storeLayoutType = "custom"), the basic store
 // layout is disabled.
 func (r *EnterprisesService) SetStoreLayout(enterpriseId string, storelayout *StoreLayout) *EnterprisesSetStoreLayoutCall {
 	c := &EnterprisesSetStoreLayoutCall{s: r.s, urlParams_: make(gensupport.URLParams)}
@@ -7101,6 +5461,7 @@ func (c *EnterprisesSetStoreLayoutCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storelayout)
 	if err != nil {
@@ -7156,7 +5517,7 @@ func (c *EnterprisesSetStoreLayoutCall) Do(opts ...googleapi.CallOption) (*Store
 	}
 	return ret, nil
 	// {
-	//   "description": "Sets the store layout for the enterprise. By default, storeLayoutType is set to \"basic\" and the basic store layout is enabled. The basic layout only contains apps approved by the administrator, and that have been added to the available product set for a user (using the  setAvailableProductSet call). Apps on the page are sorted in order of their product ID value. If you create a custom store layout (by setting storeLayoutType = \"custom\"), the basic store layout is disabled.",
+	//   "description": "Sets the store layout for the enterprise. By default, storeLayoutType is set to \"basic\" and the basic store layout is enabled. The basic layout only contains apps approved by the admin, and that have been added to the available product set for a user (using the  setAvailableProductSet call). Apps on the page are sorted in order of their product ID value. If you create a custom store layout (by setting storeLayoutType = \"custom\"), the basic store layout is disabled.",
 	//   "httpMethod": "PUT",
 	//   "id": "androidenterprise.enterprises.setStoreLayout",
 	//   "parameterOrder": [
@@ -7232,6 +5593,7 @@ func (c *EnterprisesUnenrollCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/unenroll")
@@ -7291,8 +5653,7 @@ type EntitlementsDeleteCall struct {
 	header_       http.Header
 }
 
-// Delete: Removes an entitlement to an app for a user and uninstalls
-// it.
+// Delete: Removes an entitlement to an app for a user.
 func (r *EntitlementsService) Delete(enterpriseId string, userId string, entitlementId string) *EntitlementsDeleteCall {
 	c := &EntitlementsDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.enterpriseId = enterpriseId
@@ -7332,6 +5693,7 @@ func (c *EntitlementsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/entitlements/{entitlementId}")
@@ -7359,7 +5721,7 @@ func (c *EntitlementsDeleteCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Removes an entitlement to an app for a user and uninstalls it.",
+	//   "description": "Removes an entitlement to an app for a user.",
 	//   "httpMethod": "DELETE",
 	//   "id": "androidenterprise.entitlements.delete",
 	//   "parameterOrder": [
@@ -7458,6 +5820,7 @@ func (c *EntitlementsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -7564,7 +5927,7 @@ type EntitlementsListCall struct {
 	header_      http.Header
 }
 
-// List: List of all entitlements for the specified user. Only the ID is
+// List: Lists all entitlements for the specified user. Only the ID is
 // set.
 func (r *EntitlementsService) List(enterpriseId string, userId string) *EntitlementsListCall {
 	c := &EntitlementsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
@@ -7614,6 +5977,7 @@ func (c *EntitlementsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -7668,7 +6032,7 @@ func (c *EntitlementsListCall) Do(opts ...googleapi.CallOption) (*EntitlementsLi
 	}
 	return ret, nil
 	// {
-	//   "description": "List of all entitlements for the specified user. Only the ID is set.",
+	//   "description": "Lists all entitlements for the specified user. Only the ID is set.",
 	//   "httpMethod": "GET",
 	//   "id": "androidenterprise.entitlements.list",
 	//   "parameterOrder": [
@@ -7765,6 +6129,7 @@ func (c *EntitlementsPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.entitlement)
 	if err != nil {
@@ -7933,6 +6298,7 @@ func (c *EntitlementsUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.entitlement)
 	if err != nil {
@@ -8099,6 +6465,7 @@ func (c *GrouplicensesGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8245,6 +6612,7 @@ func (c *GrouplicensesListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8385,6 +6753,7 @@ func (c *GrouplicenseusersListCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8527,6 +6896,7 @@ func (c *InstallsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/devices/{deviceId}/installs/{installId}")
@@ -8663,6 +7033,7 @@ func (c *InstallsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8829,6 +7200,7 @@ func (c *InstallsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8938,7 +7310,7 @@ type InstallsPatchCall struct {
 }
 
 // Patch: Requests to install the latest version of an app to a device.
-// If the app is already installed then it is updated to the latest
+// If the app is already installed, then it is updated to the latest
 // version if necessary. This method supports patch semantics.
 func (r *InstallsService) Patch(enterpriseId string, userId string, deviceId string, installId string, install *Install) *InstallsPatchCall {
 	c := &InstallsPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
@@ -8981,6 +7353,7 @@ func (c *InstallsPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.install)
 	if err != nil {
@@ -9039,7 +7412,7 @@ func (c *InstallsPatchCall) Do(opts ...googleapi.CallOption) (*Install, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Requests to install the latest version of an app to a device. If the app is already installed then it is updated to the latest version if necessary. This method supports patch semantics.",
+	//   "description": "Requests to install the latest version of an app to a device. If the app is already installed, then it is updated to the latest version if necessary. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "androidenterprise.installs.patch",
 	//   "parameterOrder": [
@@ -9103,7 +7476,7 @@ type InstallsUpdateCall struct {
 }
 
 // Update: Requests to install the latest version of an app to a device.
-// If the app is already installed then it is updated to the latest
+// If the app is already installed, then it is updated to the latest
 // version if necessary.
 func (r *InstallsService) Update(enterpriseId string, userId string, deviceId string, installId string, install *Install) *InstallsUpdateCall {
 	c := &InstallsUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
@@ -9146,6 +7519,7 @@ func (c *InstallsUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.install)
 	if err != nil {
@@ -9204,7 +7578,7 @@ func (c *InstallsUpdateCall) Do(opts ...googleapi.CallOption) (*Install, error) 
 	}
 	return ret, nil
 	// {
-	//   "description": "Requests to install the latest version of an app to a device. If the app is already installed then it is updated to the latest version if necessary.",
+	//   "description": "Requests to install the latest version of an app to a device. If the app is already installed, then it is updated to the latest version if necessary.",
 	//   "httpMethod": "PUT",
 	//   "id": "androidenterprise.installs.update",
 	//   "parameterOrder": [
@@ -9308,6 +7682,7 @@ func (c *ManagedconfigurationsfordeviceDeleteCall) doRequest(alt string) (*http.
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/devices/{deviceId}/managedConfigurationsForDevice/{managedConfigurationForDeviceId}")
@@ -9444,6 +7819,7 @@ func (c *ManagedconfigurationsfordeviceGetCall) doRequest(alt string) (*http.Res
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9610,6 +7986,7 @@ func (c *ManagedconfigurationsfordeviceListCall) doRequest(alt string) (*http.Re
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9763,6 +8140,7 @@ func (c *ManagedconfigurationsfordevicePatchCall) doRequest(alt string) (*http.R
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.managedconfiguration)
 	if err != nil {
@@ -9927,6 +8305,7 @@ func (c *ManagedconfigurationsfordeviceUpdateCall) doRequest(alt string) (*http.
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.managedconfiguration)
 	if err != nil {
@@ -10087,6 +8466,7 @@ func (c *ManagedconfigurationsforuserDeleteCall) doRequest(alt string) (*http.Re
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/managedConfigurationsForUser/{managedConfigurationForUserId}")
@@ -10214,6 +8594,7 @@ func (c *ManagedconfigurationsforuserGetCall) doRequest(alt string) (*http.Respo
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -10370,6 +8751,7 @@ func (c *ManagedconfigurationsforuserListCall) doRequest(alt string) (*http.Resp
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -10513,6 +8895,7 @@ func (c *ManagedconfigurationsforuserPatchCall) doRequest(alt string) (*http.Res
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.managedconfiguration)
 	if err != nil {
@@ -10667,6 +9050,7 @@ func (c *ManagedconfigurationsforuserUpdateCall) doRequest(alt string) (*http.Re
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.managedconfiguration)
 	if err != nil {
@@ -10833,6 +9217,7 @@ func (c *PermissionsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -10932,7 +9317,7 @@ type ProductsApproveCall struct {
 // permissions, if any. The maximum number of products that you can
 // approve per enterprise customer is 1,000.
 //
-// To learn how to use Google Play for Work to design and create a store
+// To learn how to use managed Google Play to design and create a store
 // layout to display approved products to your users, see Store Layout
 // Design.
 func (r *ProductsService) Approve(enterpriseId string, productId string, productsapproverequest *ProductsApproveRequest) *ProductsApproveCall {
@@ -10974,6 +9359,7 @@ func (c *ProductsApproveCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.productsapproverequest)
 	if err != nil {
@@ -11005,7 +9391,7 @@ func (c *ProductsApproveCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Approves the specified product and the relevant app permissions, if any. The maximum number of products that you can approve per enterprise customer is 1,000.\n\nTo learn how to use Google Play for Work to design and create a store layout to display approved products to your users, see Store Layout Design.",
+	//   "description": "Approves the specified product and the relevant app permissions, if any. The maximum number of products that you can approve per enterprise customer is 1,000.\n\nTo learn how to use managed Google Play to design and create a store layout to display approved products to your users, see Store Layout Design.",
 	//   "httpMethod": "POST",
 	//   "id": "androidenterprise.products.approve",
 	//   "parameterOrder": [
@@ -11105,6 +9491,7 @@ func (c *ProductsGenerateApprovalUrlCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/products/{productId}/generateApprovalUrl")
@@ -11263,6 +9650,7 @@ func (c *ProductsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11370,9 +9758,9 @@ type ProductsGetAppRestrictionsSchemaCall struct {
 // configurable properties for this product. All products have a schema,
 // but this schema may be empty if no managed configurations have been
 // defined. This schema can be used to populate a UI that allows an
-// administrator to configure the product. To apply a managed
-// configuration based on the schema obtained using this API, see
-// Managed Configurations through Play.
+// admin to configure the product. To apply a managed configuration
+// based on the schema obtained using this API, see Managed
+// Configurations through Play.
 func (r *ProductsService) GetAppRestrictionsSchema(enterpriseId string, productId string) *ProductsGetAppRestrictionsSchemaCall {
 	c := &ProductsGetAppRestrictionsSchemaCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.enterpriseId = enterpriseId
@@ -11428,6 +9816,7 @@ func (c *ProductsGetAppRestrictionsSchemaCall) doRequest(alt string) (*http.Resp
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11482,7 +9871,7 @@ func (c *ProductsGetAppRestrictionsSchemaCall) Do(opts ...googleapi.CallOption) 
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the schema that defines the configurable properties for this product. All products have a schema, but this schema may be empty if no managed configurations have been defined. This schema can be used to populate a UI that allows an administrator to configure the product. To apply a managed configuration based on the schema obtained using this API, see Managed Configurations through Play.",
+	//   "description": "Retrieves the schema that defines the configurable properties for this product. All products have a schema, but this schema may be empty if no managed configurations have been defined. This schema can be used to populate a UI that allows an admin to configure the product. To apply a managed configuration based on the schema obtained using this API, see Managed Configurations through Play.",
 	//   "httpMethod": "GET",
 	//   "id": "androidenterprise.products.getAppRestrictionsSchema",
 	//   "parameterOrder": [
@@ -11581,6 +9970,7 @@ func (c *ProductsGetPermissionsCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11713,7 +10103,7 @@ func (c *ProductsListCall) MaxResults(maxResults int64) *ProductsListCall {
 }
 
 // Query sets the optional parameter "query": The search query as typed
-// in the Google Play Store search box. If omitted, all approved apps
+// in the Google Play store search box. If omitted, all approved apps
 // will be returned (using the pagination parameters), including apps
 // that are not available in the store (e.g. unpublished apps).
 func (c *ProductsListCall) Query(query string) *ProductsListCall {
@@ -11722,7 +10112,7 @@ func (c *ProductsListCall) Query(query string) *ProductsListCall {
 }
 
 // Token sets the optional parameter "token": A pagination token is
-// contained in a requests response when there are more products. The
+// contained in a request''s response when there are more products. The
 // token can be used in a subsequent request to obtain more products,
 // and so forth. This parameter cannot be used in the initial request.
 func (c *ProductsListCall) Token(token string) *ProductsListCall {
@@ -11771,6 +10161,7 @@ func (c *ProductsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11854,12 +10245,12 @@ func (c *ProductsListCall) Do(opts ...googleapi.CallOption) (*ProductsListRespon
 	//       "type": "integer"
 	//     },
 	//     "query": {
-	//       "description": "The search query as typed in the Google Play Store search box. If omitted, all approved apps will be returned (using the pagination parameters), including apps that are not available in the store (e.g. unpublished apps).",
+	//       "description": "The search query as typed in the Google Play store search box. If omitted, all approved apps will be returned (using the pagination parameters), including apps that are not available in the store (e.g. unpublished apps).",
 	//       "location": "query",
 	//       "type": "string"
 	//     },
 	//     "token": {
-	//       "description": "A pagination token is contained in a requests response when there are more products. The token can be used in a subsequent request to obtain more products, and so forth. This parameter cannot be used in the initial request.",
+	//       "description": "A pagination token is contained in a request''s response when there are more products. The token can be used in a subsequent request to obtain more products, and so forth. This parameter cannot be used in the initial request.",
 	//       "location": "query",
 	//       "type": "string"
 	//     }
@@ -11926,6 +10317,7 @@ func (c *ProductsUnapproveCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/products/{productId}/unapprove")
@@ -11974,157 +10366,6 @@ func (c *ProductsUnapproveCall) Do(opts ...googleapi.CallOption) error {
 	//     }
 	//   },
 	//   "path": "enterprises/{enterpriseId}/products/{productId}/unapprove",
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/androidenterprise"
-	//   ]
-	// }
-
-}
-
-// method id "androidenterprise.products.updatePermissions":
-
-type ProductsUpdatePermissionsCall struct {
-	s                  *Service
-	enterpriseId       string
-	productId          string
-	productpermissions *ProductPermissions
-	urlParams_         gensupport.URLParams
-	ctx_               context.Context
-	header_            http.Header
-}
-
-// UpdatePermissions: This method has been deprecated. To
-// programmatically approve applications, you must use the iframe
-// mechanism via the  generateApprovalUrl and  approve methods of the
-// Products resource. For more information, see the  Play EMM API usage
-// requirements.
-//
-// The updatePermissions method (deprecated) updates the set of Android
-// app permissions for this app that have been accepted by the
-// enterprise.
-func (r *ProductsService) UpdatePermissions(enterpriseId string, productId string, productpermissions *ProductPermissions) *ProductsUpdatePermissionsCall {
-	c := &ProductsUpdatePermissionsCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.enterpriseId = enterpriseId
-	c.productId = productId
-	c.productpermissions = productpermissions
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *ProductsUpdatePermissionsCall) Fields(s ...googleapi.Field) *ProductsUpdatePermissionsCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *ProductsUpdatePermissionsCall) Context(ctx context.Context) *ProductsUpdatePermissionsCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *ProductsUpdatePermissionsCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *ProductsUpdatePermissionsCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.productpermissions)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/products/{productId}/permissions")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("PUT", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"enterpriseId": c.enterpriseId,
-		"productId":    c.productId,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "androidenterprise.products.updatePermissions" call.
-// Exactly one of *ProductPermissions or error will be non-nil. Any
-// non-2xx status code is an error. Response headers are in either
-// *ProductPermissions.ServerResponse.Header or (if a response was
-// returned at all) in error.(*googleapi.Error).Header. Use
-// googleapi.IsNotModified to check whether the returned error was
-// because http.StatusNotModified was returned.
-func (c *ProductsUpdatePermissionsCall) Do(opts ...googleapi.CallOption) (*ProductPermissions, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &ProductPermissions{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "This method has been deprecated. To programmatically approve applications, you must use the iframe mechanism via the  generateApprovalUrl and  approve methods of the Products resource. For more information, see the  Play EMM API usage requirements.\n\nThe updatePermissions method (deprecated) updates the set of Android app permissions for this app that have been accepted by the enterprise.",
-	//   "httpMethod": "PUT",
-	//   "id": "androidenterprise.products.updatePermissions",
-	//   "parameterOrder": [
-	//     "enterpriseId",
-	//     "productId"
-	//   ],
-	//   "parameters": {
-	//     "enterpriseId": {
-	//       "description": "The ID of the enterprise.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     },
-	//     "productId": {
-	//       "description": "The ID of the product.",
-	//       "location": "path",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "enterprises/{enterpriseId}/products/{productId}/permissions",
-	//   "request": {
-	//     "$ref": "ProductPermissions"
-	//   },
-	//   "response": {
-	//     "$ref": "ProductPermissions"
-	//   },
 	//   "scopes": [
 	//     "https://www.googleapis.com/auth/androidenterprise"
 	//   ]
@@ -12186,6 +10427,7 @@ func (c *ServiceaccountkeysDeleteCall) doRequest(alt string) (*http.Response, er
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/serviceAccountKeys/{keyId}")
@@ -12298,6 +10540,7 @@ func (c *ServiceaccountkeysInsertCall) doRequest(alt string) (*http.Response, er
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.serviceaccountkey)
 	if err != nil {
@@ -12444,6 +10687,7 @@ func (c *ServiceaccountkeysListCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -12574,6 +10818,7 @@ func (c *StorelayoutclustersDeleteCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/storeLayout/pages/{pageId}/clusters/{clusterId}")
@@ -12700,6 +10945,7 @@ func (c *StorelayoutclustersGetCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -12846,6 +11092,7 @@ func (c *StorelayoutclustersInsertCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storecluster)
 	if err != nil {
@@ -12998,6 +11245,7 @@ func (c *StorelayoutclustersListCall) doRequest(alt string) (*http.Response, err
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13138,6 +11386,7 @@ func (c *StorelayoutclustersPatchCall) doRequest(alt string) (*http.Response, er
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storecluster)
 	if err != nil {
@@ -13291,6 +11540,7 @@ func (c *StorelayoutclustersUpdateCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storecluster)
 	if err != nil {
@@ -13440,6 +11690,7 @@ func (c *StorelayoutpagesDeleteCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/storeLayout/pages/{pageId}")
@@ -13556,6 +11807,7 @@ func (c *StorelayoutpagesGetCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13692,6 +11944,7 @@ func (c *StorelayoutpagesInsertCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storepage)
 	if err != nil {
@@ -13834,6 +12087,7 @@ func (c *StorelayoutpagesListCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13965,6 +12219,7 @@ func (c *StorelayoutpagesPatchCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storepage)
 	if err != nil {
@@ -14108,6 +12363,7 @@ func (c *StorelayoutpagesUpdateCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.storepage)
 	if err != nil {
@@ -14249,6 +12505,7 @@ func (c *UsersDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}")
@@ -14359,6 +12616,7 @@ func (c *UsersGenerateAuthenticationTokenCall) doRequest(alt string) (*http.Resp
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/authenticationToken")
@@ -14454,8 +12712,8 @@ type UsersGenerateTokenCall struct {
 }
 
 // GenerateToken: Generates a token (activation code) to allow this user
-// to configure their work account in the Android Setup Wizard. Revokes
-// any previously generated token.
+// to configure their managed account in the Android Setup Wizard.
+// Revokes any previously generated token.
 //
 // This call only works with Google managed accounts.
 func (r *UsersService) GenerateToken(enterpriseId string, userId string) *UsersGenerateTokenCall {
@@ -14496,6 +12754,7 @@ func (c *UsersGenerateTokenCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/token")
@@ -14547,7 +12806,7 @@ func (c *UsersGenerateTokenCall) Do(opts ...googleapi.CallOption) (*UserToken, e
 	}
 	return ret, nil
 	// {
-	//   "description": "Generates a token (activation code) to allow this user to configure their work account in the Android Setup Wizard. Revokes any previously generated token.\n\nThis call only works with Google managed accounts.",
+	//   "description": "Generates a token (activation code) to allow this user to configure their managed account in the Android Setup Wizard. Revokes any previously generated token.\n\nThis call only works with Google managed accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "androidenterprise.users.generateToken",
 	//   "parameterOrder": [
@@ -14640,6 +12899,7 @@ func (c *UsersGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -14788,6 +13048,7 @@ func (c *UsersGetAvailableProductSetCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -14930,6 +13191,7 @@ func (c *UsersInsertCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
 	if err != nil {
@@ -15076,6 +13338,7 @@ func (c *UsersListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -15219,6 +13482,7 @@ func (c *UsersPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
 	if err != nil {
@@ -15361,6 +13625,7 @@ func (c *UsersRevokeTokenCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "enterprises/{enterpriseId}/users/{userId}/token")
@@ -15428,8 +13693,10 @@ type UsersSetAvailableProductSetCall struct {
 	header_      http.Header
 }
 
-// SetAvailableProductSet: Modifies the set of products a user is
-// entitled to access.
+// SetAvailableProductSet: Modifies the set of products that a user is
+// entitled to access (referred to as whitelisted products). Only
+// products that are approved or products that were previously approved
+// (products with revoked approval) can be whitelisted.
 func (r *UsersService) SetAvailableProductSet(enterpriseId string, userId string, productset *ProductSet) *UsersSetAvailableProductSetCall {
 	c := &UsersSetAvailableProductSetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.enterpriseId = enterpriseId
@@ -15469,6 +13736,7 @@ func (c *UsersSetAvailableProductSetCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.productset)
 	if err != nil {
@@ -15525,7 +13793,7 @@ func (c *UsersSetAvailableProductSetCall) Do(opts ...googleapi.CallOption) (*Pro
 	}
 	return ret, nil
 	// {
-	//   "description": "Modifies the set of products a user is entitled to access.",
+	//   "description": "Modifies the set of products that a user is entitled to access (referred to as whitelisted products). Only products that are approved or products that were previously approved (products with revoked approval) can be whitelisted.",
 	//   "httpMethod": "PUT",
 	//   "id": "androidenterprise.users.setAvailableProductSet",
 	//   "parameterOrder": [
@@ -15617,6 +13885,7 @@ func (c *UsersUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
 	if err != nil {

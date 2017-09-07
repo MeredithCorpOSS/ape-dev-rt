@@ -82,16 +82,15 @@ func makeProviderMap(items []plugin) string {
 
 // makeProvisionerMap creates a map of provisioners like this:
 //
-//	"file":        func() terraform.ResourceProvisioner { return new(file.ResourceProvisioner) },
-//	"local-exec":  func() terraform.ResourceProvisioner { return new(localexec.ResourceProvisioner) },
-//	"remote-exec": func() terraform.ResourceProvisioner { return new(remoteexec.ResourceProvisioner) },
+//	"chef":        chefprovisioner.Provisioner,
+//	"file":        fileprovisioner.Provisioner,
+//	"local-exec":  localexecprovisioner.Provisioner,
+//	"remote-exec": remoteexecprovisioner.Provisioner,
 //
-// This is more verbose than the Provider case because there is no corresponding
-// Provisioner function.
 func makeProvisionerMap(items []plugin) string {
 	output := ""
 	for _, item := range items {
-		output += fmt.Sprintf("\t\"%s\": func() terraform.ResourceProvisioner { return new(%s.%s) },\n", item.PluginName, item.ImportName, item.TypeName)
+		output += fmt.Sprintf("\t\"%s\":   %s.%s,\n", item.PluginName, item.ImportName, item.TypeName)
 	}
 	return output
 }
@@ -254,8 +253,8 @@ func discoverProviders() ([]plugin, error) {
 
 func discoverProvisioners() ([]plugin, error) {
 	path := "./builtin/provisioners"
-	typeID := "ResourceProvisioner"
-	typeName := ""
+	typeID := "terraform.ResourceProvisioner"
+	typeName := "Provisioner"
 	return discoverTypesInPath(path, typeID, typeName)
 }
 
@@ -270,6 +269,9 @@ import (
 IMPORTS
 	"github.com/hashicorp/terraform/plugin"
 	"github.com/hashicorp/terraform/terraform"
+
+	//New Provider Builds
+	opcprovider "github.com/hashicorp/terraform-provider-opc/opc"
 )
 
 var InternalProviders = map[string]plugin.ProviderFunc{
@@ -280,4 +282,8 @@ var InternalProvisioners = map[string]plugin.ProvisionerFunc{
 PROVISIONERS
 }
 
+func init() {
+	// New Provider Layouts
+	InternalProviders["opc"] = func() terraform.ResourceProvider { return opcprovider.Provider() }
+}
 `

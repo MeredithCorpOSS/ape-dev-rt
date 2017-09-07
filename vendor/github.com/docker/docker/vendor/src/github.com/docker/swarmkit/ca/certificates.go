@@ -28,7 +28,7 @@ import (
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/identity"
 	"github.com/docker/swarmkit/ioutils"
-	"github.com/docker/swarmkit/picker"
+	"github.com/docker/swarmkit/remotes"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,13 +37,14 @@ import (
 const (
 	// Security Strength Equivalence
 	//-----------------------------------
-	//| Key-type |  ECC  |  DH/DSA/RSA  |
-	//|   Node   |  256  |     3072     |
-	//|   Root   |  384  |     7680     |
+	//| ECC  |  DH/DSA/RSA  |
+	//| 256  |     3072     |
+	//| 384  |     7680     |
 	//-----------------------------------
 
 	// RootKeySize is the default size of the root CA key
-	RootKeySize = 384
+	// It would be ideal for the root key to use P-384, but in P-384 is not optimized in go yet :(
+	RootKeySize = 256
 	// RootKeyAlgo defines the default algorithm for the root CA Key
 	RootKeyAlgo = "ecdsa"
 	// PassphraseENVVar defines the environment variable to look for the
@@ -57,19 +58,17 @@ const (
 	RootCAExpiration = "630720000s"
 	// DefaultNodeCertExpiration represents the default expiration for node certificates (3 months)
 	DefaultNodeCertExpiration = 2160 * time.Hour
+	// CertBackdate represents the amount of time each certificate is backdated to try to avoid
+	// clock drift issues.
+	CertBackdate = 1 * time.Hour
 	// CertLowerRotationRange represents the minimum fraction of time that we will wait when randomly
 	// choosing our next certificate rotation
 	CertLowerRotationRange = 0.5
 	// CertUpperRotationRange represents the maximum fraction of time that we will wait when randomly
 	// choosing our next certificate rotation
 	CertUpperRotationRange = 0.8
-	// MinNodeCertExpiration represents the minimum expiration for node certificates (25 + 5 minutes)
-	// X - 5 > CertUpperRotationRange * X <=> X < 5/(1 - CertUpperRotationRange)
-	// Since we're issuing certificates 5 minutes in the past to get around clock drifts, and
-	// we're selecting a random rotation distribution range from CertLowerRotationRange to
-	// CertUpperRotationRange, we need to ensure that we don't accept an expiration time that will
-	// make a node able to randomly choose the next rotation after the expiration of the certificate.
-	MinNodeCertExpiration = 30 * time.Minute
+	// MinNodeCertExpiration represents the minimum expiration for node certificates
+	MinNodeCertExpiration = 1 * time.Hour
 )
 
 // ErrNoLocalRootCA is an error type used to indicate that the local root CA
@@ -156,7 +155,7 @@ func (rca *RootCA) IssueAndSaveNewCertificates(paths CertPaths, cn, ou, org stri
 
 // RequestAndSaveNewCertificates gets new certificates issued, either by signing them locally if a signer is
 // available, or by requesting them from the remote server at remoteAddr.
-func (rca *RootCA) RequestAndSaveNewCertificates(ctx context.Context, paths CertPaths, token string, picker *picker.Picker, transport credentials.TransportAuthenticator, nodeInfo chan<- api.IssueNodeCertificateResponse) (*tls.Certificate, error) {
+func (rca *RootCA) RequestAndSaveNewCertificates(ctx context.Context, paths CertPaths, token string, remotes remotes.Remotes, transport credentials.TransportAuthenticator, nodeInfo chan<- api.IssueNodeCertificateResponse) (*tls.Certificate, error) {
 	// Create a new key/pair and CSR for the new manager
 	// Write the new CSR and the new key to a temporary location so we can survive crashes on rotation
 	tempPaths := genTempPaths(paths)
@@ -171,7 +170,7 @@ func (rca *RootCA) RequestAndSaveNewCertificates(ctx context.Context, paths Cert
 	// responding properly (for example, it may have just been demoted).
 	var signedCert []byte
 	for i := 0; i != 5; i++ {
-		signedCert, err = GetRemoteSignedCertificate(ctx, csr, token, rca.Pool, picker, transport, nodeInfo)
+		signedCert, err = GetRemoteSignedCertificate(ctx, csr, token, rca.Pool, remotes, transport, nodeInfo)
 		if err == nil {
 			break
 		}
@@ -235,7 +234,7 @@ func (rca *RootCA) RequestAndSaveNewCertificates(ctx context.Context, paths Cert
 func PrepareCSR(csrBytes []byte, cn, ou, org string) cfsigner.SignRequest {
 	// All managers get added the subject-alt-name of CA, so they can be
 	// used for cert issuance.
-	hosts := []string{ou}
+	hosts := []string{ou, cn}
 	if ou == ManagerRole {
 		hosts = append(hosts, CARole)
 	}
@@ -424,33 +423,38 @@ func GetLocalRootCA(baseDir string) (RootCA, error) {
 }
 
 // GetRemoteCA returns the remote endpoint's CA certificate
-func GetRemoteCA(ctx context.Context, d digest.Digest, picker *picker.Picker) (RootCA, error) {
-	// We need a valid picker to be able to Dial to a remote CA
-	if picker == nil {
-		return RootCA{}, fmt.Errorf("valid remote address picker required")
-	}
-
+func GetRemoteCA(ctx context.Context, d digest.Digest, r remotes.Remotes) (RootCA, error) {
 	// This TLS Config is intentionally using InsecureSkipVerify. Either we're
 	// doing TOFU, in which case we don't validate the remote CA, or we're using
 	// a user supplied hash to check the integrity of the CA certificate.
 	insecureCreds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecureCreds),
-		grpc.WithBackoffMaxDelay(10 * time.Second),
-		grpc.WithPicker(picker)}
+		grpc.WithTimeout(5 * time.Second),
+		grpc.WithBackoffMaxDelay(5 * time.Second),
+	}
 
-	firstAddr, err := picker.PickAddr()
+	peer, err := r.Select()
 	if err != nil {
 		return RootCA{}, err
 	}
 
-	conn, err := grpc.Dial(firstAddr, opts...)
+	conn, err := grpc.Dial(peer.Addr, opts...)
 	if err != nil {
 		return RootCA{}, err
 	}
 	defer conn.Close()
 
 	client := api.NewCAClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	defer func() {
+		if err != nil {
+			r.Observe(peer, -remotes.DefaultObservationWeight)
+			return
+		}
+		r.Observe(peer, remotes.DefaultObservationWeight)
+	}()
 	response, err := client.GetRootCACertificate(ctx, &api.GetRootCACertificateRequest{})
 	if err != nil {
 		return RootCA{}, err
@@ -597,15 +601,11 @@ func GenerateAndWriteNewKey(paths CertPaths) (csr, key []byte, err error) {
 	return
 }
 
-// GetRemoteSignedCertificate submits a CSR to a remote CA server address
-// available through a picker, and that is part of a CA identified by a
-// specific certificate pool.
-func GetRemoteSignedCertificate(ctx context.Context, csr []byte, token string, rootCAPool *x509.CertPool, picker *picker.Picker, creds credentials.TransportAuthenticator, nodeInfo chan<- api.IssueNodeCertificateResponse) ([]byte, error) {
+// GetRemoteSignedCertificate submits a CSR to a remote CA server address,
+// and that is part of a CA identified by a specific certificate pool.
+func GetRemoteSignedCertificate(ctx context.Context, csr []byte, token string, rootCAPool *x509.CertPool, r remotes.Remotes, creds credentials.TransportAuthenticator, nodeInfo chan<- api.IssueNodeCertificateResponse) ([]byte, error) {
 	if rootCAPool == nil {
 		return nil, fmt.Errorf("valid root CA pool required")
-	}
-	if picker == nil {
-		return nil, fmt.Errorf("valid remote address picker required")
 	}
 
 	if creds == nil {
@@ -614,17 +614,18 @@ func GetRemoteSignedCertificate(ctx context.Context, csr []byte, token string, r
 		creds = credentials.NewTLS(&tls.Config{ServerName: CARole, RootCAs: rootCAPool})
 	}
 
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-		grpc.WithBackoffMaxDelay(10 * time.Second),
-		grpc.WithPicker(picker)}
-
-	firstAddr, err := picker.PickAddr()
+	peer, err := r.Select()
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := grpc.Dial(firstAddr, opts...)
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(creds),
+		grpc.WithTimeout(5 * time.Second),
+		grpc.WithBackoffMaxDelay(5 * time.Second),
+	}
+
+	conn, err := grpc.Dial(peer.Addr, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -656,8 +657,11 @@ func GetRemoteSignedCertificate(ctx context.Context, csr []byte, token string, r
 	// Exponential backoff with Max of 30 seconds to wait for a new retry
 	for {
 		// Send the Request and retrieve the certificate
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		statusResponse, err := caClient.NodeCertificateStatus(ctx, statusRequest)
 		if err != nil {
+			r.Observe(peer, -remotes.DefaultObservationWeight)
 			return nil, err
 		}
 
@@ -673,6 +677,7 @@ func GetRemoteSignedCertificate(ctx context.Context, csr []byte, token string, r
 			// retry until the certificate gets updated per our
 			// current request.
 			if bytes.Equal(statusResponse.Certificate.CSR, csr) {
+				r.Observe(peer, remotes.DefaultObservationWeight)
 				return statusResponse.Certificate.Certificate, nil
 			}
 		}

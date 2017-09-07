@@ -73,7 +73,6 @@ DEFAULT_BUNDLES=(
 	test-integration-cli
 	test-docker-py
 
-	cover
 	cross
 	tgz
 )
@@ -116,7 +115,7 @@ if [ "$AUTO_GOPATH" ]; then
 	if [ "$(go env GOOS)" = 'solaris' ]; then
 		# sys/unix is installed outside the standard library on solaris
 		# TODO need to allow for version change, need to get version from go
-		export GO_VERSION=${GO_VERSION:-"1.6.3"}
+		export GO_VERSION=${GO_VERSION:-"1.7"}
 		export GOPATH="${GOPATH}:/usr/lib/gocode/${GO_VERSION}"
 	fi
 fi
@@ -285,7 +284,6 @@ install_binary() {
 		return 1
 	fi
 }
-
 
 main() {
 	# We want this to fail if the bundles already exist and cannot be removed.

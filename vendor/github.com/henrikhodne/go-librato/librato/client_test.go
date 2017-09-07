@@ -98,14 +98,14 @@ func TestNewRequest_invalidJSON(t *testing.T) {
 	c := NewClient("", "")
 
 	type T struct {
-		A map[int]interface{}
+		A map[bool]interface{}
 	}
 	_, err := c.NewRequest("GET", "/", &T{})
 
 	if err == nil {
 		t.Error("Expected error to be returned.")
 	}
-	if err, ok := err.(*json.UnsupportedTypeError); !ok {
+	if _, ok := err.(*json.UnsupportedTypeError); !ok {
 		t.Errorf("Expected a JSON error; got %#v.", err)
 	}
 }

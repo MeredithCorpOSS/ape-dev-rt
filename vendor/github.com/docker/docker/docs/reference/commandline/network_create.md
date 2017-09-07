@@ -11,7 +11,7 @@ parent = "smn_cli"
 # network create
 
 ```markdown
-Usage:	docker network create [OPTIONS]
+Usage:	docker network create [OPTIONS] NETWORK
 
 Create a network
 
@@ -192,4 +192,4 @@ to create an externally isolated `overlay` network, you can specify the
 * [network disconnect](network_disconnect.md)
 * [network ls](network_ls.md)
 * [network rm](network_rm.md)
-* [Understand Docker container networks](../../userguide/networking/dockernetworks.md)
+* [Understand Docker container networks](../../userguide/networking/index.md)

@@ -20,7 +20,7 @@ Options:
   -f, --filter value    Filter output based on conditions provided (default [])
                         - exited=<int> an exit code of <int>
                         - label=<key> or label=<key>=<value>
-                        - status=(created|restarting|running|paused|exited)
+                        - status=(created|restarting|removing|running|paused|exited)
                         - name=<string> a container's name
                         - id=<ID> a container's ID
                         - before=(<container-name>|<container-id>)
@@ -68,7 +68,7 @@ The currently supported filters are:
 * label (`label=<key>` or `label=<key>=<value>`)
 * name (container's name)
 * exited (int - the code of exited containers. Only useful with `--all`)
-* status (created|restarting|running|paused|exited|dead)
+* status (created|restarting|running|removing|paused|exited|dead)
 * ancestor (`<image-name>[:<tag>]`,  `<image id>` or `<image@digest>`) - filters containers that were created from the given image or a descendant.
 * before (container's id or name) - filters containers created before given id or name
 * since (container's id or name) - filters containers created since given id or name
@@ -138,10 +138,27 @@ ea09c3c82f6e        registry:latest   /srv/run.sh            2 weeks ago        
 48ee228c9464        fedora:20         bash                   2 weeks ago         Exited (0) 2 weeks ago                              tender_torvalds
 ```
 
+#### Killed containers
+
+You can use a filter to locate containers that exited with status of `137`
+meaning a `SIGKILL(9)` killed them.
+
+```bash
+$ docker ps -a --filter 'exited=137'
+CONTAINER ID        IMAGE               COMMAND                CREATED             STATUS                       PORTS               NAMES
+b3e1c0ed5bfe        ubuntu:latest       "sleep 1000"           12 seconds ago      Exited (137) 5 seconds ago                       grave_kowalevski
+a2eb5558d669        redis:latest        "/entrypoint.sh redi   2 hours ago         Exited (137) 2 hours ago                         sharp_lalande
+
+Any of these events result in a `137` status:
+
+* the `init` process of the container is killed manually
+* `docker kill` kills the container
+* Docker daemon restarts which kills all running containers
+
 #### Status
 
 The `status` filter matches containers by status. You can filter using
-`created`, `restarting`, `running`, `paused`, `exited` and `dead`. For example,
+`created`, `restarting`, `running`, `removing`, `paused`, `exited` and `dead`. For example,
 to filter for `running` containers:
 
 ```bash

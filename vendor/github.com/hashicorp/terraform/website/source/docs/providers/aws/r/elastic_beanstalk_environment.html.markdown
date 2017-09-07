@@ -17,16 +17,15 @@ Environments are often things such as `development`, `integration`, or
 
 ## Example Usage
 
-
-```
+```hcl
 resource "aws_elastic_beanstalk_application" "tftest" {
-  name = "tf-test-name"
+  name        = "tf-test-name"
   description = "tf-test-desc"
 }
 
 resource "aws_elastic_beanstalk_environment" "tfenvtest" {
-  name = "tf-test-name"
-  application = "${aws_elastic_beanstalk_application.tftest.name}"
+  name                = "tf-test-name"
+  application         = "${aws_elastic_beanstalk_application.tftest.name}"
   solution_stack_name = "64bit Amazon Linux 2015.03 v2.0.3 running Go 1.4"
 }
 ```
@@ -51,7 +50,7 @@ The following arguments are supported:
 off of. Example stacks can be found in the [Amazon API documentation][1]
 * `template_name` – (Optional) The name of the Elastic Beanstalk Configuration
   template to use in deployment
-* `wait_for_ready_timeout` - (Default: `10m`) The maximum
+* `wait_for_ready_timeout` - (Default: `20m`) The maximum
   [duration](https://golang.org/pkg/time/#ParseDuration) that Terraform should
   wait for an Elastic Beanstalk Environment to be in a ready state before timing
   out.
@@ -80,16 +79,17 @@ The `setting` and `all_settings` mappings support the following format:
 
 ### Example With Options
 
-```
+```hcl
 resource "aws_elastic_beanstalk_application" "tftest" {
-  name = "tf-test-name"
+  name        = "tf-test-name"
   description = "tf-test-desc"
 }
 
 resource "aws_elastic_beanstalk_environment" "tfenvtest" {
-  name = "tf-test-name"
-  application = "${aws_elastic_beanstalk_application.tftest.name}"
+  name                = "tf-test-name"
+  application         = "${aws_elastic_beanstalk_application.tftest.name}"
   solution_stack_name = "64bit Amazon Linux 2015.03 v2.0.3 running Go 1.4"
+
   setting {
     namespace = "aws:ec2:vpc"
     name      = "VPCId"
@@ -100,7 +100,7 @@ resource "aws_elastic_beanstalk_environment" "tfenvtest" {
     namespace = "aws:ec2:vpc"
     name      = "Subnets"
     value     = "subnet-xxxxxxxx"
-  }  
+  }
 }
 ```
 
@@ -108,6 +108,7 @@ resource "aws_elastic_beanstalk_environment" "tfenvtest" {
 
 The following attributes are exported:
 
+* `id` - ID of the Elastic Beanstalk Environment.
 * `name` - Name of the Elastic Beanstalk Environment.
 * `description` - Description of the Elastic Beanstalk Environment.
 * `tier` - The environment tier specified.
@@ -131,7 +132,7 @@ The following attributes are exported:
 
 ## Import
 
-Elastic Beanstalk Environments can be imported using the `id`, e.g. 
+Elastic Beanstalk Environments can be imported using the `id`, e.g.
 
 ```
 $ terraform import aws_elastic_beanstalk_environment.prodenv e-rpqsewtp2j

@@ -2,7 +2,6 @@ package command
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -30,21 +29,19 @@ type agentWrapper struct {
 	dir      string
 	config   *agent.Config
 	agent    *agent.Agent
-	rpc      *agent.AgentRPC
 	http     *agent.HTTPServer
 	addr     string
 	httpAddr string
 }
 
 func (a *agentWrapper) Shutdown() {
-	a.rpc.Shutdown()
 	a.agent.Shutdown()
 	a.http.Shutdown()
 	os.RemoveAll(a.dir)
 }
 
 func testAgent(t *testing.T) *agentWrapper {
-	return testAgentWithConfig(t, func(c *agent.Config) {})
+	return testAgentWithConfig(t, nil)
 }
 
 func testAgentWithAPIClient(t *testing.T) (*agentWrapper, *api.Client) {
@@ -57,16 +54,21 @@ func testAgentWithAPIClient(t *testing.T) (*agentWrapper, *api.Client) {
 }
 
 func testAgentWithConfig(t *testing.T, cb func(c *agent.Config)) *agentWrapper {
+	return testAgentWithConfigReload(t, cb, nil)
+}
+
+func testAgentWithConfigReload(t *testing.T, cb func(c *agent.Config), reloadCh chan chan error) *agentWrapper {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
 
 	lw := logger.NewLogWriter(512)
-	mult := io.MultiWriter(os.Stderr, lw)
 
 	conf := nextConfig()
-	cb(conf)
+	if cb != nil {
+		cb(conf)
+	}
 
 	dir, err := ioutil.TempDir("", "agent")
 	if err != nil {
@@ -74,13 +76,11 @@ func testAgentWithConfig(t *testing.T, cb func(c *agent.Config)) *agentWrapper {
 	}
 	conf.DataDir = dir
 
-	a, err := agent.Create(conf, lw, nil, nil)
+	a, err := agent.Create(conf, lw, nil, reloadCh)
 	if err != nil {
 		os.RemoveAll(dir)
 		t.Fatalf(fmt.Sprintf("err: %v", err))
 	}
-
-	rpc := agent.NewAgentRPC(a, l, mult, lw)
 
 	conf.Addresses.HTTP = "127.0.0.1"
 	httpAddr := fmt.Sprintf("127.0.0.1:%d", conf.Ports.HTTP)
@@ -99,7 +99,6 @@ func testAgentWithConfig(t *testing.T, cb func(c *agent.Config)) *agentWrapper {
 		dir:      dir,
 		config:   conf,
 		agent:    a,
-		rpc:      rpc,
 		http:     http[0],
 		addr:     l.Addr().String(),
 		httpAddr: httpAddr,
@@ -118,7 +117,6 @@ func nextConfig() *agent.Config {
 
 	conf.Ports.HTTP = 10000 + 10*idx
 	conf.Ports.HTTPS = 10401 + 10*idx
-	conf.Ports.RPC = 10100 + 10*idx
 	conf.Ports.SerfLan = 10201 + 10*idx
 	conf.Ports.SerfWan = 10202 + 10*idx
 	conf.Ports.Server = 10300 + 10*idx

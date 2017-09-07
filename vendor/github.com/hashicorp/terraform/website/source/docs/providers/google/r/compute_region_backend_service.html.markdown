@@ -9,18 +9,18 @@ description: |-
 # google\_compute\_region\_backend\_service
 
 A Region Backend Service defines a regionally-scoped group of virtual machines that will serve traffic for load balancing.
-
-See [backendServices](https://cloud.google.com/compute/docs/reference/latest/backendServices) documentation for more on this resource type, and [Internal Load Balancing](https://cloud.google.com/compute/docs/load-balancing/internal/) documentation for more details on usage.
+For more information see [the official documentation](https://cloud.google.com/compute/docs/load-balancing/internal/) 
+and [API](https://cloud.google.com/compute/docs/reference/latest/backendServices).
 
 ## Example Usage
 
 ```tf
 resource "google_compute_region_backend_service" "foobar" {
-  name                  = "blablah"
-  description           = "Hello World 1234"
-  protocol              = "TCP"
-  timeout_sec           = 10
-  session_affinity      = "CLIENT_IP"
+  name             = "blablah"
+  description      = "Hello World 1234"
+  protocol         = "TCP"
+  timeout_sec      = 10
+  session_affinity = "CLIENT_IP"
 
   backend {
     group = "${google_compute_instance_group_manager.foo.instance_group}"
@@ -56,7 +56,7 @@ resource "google_compute_health_check" "default" {
   name               = "test"
   check_interval_sec = 1
   timeout_sec        = 1
-  type               = "TCP"
+
   tcp_health_check {
     port = "80"
   }
@@ -75,7 +75,7 @@ The following arguments are supported:
 - - -
 
 * `backend` - (Optional) The list of backends that serve this BackendService.
-    See *Backend* below.
+    Structure is documented below.
 
 * `description` - (Optional) The textual description for the backend service.
 
@@ -96,11 +96,11 @@ The following arguments are supported:
     to a request before considering the request failed. Defaults to `30`.
 
 
-**Backend** supports the following attributes:
+The `backend` block supports:
 
 * `group` - (Required) The name or URI of a Compute Engine instance group
     (`google_compute_instance_group_manager.xyz.instance_group`) that can
-    receive traffic.
+    receive traffic. Instance groups must contain at least one instance.
 
 * `balancing_mode` - (Optional) Defines the strategy for balancing load.
     Defaults to `UTILIZATION`

@@ -71,9 +71,10 @@ func New(client *http.Client) (*APIService, error) {
 }
 
 type APIService struct {
-	client    *http.Client
-	BasePath  string // API endpoint base URL
-	UserAgent string // optional additional User-Agent fragment
+	client                    *http.Client
+	BasePath                  string // API endpoint base URL
+	UserAgent                 string // optional additional User-Agent fragment
+	GoogleClientHeaderElement string // client header fragment, for Google use only
 
 	Accounts *AccountsService
 
@@ -103,6 +104,10 @@ func (s *APIService) userAgent() string {
 		return googleapi.UserAgent
 	}
 	return googleapi.UserAgent + " " + s.UserAgent
+}
+
+func (s *APIService) clientHeader() string {
+	return gensupport.GoogleClientHeader("20170210", s.GoogleClientHeaderElement)
 }
 
 func NewAccountsService(s *APIService) *AccountsService {
@@ -209,11 +214,12 @@ type Account struct {
 	// AdultContent: Indicates whether the merchant sells adult content.
 	AdultContent bool `json:"adultContent,omitempty"`
 
-	// AdwordsLinks: List of linked AdWords accounts, active or pending
-	// approval. To create a new link request, add a new link with status
-	// active to the list. It will remain is state pending until approved or
-	// rejected in the AdWords interface. To delete an active link or to
-	// cancel a link request, remove it from the list.
+	// AdwordsLinks: List of linked AdWords accounts that are active or
+	// pending approval. To create a new link request, add a new link with
+	// status active to the list. It will remain in a pending state until
+	// approved or rejected either in the AdWords interface or through the
+	// AdWords API. To delete an active link, or to cancel a link request,
+	// remove it from the list.
 	AdwordsLinks []*AccountAdwordsLink `json:"adwordsLinks,omitempty"`
 
 	// Id: Merchant Center account ID.
@@ -841,6 +847,9 @@ type AccountStatusDataQualityIssue struct {
 	// Country: Country for which this issue is reported.
 	Country string `json:"country,omitempty"`
 
+	// Detail: A more detailed description of the issue.
+	Detail string `json:"detail,omitempty"`
+
 	// DisplayedValue: Actual value displayed on the landing page.
 	DisplayedValue string `json:"displayedValue,omitempty"`
 
@@ -852,6 +861,9 @@ type AccountStatusDataQualityIssue struct {
 
 	// LastChecked: Last time the account was checked for this issue.
 	LastChecked string `json:"lastChecked,omitempty"`
+
+	// Location: The attribute name that is relevant for the issue.
+	Location string `json:"location,omitempty"`
 
 	// NumItems: Number of items in the account found to have the said
 	// issue.
@@ -1901,7 +1913,8 @@ type Datafeed struct {
 	// the feed. Must be a valid language for targetCountry.
 	ContentLanguage string `json:"contentLanguage,omitempty"`
 
-	// ContentType: The type of data feed.
+	// ContentType: The type of data feed. For product inventory feeds, only
+	// feeds for local stores, not online stores, are supported.
 	ContentType string `json:"contentType,omitempty"`
 
 	// FetchSchedule: Fetch schedule for the feed file.
@@ -3128,6 +3141,20 @@ func (s *LoyaltyPoints) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *LoyaltyPoints) UnmarshalJSON(data []byte) error {
+	type noMethod LoyaltyPoints
+	var s1 struct {
+		Ratio gensupport.JSONFloat64 `json:"ratio"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Ratio = float64(s1.Ratio)
+	return nil
+}
+
 type Order struct {
 	// Acknowledged: Whether the order was acknowledged.
 	Acknowledged bool `json:"acknowledged,omitempty"`
@@ -3326,8 +3353,7 @@ type OrderCustomer struct {
 	// explicitly chose to opt in or out of providing marketing rights to
 	// the merchant. If unset, this indicates the user has already made this
 	// choice in a previous purchase, and was thus not shown the marketing
-	// right opt in/out checkbox during the Purchases on Google checkout
-	// flow.
+	// right opt in/out checkbox during the checkout flow.
 	ExplicitMarketingPreference bool `json:"explicitMarketingPreference,omitempty"`
 
 	// FullName: Full name of the customer.
@@ -5527,6 +5553,20 @@ func (s *Product) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *Product) UnmarshalJSON(data []byte) error {
+	type noMethod Product
+	var s1 struct {
+		DisplayAdsValue gensupport.JSONFloat64 `json:"displayAdsValue"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.DisplayAdsValue = float64(s1.DisplayAdsValue)
+	return nil
+}
+
 type ProductAspect struct {
 	// AspectName: The name of the aspect.
 	AspectName string `json:"aspectName,omitempty"`
@@ -5751,6 +5791,20 @@ func (s *ProductShippingDimension) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *ProductShippingDimension) UnmarshalJSON(data []byte) error {
+	type noMethod ProductShippingDimension
+	var s1 struct {
+		Value gensupport.JSONFloat64 `json:"value"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Value = float64(s1.Value)
+	return nil
+}
+
 type ProductShippingWeight struct {
 	// Unit: The unit of value.
 	Unit string `json:"unit,omitempty"`
@@ -5780,6 +5834,20 @@ func (s *ProductShippingWeight) MarshalJSON() ([]byte, error) {
 	type noMethod ProductShippingWeight
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
+}
+
+func (s *ProductShippingWeight) UnmarshalJSON(data []byte) error {
+	type noMethod ProductShippingWeight
+	var s1 struct {
+		Value gensupport.JSONFloat64 `json:"value"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Value = float64(s1.Value)
+	return nil
 }
 
 // ProductStatus: The status of a product, i.e., information about a
@@ -5975,6 +6043,20 @@ func (s *ProductTax) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
+func (s *ProductTax) UnmarshalJSON(data []byte) error {
+	type noMethod ProductTax
+	var s1 struct {
+		Rate gensupport.JSONFloat64 `json:"rate"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Rate = float64(s1.Rate)
+	return nil
+}
+
 type ProductUnitPricingBaseMeasure struct {
 	// Unit: The unit of the denominator.
 	Unit string `json:"unit,omitempty"`
@@ -6033,6 +6115,20 @@ func (s *ProductUnitPricingMeasure) MarshalJSON() ([]byte, error) {
 	type noMethod ProductUnitPricingMeasure
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
+}
+
+func (s *ProductUnitPricingMeasure) UnmarshalJSON(data []byte) error {
+	type noMethod ProductUnitPricingMeasure
+	var s1 struct {
+		Value gensupport.JSONFloat64 `json:"value"`
+		*noMethod
+	}
+	s1.noMethod = (*noMethod)(s)
+	if err := json.Unmarshal(data, &s1); err != nil {
+		return err
+	}
+	s.Value = float64(s1.Value)
+	return nil
 }
 
 type ProductsCustomBatchRequest struct {
@@ -6880,8 +6976,7 @@ type TestOrderCustomer struct {
 	// explicitly chose to opt in or out of providing marketing rights to
 	// the merchant. If unset, this indicates the user has already made this
 	// choice in a previous purchase, and was thus not shown the marketing
-	// right opt in/out checkbox during the Purchases on Google checkout
-	// flow. Optional.
+	// right opt in/out checkbox during the checkout flow. Optional.
 	ExplicitMarketingPreference bool `json:"explicitMarketingPreference,omitempty"`
 
 	// FullName: Full name of the customer.
@@ -7194,6 +7289,7 @@ func (c *AccountsAuthinfoCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -7314,6 +7410,7 @@ func (c *AccountsCustombatchCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accountscustombatchrequest)
 	if err != nil {
@@ -7401,7 +7498,8 @@ type AccountsDeleteCall struct {
 	header_    http.Header
 }
 
-// Delete: Deletes a Merchant Center sub-account.
+// Delete: Deletes a Merchant Center sub-account. This method can only
+// be called for multi-client accounts.
 func (r *AccountsService) Delete(merchantId uint64, accountId uint64) *AccountsDeleteCall {
 	c := &AccountsDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -7447,6 +7545,7 @@ func (c *AccountsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "{merchantId}/accounts/{accountId}")
@@ -7473,7 +7572,7 @@ func (c *AccountsDeleteCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Deletes a Merchant Center sub-account.",
+	//   "description": "Deletes a Merchant Center sub-account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "DELETE",
 	//   "id": "content.accounts.delete",
 	//   "parameterOrder": [
@@ -7521,7 +7620,10 @@ type AccountsGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves a Merchant Center account.
+// Get: Retrieves a Merchant Center account. This method can only be
+// called for accounts to which the managing account has access: either
+// the managing account itself or sub-accounts if the managing account
+// is a multi-client account.
 func (r *AccountsService) Get(merchantId uint64, accountId uint64) *AccountsGetCall {
 	c := &AccountsGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -7570,6 +7672,7 @@ func (c *AccountsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -7624,7 +7727,7 @@ func (c *AccountsGetCall) Do(opts ...googleapi.CallOption) (*Account, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves a Merchant Center account.",
+	//   "description": "Retrieves a Merchant Center account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accounts.get",
 	//   "parameterOrder": [
@@ -7669,7 +7772,8 @@ type AccountsInsertCall struct {
 	header_    http.Header
 }
 
-// Insert: Creates a Merchant Center sub-account.
+// Insert: Creates a Merchant Center sub-account. This method can only
+// be called for multi-client accounts.
 func (r *AccountsService) Insert(merchantId uint64, account *Account) *AccountsInsertCall {
 	c := &AccountsInsertCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -7715,6 +7819,7 @@ func (c *AccountsInsertCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.account)
 	if err != nil {
@@ -7770,7 +7875,7 @@ func (c *AccountsInsertCall) Do(opts ...googleapi.CallOption) (*Account, error) 
 	}
 	return ret, nil
 	// {
-	//   "description": "Creates a Merchant Center sub-account.",
+	//   "description": "Creates a Merchant Center sub-account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.accounts.insert",
 	//   "parameterOrder": [
@@ -7815,7 +7920,8 @@ type AccountsListCall struct {
 	header_      http.Header
 }
 
-// List: Lists the sub-accounts in your Merchant Center account.
+// List: Lists the sub-accounts in your Merchant Center account. This
+// method can only be called for multi-client accounts.
 func (r *AccountsService) List(merchantId uint64) *AccountsListCall {
 	c := &AccountsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -7877,6 +7983,7 @@ func (c *AccountsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -7930,7 +8037,7 @@ func (c *AccountsListCall) Do(opts ...googleapi.CallOption) (*AccountsListRespon
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the sub-accounts in your Merchant Center account.",
+	//   "description": "Lists the sub-accounts in your Merchant Center account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accounts.list",
 	//   "parameterOrder": [
@@ -8000,8 +8107,10 @@ type AccountsPatchCall struct {
 	header_    http.Header
 }
 
-// Patch: Updates a Merchant Center account. This method supports patch
-// semantics.
+// Patch: Updates a Merchant Center account. This method can only be
+// called for accounts to which the managing account has access: either
+// the managing account itself or sub-accounts if the managing account
+// is a multi-client account. This method supports patch semantics.
 func (r *AccountsService) Patch(merchantId uint64, accountId uint64, account *Account) *AccountsPatchCall {
 	c := &AccountsPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8048,6 +8157,7 @@ func (c *AccountsPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.account)
 	if err != nil {
@@ -8104,7 +8214,7 @@ func (c *AccountsPatchCall) Do(opts ...googleapi.CallOption) (*Account, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates a Merchant Center account. This method supports patch semantics.",
+	//   "description": "Updates a Merchant Center account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "content.accounts.patch",
 	//   "parameterOrder": [
@@ -8158,7 +8268,10 @@ type AccountsUpdateCall struct {
 	header_    http.Header
 }
 
-// Update: Updates a Merchant Center account.
+// Update: Updates a Merchant Center account. This method can only be
+// called for accounts to which the managing account has access: either
+// the managing account itself or sub-accounts if the managing account
+// is a multi-client account.
 func (r *AccountsService) Update(merchantId uint64, accountId uint64, account *Account) *AccountsUpdateCall {
 	c := &AccountsUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8205,6 +8318,7 @@ func (c *AccountsUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.account)
 	if err != nil {
@@ -8261,7 +8375,7 @@ func (c *AccountsUpdateCall) Do(opts ...googleapi.CallOption) (*Account, error) 
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates a Merchant Center account.",
+	//   "description": "Updates a Merchant Center account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "PUT",
 	//   "id": "content.accounts.update",
 	//   "parameterOrder": [
@@ -8359,6 +8473,7 @@ func (c *AccountshippingCustombatchCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accountshippingcustombatchrequest)
 	if err != nil {
@@ -8448,7 +8563,10 @@ type AccountshippingGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves the shipping settings of the account.
+// Get: Retrieves the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *AccountshippingService) Get(merchantId uint64, accountId uint64) *AccountshippingGetCall {
 	c := &AccountshippingGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8497,6 +8615,7 @@ func (c *AccountshippingGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8551,7 +8670,7 @@ func (c *AccountshippingGetCall) Do(opts ...googleapi.CallOption) (*AccountShipp
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the shipping settings of the account.",
+	//   "description": "Retrieves the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accountshipping.get",
 	//   "parameterOrder": [
@@ -8597,7 +8716,8 @@ type AccountshippingListCall struct {
 }
 
 // List: Lists the shipping settings of the sub-accounts in your
-// Merchant Center account.
+// Merchant Center account. This method can only be called for
+// multi-client accounts.
 func (r *AccountshippingService) List(merchantId uint64) *AccountshippingListCall {
 	c := &AccountshippingListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8660,6 +8780,7 @@ func (c *AccountshippingListCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -8713,7 +8834,7 @@ func (c *AccountshippingListCall) Do(opts ...googleapi.CallOption) (*Accountship
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the shipping settings of the sub-accounts in your Merchant Center account.",
+	//   "description": "Lists the shipping settings of the sub-accounts in your Merchant Center account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accountshipping.list",
 	//   "parameterOrder": [
@@ -8783,8 +8904,11 @@ type AccountshippingPatchCall struct {
 	header_         http.Header
 }
 
-// Patch: Updates the shipping settings of the account. This method
-// supports patch semantics.
+// Patch: Updates the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account. This method supports patch
+// semantics.
 func (r *AccountshippingService) Patch(merchantId uint64, accountId uint64, accountshipping *AccountShipping) *AccountshippingPatchCall {
 	c := &AccountshippingPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8831,6 +8955,7 @@ func (c *AccountshippingPatchCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accountshipping)
 	if err != nil {
@@ -8887,7 +9012,7 @@ func (c *AccountshippingPatchCall) Do(opts ...googleapi.CallOption) (*AccountShi
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the shipping settings of the account. This method supports patch semantics.",
+	//   "description": "Updates the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "content.accountshipping.patch",
 	//   "parameterOrder": [
@@ -8941,7 +9066,10 @@ type AccountshippingUpdateCall struct {
 	header_         http.Header
 }
 
-// Update: Updates the shipping settings of the account.
+// Update: Updates the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *AccountshippingService) Update(merchantId uint64, accountId uint64, accountshipping *AccountShipping) *AccountshippingUpdateCall {
 	c := &AccountshippingUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -8988,6 +9116,7 @@ func (c *AccountshippingUpdateCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accountshipping)
 	if err != nil {
@@ -9044,7 +9173,7 @@ func (c *AccountshippingUpdateCall) Do(opts ...googleapi.CallOption) (*AccountSh
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the shipping settings of the account.",
+	//   "description": "Updates the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "PUT",
 	//   "id": "content.accountshipping.update",
 	//   "parameterOrder": [
@@ -9134,6 +9263,7 @@ func (c *AccountstatusesCustombatchCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accountstatusescustombatchrequest)
 	if err != nil {
@@ -9215,7 +9345,10 @@ type AccountstatusesGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves the status of a Merchant Center account.
+// Get: Retrieves the status of a Merchant Center account. This method
+// can only be called for accounts to which the managing account has
+// access: either the managing account itself or sub-accounts if the
+// managing account is a multi-client account.
 func (r *AccountstatusesService) Get(merchantId uint64, accountId uint64) *AccountstatusesGetCall {
 	c := &AccountstatusesGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -9264,6 +9397,7 @@ func (c *AccountstatusesGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9318,7 +9452,7 @@ func (c *AccountstatusesGetCall) Do(opts ...googleapi.CallOption) (*AccountStatu
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the status of a Merchant Center account.",
+	//   "description": "Retrieves the status of a Merchant Center account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accountstatuses.get",
 	//   "parameterOrder": [
@@ -9364,7 +9498,7 @@ type AccountstatusesListCall struct {
 }
 
 // List: Lists the statuses of the sub-accounts in your Merchant Center
-// account.
+// account. This method can only be called for multi-client accounts.
 func (r *AccountstatusesService) List(merchantId uint64) *AccountstatusesListCall {
 	c := &AccountstatusesListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -9427,6 +9561,7 @@ func (c *AccountstatusesListCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9480,7 +9615,7 @@ func (c *AccountstatusesListCall) Do(opts ...googleapi.CallOption) (*Accountstat
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the statuses of the sub-accounts in your Merchant Center account.",
+	//   "description": "Lists the statuses of the sub-accounts in your Merchant Center account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accountstatuses.list",
 	//   "parameterOrder": [
@@ -9594,6 +9729,7 @@ func (c *AccounttaxCustombatchCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accounttaxcustombatchrequest)
 	if err != nil {
@@ -9682,7 +9818,10 @@ type AccounttaxGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves the tax settings of the account.
+// Get: Retrieves the tax settings of the account. This method can only
+// be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *AccounttaxService) Get(merchantId uint64, accountId uint64) *AccounttaxGetCall {
 	c := &AccounttaxGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -9731,6 +9870,7 @@ func (c *AccounttaxGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9785,7 +9925,7 @@ func (c *AccounttaxGetCall) Do(opts ...googleapi.CallOption) (*AccountTax, error
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the tax settings of the account.",
+	//   "description": "Retrieves the tax settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accounttax.get",
 	//   "parameterOrder": [
@@ -9831,7 +9971,8 @@ type AccounttaxListCall struct {
 }
 
 // List: Lists the tax settings of the sub-accounts in your Merchant
-// Center account.
+// Center account. This method can only be called for multi-client
+// accounts.
 func (r *AccounttaxService) List(merchantId uint64) *AccounttaxListCall {
 	c := &AccounttaxListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -9893,6 +10034,7 @@ func (c *AccounttaxListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -9946,7 +10088,7 @@ func (c *AccounttaxListCall) Do(opts ...googleapi.CallOption) (*AccounttaxListRe
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the tax settings of the sub-accounts in your Merchant Center account.",
+	//   "description": "Lists the tax settings of the sub-accounts in your Merchant Center account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.accounttax.list",
 	//   "parameterOrder": [
@@ -10016,8 +10158,11 @@ type AccounttaxPatchCall struct {
 	header_    http.Header
 }
 
-// Patch: Updates the tax settings of the account. This method supports
-// patch semantics.
+// Patch: Updates the tax settings of the account. This method can only
+// be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account. This method supports patch
+// semantics.
 func (r *AccounttaxService) Patch(merchantId uint64, accountId uint64, accounttax *AccountTax) *AccounttaxPatchCall {
 	c := &AccounttaxPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10064,6 +10209,7 @@ func (c *AccounttaxPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accounttax)
 	if err != nil {
@@ -10120,7 +10266,7 @@ func (c *AccounttaxPatchCall) Do(opts ...googleapi.CallOption) (*AccountTax, err
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the tax settings of the account. This method supports patch semantics.",
+	//   "description": "Updates the tax settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "content.accounttax.patch",
 	//   "parameterOrder": [
@@ -10174,7 +10320,10 @@ type AccounttaxUpdateCall struct {
 	header_    http.Header
 }
 
-// Update: Updates the tax settings of the account.
+// Update: Updates the tax settings of the account. This method can only
+// be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *AccounttaxService) Update(merchantId uint64, accountId uint64, accounttax *AccountTax) *AccounttaxUpdateCall {
 	c := &AccounttaxUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10221,6 +10370,7 @@ func (c *AccounttaxUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.accounttax)
 	if err != nil {
@@ -10277,7 +10427,7 @@ func (c *AccounttaxUpdateCall) Do(opts ...googleapi.CallOption) (*AccountTax, er
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the tax settings of the account.",
+	//   "description": "Updates the tax settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "PUT",
 	//   "id": "content.accounttax.update",
 	//   "parameterOrder": [
@@ -10374,6 +10524,7 @@ func (c *DatafeedsCustombatchCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.datafeedscustombatchrequest)
 	if err != nil {
@@ -10460,7 +10611,8 @@ type DatafeedsDeleteCall struct {
 	header_    http.Header
 }
 
-// Delete: Deletes a datafeed from your Merchant Center account.
+// Delete: Deletes a datafeed from your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *DatafeedsService) Delete(merchantId uint64, datafeedId uint64) *DatafeedsDeleteCall {
 	c := &DatafeedsDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10506,6 +10658,7 @@ func (c *DatafeedsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "{merchantId}/datafeeds/{datafeedId}")
@@ -10532,7 +10685,7 @@ func (c *DatafeedsDeleteCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Deletes a datafeed from your Merchant Center account.",
+	//   "description": "Deletes a datafeed from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "DELETE",
 	//   "id": "content.datafeeds.delete",
 	//   "parameterOrder": [
@@ -10578,7 +10731,8 @@ type DatafeedsGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves a datafeed from your Merchant Center account.
+// Get: Retrieves a datafeed from your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *DatafeedsService) Get(merchantId uint64, datafeedId uint64) *DatafeedsGetCall {
 	c := &DatafeedsGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10627,6 +10781,7 @@ func (c *DatafeedsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -10681,7 +10836,7 @@ func (c *DatafeedsGetCall) Do(opts ...googleapi.CallOption) (*Datafeed, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves a datafeed from your Merchant Center account.",
+	//   "description": "Retrieves a datafeed from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.datafeeds.get",
 	//   "parameterOrder": [
@@ -10724,7 +10879,8 @@ type DatafeedsInsertCall struct {
 	header_    http.Header
 }
 
-// Insert: Registers a datafeed with your Merchant Center account.
+// Insert: Registers a datafeed with your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *DatafeedsService) Insert(merchantId uint64, datafeed *Datafeed) *DatafeedsInsertCall {
 	c := &DatafeedsInsertCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10770,6 +10926,7 @@ func (c *DatafeedsInsertCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.datafeed)
 	if err != nil {
@@ -10825,7 +10982,7 @@ func (c *DatafeedsInsertCall) Do(opts ...googleapi.CallOption) (*Datafeed, error
 	}
 	return ret, nil
 	// {
-	//   "description": "Registers a datafeed with your Merchant Center account.",
+	//   "description": "Registers a datafeed with your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.datafeeds.insert",
 	//   "parameterOrder": [
@@ -10869,7 +11026,8 @@ type DatafeedsListCall struct {
 	header_      http.Header
 }
 
-// List: Lists the datafeeds in your Merchant Center account.
+// List: Lists the datafeeds in your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *DatafeedsService) List(merchantId uint64) *DatafeedsListCall {
 	c := &DatafeedsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -10931,6 +11089,7 @@ func (c *DatafeedsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -10984,7 +11143,7 @@ func (c *DatafeedsListCall) Do(opts ...googleapi.CallOption) (*DatafeedsListResp
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the datafeeds in your Merchant Center account.",
+	//   "description": "Lists the datafeeds in your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.datafeeds.list",
 	//   "parameterOrder": [
@@ -11055,7 +11214,8 @@ type DatafeedsPatchCall struct {
 }
 
 // Patch: Updates a datafeed of your Merchant Center account. This
-// method supports patch semantics.
+// method can only be called for non-multi-client accounts. This method
+// supports patch semantics.
 func (r *DatafeedsService) Patch(merchantId uint64, datafeedId uint64, datafeed *Datafeed) *DatafeedsPatchCall {
 	c := &DatafeedsPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -11102,6 +11262,7 @@ func (c *DatafeedsPatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.datafeed)
 	if err != nil {
@@ -11158,7 +11319,7 @@ func (c *DatafeedsPatchCall) Do(opts ...googleapi.CallOption) (*Datafeed, error)
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates a datafeed of your Merchant Center account. This method supports patch semantics.",
+	//   "description": "Updates a datafeed of your Merchant Center account. This method can only be called for non-multi-client accounts. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "content.datafeeds.patch",
 	//   "parameterOrder": [
@@ -11210,7 +11371,8 @@ type DatafeedsUpdateCall struct {
 	header_    http.Header
 }
 
-// Update: Updates a datafeed of your Merchant Center account.
+// Update: Updates a datafeed of your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *DatafeedsService) Update(merchantId uint64, datafeedId uint64, datafeed *Datafeed) *DatafeedsUpdateCall {
 	c := &DatafeedsUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -11257,6 +11419,7 @@ func (c *DatafeedsUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.datafeed)
 	if err != nil {
@@ -11313,7 +11476,7 @@ func (c *DatafeedsUpdateCall) Do(opts ...googleapi.CallOption) (*Datafeed, error
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates a datafeed of your Merchant Center account.",
+	//   "description": "Updates a datafeed of your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "PUT",
 	//   "id": "content.datafeeds.update",
 	//   "parameterOrder": [
@@ -11401,6 +11564,7 @@ func (c *DatafeedstatusesCustombatchCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.datafeedstatusescustombatchrequest)
 	if err != nil {
@@ -11483,7 +11647,8 @@ type DatafeedstatusesGetCall struct {
 }
 
 // Get: Retrieves the status of a datafeed from your Merchant Center
-// account.
+// account. This method can only be called for non-multi-client
+// accounts.
 func (r *DatafeedstatusesService) Get(merchantId uint64, datafeedId uint64) *DatafeedstatusesGetCall {
 	c := &DatafeedstatusesGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -11532,6 +11697,7 @@ func (c *DatafeedstatusesGetCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11586,7 +11752,7 @@ func (c *DatafeedstatusesGetCall) Do(opts ...googleapi.CallOption) (*DatafeedSta
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the status of a datafeed from your Merchant Center account.",
+	//   "description": "Retrieves the status of a datafeed from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.datafeedstatuses.get",
 	//   "parameterOrder": [
@@ -11630,7 +11796,8 @@ type DatafeedstatusesListCall struct {
 }
 
 // List: Lists the statuses of the datafeeds in your Merchant Center
-// account.
+// account. This method can only be called for non-multi-client
+// accounts.
 func (r *DatafeedstatusesService) List(merchantId uint64) *DatafeedstatusesListCall {
 	c := &DatafeedstatusesListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -11692,6 +11859,7 @@ func (c *DatafeedstatusesListCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -11745,7 +11913,7 @@ func (c *DatafeedstatusesListCall) Do(opts ...googleapi.CallOption) (*Datafeedst
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the statuses of the datafeeds in your Merchant Center account.",
+	//   "description": "Lists the statuses of the datafeeds in your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.datafeedstatuses.list",
 	//   "parameterOrder": [
@@ -11815,7 +11983,8 @@ type InventoryCustombatchCall struct {
 
 // Custombatch: Updates price and availability for multiple products or
 // stores in a single request. This operation does not update the
-// expiration date of the products.
+// expiration date of the products. This method can only be called for
+// non-multi-client accounts.
 func (r *InventoryService) Custombatch(inventorycustombatchrequest *InventoryCustomBatchRequest) *InventoryCustombatchCall {
 	c := &InventoryCustombatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.inventorycustombatchrequest = inventorycustombatchrequest
@@ -11860,6 +12029,7 @@ func (c *InventoryCustombatchCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.inventorycustombatchrequest)
 	if err != nil {
@@ -11912,7 +12082,7 @@ func (c *InventoryCustombatchCall) Do(opts ...googleapi.CallOption) (*InventoryC
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates price and availability for multiple products or stores in a single request. This operation does not update the expiration date of the products.",
+	//   "description": "Updates price and availability for multiple products or stores in a single request. This operation does not update the expiration date of the products. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.inventory.custombatch",
 	//   "parameters": {
@@ -11951,7 +12121,8 @@ type InventorySetCall struct {
 
 // Set: Updates price and availability of a product in your Merchant
 // Center account. This operation does not update the expiration date of
-// the product.
+// the product. This method can only be called for non-multi-client
+// accounts.
 func (r *InventoryService) Set(merchantId uint64, storeCode string, productId string, inventorysetrequest *InventorySetRequest) *InventorySetCall {
 	c := &InventorySetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -11999,6 +12170,7 @@ func (c *InventorySetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.inventorysetrequest)
 	if err != nil {
@@ -12056,7 +12228,7 @@ func (c *InventorySetCall) Do(opts ...googleapi.CallOption) (*InventorySetRespon
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates price and availability of a product in your Merchant Center account. This operation does not update the expiration date of the product.",
+	//   "description": "Updates price and availability of a product in your Merchant Center account. This operation does not update the expiration date of the product. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.inventory.set",
 	//   "parameterOrder": [
@@ -12116,7 +12288,8 @@ type OrdersAcknowledgeCall struct {
 	header_                  http.Header
 }
 
-// Acknowledge: Marks an order as acknowledged.
+// Acknowledge: Marks an order as acknowledged. This method can only be
+// called for non-multi-client accounts.
 func (r *OrdersService) Acknowledge(merchantId uint64, orderId string, ordersacknowledgerequest *OrdersAcknowledgeRequest) *OrdersAcknowledgeCall {
 	c := &OrdersAcknowledgeCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12156,6 +12329,7 @@ func (c *OrdersAcknowledgeCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersacknowledgerequest)
 	if err != nil {
@@ -12212,7 +12386,7 @@ func (c *OrdersAcknowledgeCall) Do(opts ...googleapi.CallOption) (*OrdersAcknowl
 	}
 	return ret, nil
 	// {
-	//   "description": "Marks an order as acknowledged.",
+	//   "description": "Marks an order as acknowledged. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.acknowledge",
 	//   "parameterOrder": [
@@ -12260,7 +12434,8 @@ type OrdersAdvancetestorderCall struct {
 }
 
 // Advancetestorder: Sandbox only. Moves a test order from state
-// "inProgress" to state "pendingShipment".
+// "inProgress" to state "pendingShipment". This method can only be
+// called for non-multi-client accounts.
 func (r *OrdersService) Advancetestorder(merchantId uint64, orderId string) *OrdersAdvancetestorderCall {
 	c := &OrdersAdvancetestorderCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12299,6 +12474,7 @@ func (c *OrdersAdvancetestorderCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "{merchantId}/testorders/{orderId}/advance")
@@ -12350,7 +12526,7 @@ func (c *OrdersAdvancetestorderCall) Do(opts ...googleapi.CallOption) (*OrdersAd
 	}
 	return ret, nil
 	// {
-	//   "description": "Sandbox only. Moves a test order from state \"inProgress\" to state \"pendingShipment\".",
+	//   "description": "Sandbox only. Moves a test order from state \"inProgress\" to state \"pendingShipment\". This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.advancetestorder",
 	//   "parameterOrder": [
@@ -12395,7 +12571,8 @@ type OrdersCancelCall struct {
 	header_             http.Header
 }
 
-// Cancel: Cancels all line items in an order.
+// Cancel: Cancels all line items in an order. This method can only be
+// called for non-multi-client accounts.
 func (r *OrdersService) Cancel(merchantId uint64, orderId string, orderscancelrequest *OrdersCancelRequest) *OrdersCancelCall {
 	c := &OrdersCancelCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12435,6 +12612,7 @@ func (c *OrdersCancelCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.orderscancelrequest)
 	if err != nil {
@@ -12491,7 +12669,7 @@ func (c *OrdersCancelCall) Do(opts ...googleapi.CallOption) (*OrdersCancelRespon
 	}
 	return ret, nil
 	// {
-	//   "description": "Cancels all line items in an order.",
+	//   "description": "Cancels all line items in an order. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.cancel",
 	//   "parameterOrder": [
@@ -12539,7 +12717,8 @@ type OrdersCancellineitemCall struct {
 	header_                     http.Header
 }
 
-// Cancellineitem: Cancels a line item.
+// Cancellineitem: Cancels a line item. This method can only be called
+// for non-multi-client accounts.
 func (r *OrdersService) Cancellineitem(merchantId uint64, orderId string, orderscancellineitemrequest *OrdersCancelLineItemRequest) *OrdersCancellineitemCall {
 	c := &OrdersCancellineitemCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12579,6 +12758,7 @@ func (c *OrdersCancellineitemCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.orderscancellineitemrequest)
 	if err != nil {
@@ -12635,7 +12815,7 @@ func (c *OrdersCancellineitemCall) Do(opts ...googleapi.CallOption) (*OrdersCanc
 	}
 	return ret, nil
 	// {
-	//   "description": "Cancels a line item.",
+	//   "description": "Cancels a line item. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.cancellineitem",
 	//   "parameterOrder": [
@@ -12682,7 +12862,8 @@ type OrdersCreatetestorderCall struct {
 	header_                      http.Header
 }
 
-// Createtestorder: Sandbox only. Creates a test order.
+// Createtestorder: Sandbox only. Creates a test order. This method can
+// only be called for non-multi-client accounts.
 func (r *OrdersService) Createtestorder(merchantId uint64, orderscreatetestorderrequest *OrdersCreateTestOrderRequest) *OrdersCreatetestorderCall {
 	c := &OrdersCreatetestorderCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12721,6 +12902,7 @@ func (c *OrdersCreatetestorderCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.orderscreatetestorderrequest)
 	if err != nil {
@@ -12776,7 +12958,7 @@ func (c *OrdersCreatetestorderCall) Do(opts ...googleapi.CallOption) (*OrdersCre
 	}
 	return ret, nil
 	// {
-	//   "description": "Sandbox only. Creates a test order.",
+	//   "description": "Sandbox only. Creates a test order. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.createtestorder",
 	//   "parameterOrder": [
@@ -12816,7 +12998,8 @@ type OrdersCustombatchCall struct {
 }
 
 // Custombatch: Retrieves or modifies multiple orders in a single
-// request.
+// request. This method can only be called for non-multi-client
+// accounts.
 func (r *OrdersService) Custombatch(orderscustombatchrequest *OrdersCustomBatchRequest) *OrdersCustombatchCall {
 	c := &OrdersCustombatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.orderscustombatchrequest = orderscustombatchrequest
@@ -12854,6 +13037,7 @@ func (c *OrdersCustombatchCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.orderscustombatchrequest)
 	if err != nil {
@@ -12906,7 +13090,7 @@ func (c *OrdersCustombatchCall) Do(opts ...googleapi.CallOption) (*OrdersCustomB
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves or modifies multiple orders in a single request.",
+	//   "description": "Retrieves or modifies multiple orders in a single request. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.custombatch",
 	//   "path": "orders/batch",
@@ -12935,7 +13119,8 @@ type OrdersGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves an order from your Merchant Center account.
+// Get: Retrieves an order from your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *OrdersService) Get(merchantId uint64, orderId string) *OrdersGetCall {
 	c := &OrdersGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -12984,6 +13169,7 @@ func (c *OrdersGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13038,7 +13224,7 @@ func (c *OrdersGetCall) Do(opts ...googleapi.CallOption) (*Order, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves an order from your Merchant Center account.",
+	//   "description": "Retrieves an order from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.orders.get",
 	//   "parameterOrder": [
@@ -13084,6 +13270,7 @@ type OrdersGetbymerchantorderidCall struct {
 }
 
 // Getbymerchantorderid: Retrieves an order using merchant order id.
+// This method can only be called for non-multi-client accounts.
 func (r *OrdersService) Getbymerchantorderid(merchantId uint64, merchantOrderId string) *OrdersGetbymerchantorderidCall {
 	c := &OrdersGetbymerchantorderidCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -13132,6 +13319,7 @@ func (c *OrdersGetbymerchantorderidCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13187,7 +13375,7 @@ func (c *OrdersGetbymerchantorderidCall) Do(opts ...googleapi.CallOption) (*Orde
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves an order using merchant order id.",
+	//   "description": "Retrieves an order using merchant order id. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.orders.getbymerchantorderid",
 	//   "parameterOrder": [
@@ -13233,7 +13421,8 @@ type OrdersGettestordertemplateCall struct {
 }
 
 // Gettestordertemplate: Sandbox only. Retrieves an order template that
-// can be used to quickly create a new order in sandbox.
+// can be used to quickly create a new order in sandbox. This method can
+// only be called for non-multi-client accounts.
 func (r *OrdersService) Gettestordertemplate(merchantId uint64, templateName string) *OrdersGettestordertemplateCall {
 	c := &OrdersGettestordertemplateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -13282,6 +13471,7 @@ func (c *OrdersGettestordertemplateCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13337,7 +13527,7 @@ func (c *OrdersGettestordertemplateCall) Do(opts ...googleapi.CallOption) (*Orde
 	}
 	return ret, nil
 	// {
-	//   "description": "Sandbox only. Retrieves an order template that can be used to quickly create a new order in sandbox.",
+	//   "description": "Sandbox only. Retrieves an order template that can be used to quickly create a new order in sandbox. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.orders.gettestordertemplate",
 	//   "parameterOrder": [
@@ -13393,7 +13583,8 @@ type OrdersListCall struct {
 	header_      http.Header
 }
 
-// List: Lists the orders in your Merchant Center account.
+// List: Lists the orders in your Merchant Center account. This method
+// can only be called for non-multi-client accounts.
 func (r *OrdersService) List(merchantId uint64) *OrdersListCall {
 	c := &OrdersListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -13525,6 +13716,7 @@ func (c *OrdersListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -13578,7 +13770,7 @@ func (c *OrdersListCall) Do(opts ...googleapi.CallOption) (*OrdersListResponse, 
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the orders in your Merchant Center account.",
+	//   "description": "Lists the orders in your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.orders.list",
 	//   "parameterOrder": [
@@ -13709,6 +13901,7 @@ type OrdersRefundCall struct {
 }
 
 // Refund: Refund a portion of the order, up to the full amount paid.
+// This method can only be called for non-multi-client accounts.
 func (r *OrdersService) Refund(merchantId uint64, orderId string, ordersrefundrequest *OrdersRefundRequest) *OrdersRefundCall {
 	c := &OrdersRefundCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -13748,6 +13941,7 @@ func (c *OrdersRefundCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersrefundrequest)
 	if err != nil {
@@ -13804,7 +13998,7 @@ func (c *OrdersRefundCall) Do(opts ...googleapi.CallOption) (*OrdersRefundRespon
 	}
 	return ret, nil
 	// {
-	//   "description": "Refund a portion of the order, up to the full amount paid.",
+	//   "description": "Refund a portion of the order, up to the full amount paid. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.refund",
 	//   "parameterOrder": [
@@ -13852,7 +14046,8 @@ type OrdersReturnlineitemCall struct {
 	header_                     http.Header
 }
 
-// Returnlineitem: Returns a line item.
+// Returnlineitem: Returns a line item. This method can only be called
+// for non-multi-client accounts.
 func (r *OrdersService) Returnlineitem(merchantId uint64, orderId string, ordersreturnlineitemrequest *OrdersReturnLineItemRequest) *OrdersReturnlineitemCall {
 	c := &OrdersReturnlineitemCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -13892,6 +14087,7 @@ func (c *OrdersReturnlineitemCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersreturnlineitemrequest)
 	if err != nil {
@@ -13948,7 +14144,7 @@ func (c *OrdersReturnlineitemCall) Do(opts ...googleapi.CallOption) (*OrdersRetu
 	}
 	return ret, nil
 	// {
-	//   "description": "Returns a line item.",
+	//   "description": "Returns a line item. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.returnlineitem",
 	//   "parameterOrder": [
@@ -13996,7 +14192,8 @@ type OrdersShiplineitemsCall struct {
 	header_                    http.Header
 }
 
-// Shiplineitems: Marks line item(s) as shipped.
+// Shiplineitems: Marks line item(s) as shipped. This method can only be
+// called for non-multi-client accounts.
 func (r *OrdersService) Shiplineitems(merchantId uint64, orderId string, ordersshiplineitemsrequest *OrdersShipLineItemsRequest) *OrdersShiplineitemsCall {
 	c := &OrdersShiplineitemsCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14036,6 +14233,7 @@ func (c *OrdersShiplineitemsCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersshiplineitemsrequest)
 	if err != nil {
@@ -14092,7 +14290,7 @@ func (c *OrdersShiplineitemsCall) Do(opts ...googleapi.CallOption) (*OrdersShipL
 	}
 	return ret, nil
 	// {
-	//   "description": "Marks line item(s) as shipped.",
+	//   "description": "Marks line item(s) as shipped. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.shiplineitems",
 	//   "parameterOrder": [
@@ -14141,7 +14339,7 @@ type OrdersUpdatemerchantorderidCall struct {
 }
 
 // Updatemerchantorderid: Updates the merchant order ID for a given
-// order.
+// order. This method can only be called for non-multi-client accounts.
 func (r *OrdersService) Updatemerchantorderid(merchantId uint64, orderId string, ordersupdatemerchantorderidrequest *OrdersUpdateMerchantOrderIdRequest) *OrdersUpdatemerchantorderidCall {
 	c := &OrdersUpdatemerchantorderidCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14181,6 +14379,7 @@ func (c *OrdersUpdatemerchantorderidCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersupdatemerchantorderidrequest)
 	if err != nil {
@@ -14238,7 +14437,7 @@ func (c *OrdersUpdatemerchantorderidCall) Do(opts ...googleapi.CallOption) (*Ord
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the merchant order ID for a given order.",
+	//   "description": "Updates the merchant order ID for a given order. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.updatemerchantorderid",
 	//   "parameterOrder": [
@@ -14287,7 +14486,7 @@ type OrdersUpdateshipmentCall struct {
 }
 
 // Updateshipment: Updates a shipment's status, carrier, and/or tracking
-// ID.
+// ID. This method can only be called for non-multi-client accounts.
 func (r *OrdersService) Updateshipment(merchantId uint64, orderId string, ordersupdateshipmentrequest *OrdersUpdateShipmentRequest) *OrdersUpdateshipmentCall {
 	c := &OrdersUpdateshipmentCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14327,6 +14526,7 @@ func (c *OrdersUpdateshipmentCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.ordersupdateshipmentrequest)
 	if err != nil {
@@ -14383,7 +14583,7 @@ func (c *OrdersUpdateshipmentCall) Do(opts ...googleapi.CallOption) (*OrdersUpda
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates a shipment's status, carrier, and/or tracking ID.",
+	//   "description": "Updates a shipment's status, carrier, and/or tracking ID. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.orders.updateshipment",
 	//   "parameterOrder": [
@@ -14430,7 +14630,8 @@ type ProductsCustombatchCall struct {
 }
 
 // Custombatch: Retrieves, inserts, and deletes multiple products in a
-// single request.
+// single request. This method can only be called for non-multi-client
+// accounts.
 func (r *ProductsService) Custombatch(productscustombatchrequest *ProductsCustomBatchRequest) *ProductsCustombatchCall {
 	c := &ProductsCustombatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.productscustombatchrequest = productscustombatchrequest
@@ -14475,6 +14676,7 @@ func (c *ProductsCustombatchCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.productscustombatchrequest)
 	if err != nil {
@@ -14527,7 +14729,7 @@ func (c *ProductsCustombatchCall) Do(opts ...googleapi.CallOption) (*ProductsCus
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves, inserts, and deletes multiple products in a single request.",
+	//   "description": "Retrieves, inserts, and deletes multiple products in a single request. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.products.custombatch",
 	//   "parameters": {
@@ -14562,7 +14764,8 @@ type ProductsDeleteCall struct {
 	header_    http.Header
 }
 
-// Delete: Deletes a product from your Merchant Center account.
+// Delete: Deletes a product from your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *ProductsService) Delete(merchantId uint64, productId string) *ProductsDeleteCall {
 	c := &ProductsDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14608,6 +14811,7 @@ func (c *ProductsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "{merchantId}/products/{productId}")
@@ -14634,7 +14838,7 @@ func (c *ProductsDeleteCall) Do(opts ...googleapi.CallOption) error {
 	}
 	return nil
 	// {
-	//   "description": "Deletes a product from your Merchant Center account.",
+	//   "description": "Deletes a product from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "DELETE",
 	//   "id": "content.products.delete",
 	//   "parameterOrder": [
@@ -14681,7 +14885,8 @@ type ProductsGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves a product from your Merchant Center account.
+// Get: Retrieves a product from your Merchant Center account. This
+// method can only be called for non-multi-client accounts.
 func (r *ProductsService) Get(merchantId uint64, productId string) *ProductsGetCall {
 	c := &ProductsGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14730,6 +14935,7 @@ func (c *ProductsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -14784,7 +14990,7 @@ func (c *ProductsGetCall) Do(opts ...googleapi.CallOption) (*Product, error) {
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves a product from your Merchant Center account.",
+	//   "description": "Retrieves a product from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.products.get",
 	//   "parameterOrder": [
@@ -14828,7 +15034,10 @@ type ProductsInsertCall struct {
 	header_    http.Header
 }
 
-// Insert: Uploads a product to your Merchant Center account.
+// Insert: Uploads a product to your Merchant Center account. If an item
+// with the same channel, contentLanguage, offerId, and targetCountry
+// already exists, this method updates that entry. This method can only
+// be called for non-multi-client accounts.
 func (r *ProductsService) Insert(merchantId uint64, product *Product) *ProductsInsertCall {
 	c := &ProductsInsertCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -14874,6 +15083,7 @@ func (c *ProductsInsertCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.product)
 	if err != nil {
@@ -14929,7 +15139,7 @@ func (c *ProductsInsertCall) Do(opts ...googleapi.CallOption) (*Product, error) 
 	}
 	return ret, nil
 	// {
-	//   "description": "Uploads a product to your Merchant Center account.",
+	//   "description": "Uploads a product to your Merchant Center account. If an item with the same channel, contentLanguage, offerId, and targetCountry already exists, this method updates that entry. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.products.insert",
 	//   "parameterOrder": [
@@ -14974,7 +15184,8 @@ type ProductsListCall struct {
 	header_      http.Header
 }
 
-// List: Lists the products in your Merchant Center account.
+// List: Lists the products in your Merchant Center account. This method
+// can only be called for non-multi-client accounts.
 func (r *ProductsService) List(merchantId uint64) *ProductsListCall {
 	c := &ProductsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -15045,6 +15256,7 @@ func (c *ProductsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -15098,7 +15310,7 @@ func (c *ProductsListCall) Do(opts ...googleapi.CallOption) (*ProductsListRespon
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the products in your Merchant Center account.",
+	//   "description": "Lists the products in your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.products.list",
 	//   "parameterOrder": [
@@ -15172,7 +15384,8 @@ type ProductstatusesCustombatchCall struct {
 }
 
 // Custombatch: Gets the statuses of multiple products in a single
-// request.
+// request. This method can only be called for non-multi-client
+// accounts.
 func (r *ProductstatusesService) Custombatch(productstatusescustombatchrequest *ProductstatusesCustomBatchRequest) *ProductstatusesCustombatchCall {
 	c := &ProductstatusesCustombatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.productstatusescustombatchrequest = productstatusescustombatchrequest
@@ -15210,6 +15423,7 @@ func (c *ProductstatusesCustombatchCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.productstatusescustombatchrequest)
 	if err != nil {
@@ -15263,7 +15477,7 @@ func (c *ProductstatusesCustombatchCall) Do(opts ...googleapi.CallOption) (*Prod
 	}
 	return ret, nil
 	// {
-	//   "description": "Gets the statuses of multiple products in a single request.",
+	//   "description": "Gets the statuses of multiple products in a single request. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "POST",
 	//   "id": "content.productstatuses.custombatch",
 	//   "path": "productstatuses/batch",
@@ -15293,6 +15507,7 @@ type ProductstatusesGetCall struct {
 }
 
 // Get: Gets the status of a product from your Merchant Center account.
+// This method can only be called for non-multi-client accounts.
 func (r *ProductstatusesService) Get(merchantId uint64, productId string) *ProductstatusesGetCall {
 	c := &ProductstatusesGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -15341,6 +15556,7 @@ func (c *ProductstatusesGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -15395,7 +15611,7 @@ func (c *ProductstatusesGetCall) Do(opts ...googleapi.CallOption) (*ProductStatu
 	}
 	return ret, nil
 	// {
-	//   "description": "Gets the status of a product from your Merchant Center account.",
+	//   "description": "Gets the status of a product from your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.productstatuses.get",
 	//   "parameterOrder": [
@@ -15440,7 +15656,8 @@ type ProductstatusesListCall struct {
 }
 
 // List: Lists the statuses of the products in your Merchant Center
-// account.
+// account. This method can only be called for non-multi-client
+// accounts.
 func (r *ProductstatusesService) List(merchantId uint64) *ProductstatusesListCall {
 	c := &ProductstatusesListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -15512,6 +15729,7 @@ func (c *ProductstatusesListCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -15565,7 +15783,7 @@ func (c *ProductstatusesListCall) Do(opts ...googleapi.CallOption) (*Productstat
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the statuses of the products in your Merchant Center account.",
+	//   "description": "Lists the statuses of the products in your Merchant Center account. This method can only be called for non-multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.productstatuses.list",
 	//   "parameterOrder": [
@@ -15684,6 +15902,7 @@ func (c *ShippingsettingsCustombatchCall) doRequest(alt string) (*http.Response,
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.shippingsettingscustombatchrequest)
 	if err != nil {
@@ -15773,7 +15992,10 @@ type ShippingsettingsGetCall struct {
 	header_      http.Header
 }
 
-// Get: Retrieves the shipping settings of the account.
+// Get: Retrieves the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *ShippingsettingsService) Get(merchantId uint64, accountId uint64) *ShippingsettingsGetCall {
 	c := &ShippingsettingsGetCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -15822,6 +16044,7 @@ func (c *ShippingsettingsGetCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -15876,7 +16099,7 @@ func (c *ShippingsettingsGetCall) Do(opts ...googleapi.CallOption) (*ShippingSet
 	}
 	return ret, nil
 	// {
-	//   "description": "Retrieves the shipping settings of the account.",
+	//   "description": "Retrieves the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "GET",
 	//   "id": "content.shippingsettings.get",
 	//   "parameterOrder": [
@@ -15970,6 +16193,7 @@ func (c *ShippingsettingsGetsupportedcarriersCall) doRequest(alt string) (*http.
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -16063,7 +16287,8 @@ type ShippingsettingsListCall struct {
 }
 
 // List: Lists the shipping settings of the sub-accounts in your
-// Merchant Center account.
+// Merchant Center account. This method can only be called for
+// multi-client accounts.
 func (r *ShippingsettingsService) List(merchantId uint64) *ShippingsettingsListCall {
 	c := &ShippingsettingsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -16126,6 +16351,7 @@ func (c *ShippingsettingsListCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -16179,7 +16405,7 @@ func (c *ShippingsettingsListCall) Do(opts ...googleapi.CallOption) (*Shippingse
 	}
 	return ret, nil
 	// {
-	//   "description": "Lists the shipping settings of the sub-accounts in your Merchant Center account.",
+	//   "description": "Lists the shipping settings of the sub-accounts in your Merchant Center account. This method can only be called for multi-client accounts.",
 	//   "httpMethod": "GET",
 	//   "id": "content.shippingsettings.list",
 	//   "parameterOrder": [
@@ -16249,8 +16475,11 @@ type ShippingsettingsPatchCall struct {
 	header_          http.Header
 }
 
-// Patch: Updates the shipping settings of the account. This method
-// supports patch semantics.
+// Patch: Updates the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account. This method supports patch
+// semantics.
 func (r *ShippingsettingsService) Patch(merchantId uint64, accountId uint64, shippingsettings *ShippingSettings) *ShippingsettingsPatchCall {
 	c := &ShippingsettingsPatchCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -16297,6 +16526,7 @@ func (c *ShippingsettingsPatchCall) doRequest(alt string) (*http.Response, error
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.shippingsettings)
 	if err != nil {
@@ -16353,7 +16583,7 @@ func (c *ShippingsettingsPatchCall) Do(opts ...googleapi.CallOption) (*ShippingS
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the shipping settings of the account. This method supports patch semantics.",
+	//   "description": "Updates the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account. This method supports patch semantics.",
 	//   "httpMethod": "PATCH",
 	//   "id": "content.shippingsettings.patch",
 	//   "parameterOrder": [
@@ -16407,7 +16637,10 @@ type ShippingsettingsUpdateCall struct {
 	header_          http.Header
 }
 
-// Update: Updates the shipping settings of the account.
+// Update: Updates the shipping settings of the account. This method can
+// only be called for accounts to which the managing account has access:
+// either the managing account itself or sub-accounts if the managing
+// account is a multi-client account.
 func (r *ShippingsettingsService) Update(merchantId uint64, accountId uint64, shippingsettings *ShippingSettings) *ShippingsettingsUpdateCall {
 	c := &ShippingsettingsUpdateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.merchantId = merchantId
@@ -16454,6 +16687,7 @@ func (c *ShippingsettingsUpdateCall) doRequest(alt string) (*http.Response, erro
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.shippingsettings)
 	if err != nil {
@@ -16510,7 +16744,7 @@ func (c *ShippingsettingsUpdateCall) Do(opts ...googleapi.CallOption) (*Shipping
 	}
 	return ret, nil
 	// {
-	//   "description": "Updates the shipping settings of the account.",
+	//   "description": "Updates the shipping settings of the account. This method can only be called for accounts to which the managing account has access: either the managing account itself or sub-accounts if the managing account is a multi-client account.",
 	//   "httpMethod": "PUT",
 	//   "id": "content.shippingsettings.update",
 	//   "parameterOrder": [

@@ -39,7 +39,9 @@ plugin-dev: generate
 
 # test runs the unit tests
 test: fmtcheck errcheck generate
-	TF_ACC= go test $(TEST) $(TESTARGS) -timeout=30s -parallel=4
+	go test -i $(TEST) || exit 1
+	echo $(TEST) | \
+		xargs -t -n4 go test $(TESTARGS) -timeout=60s -parallel=4
 
 # testacc runs acceptance tests
 testacc: fmtcheck generate
@@ -73,8 +75,8 @@ cover:
 # vet runs the Go source code static analysis tool `vet` to find
 # any common errors.
 vet:
-	@echo "go vet ."
-	@go vet $$(go list ./... | grep -v vendor/) ; if [ $$? -eq 1 ]; then \
+	@echo 'go vet $$(go list ./... | grep -v /terraform/vendor/)'
+	@go vet $$(go list ./... | grep -v /terraform/vendor/) ; if [ $$? -eq 1 ]; then \
 		echo ""; \
 		echo "Vet found suspicious constructs. Please check the reported constructs"; \
 		echo "and fix them if necessary before submitting the code for review."; \
@@ -101,5 +103,10 @@ errcheck:
 
 vendor-status:
 	@govendor status
+
+# disallow any parallelism (-j) for Make. This is necessary since some
+# commands during the build process create temporary files that collide
+# under parallel conditions.
+.NOTPARALLEL:
 
 .PHONY: bin core-dev core-test cover default dev errcheck fmt fmtcheck generate plugin-dev quickdev test-compile test testacc testrace tools vendor-status vet

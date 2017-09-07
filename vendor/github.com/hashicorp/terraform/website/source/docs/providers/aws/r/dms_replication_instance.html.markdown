@@ -12,24 +12,26 @@ Provides a DMS (Data Migration Service) replication instance resource. DMS repli
 
 ## Example Usage
 
-```
+```hcl
 # Create a new replication instance
 resource "aws_dms_replication_instance" "test" {
-  allocated_storage = 20
-  apply_immediately = true
-  auto_minor_version_upgrade = true
-  availability_zone = "us-west-2c"
-  engine_version = "1.9.0"
-  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
-  multi_az = false
+  allocated_storage            = 20
+  apply_immediately            = true
+  auto_minor_version_upgrade   = true
+  availability_zone            = "us-west-2c"
+  engine_version               = "1.9.0"
+  kms_key_arn                  = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+  multi_az                     = false
   preferred_maintenance_window = "sun:10:30-sun:14:30"
-  publicly_accessible = true
-  replication_instance_class = "dms.t2.micro"
-  replication_instance_id = "test-dms-replication-instance-tf"
-  replication_subnet_group_id = "${aws_dms_replication_subnet_group.test-dms-replication-subnet-group-tf}"
+  publicly_accessible          = true
+  replication_instance_class   = "dms.t2.micro"
+  replication_instance_id      = "test-dms-replication-instance-tf"
+  replication_subnet_group_id  = "${aws_dms_replication_subnet_group.test-dms-replication-subnet-group-tf}"
+
   tags {
     Name = "test"
   }
+
   vpc_security_group_ids = [
     "sg-12345678",
   ]
@@ -74,6 +76,16 @@ The following attributes are exported:
 * `replication_instance_arn` - The Amazon Resource Name (ARN) of the replication instance.
 * `replication_instance_private_ips` -  A list of the private IP addresses of the replication instance.
 * `replication_instance_public_ips` - A list of the public IP addresses of the replication instance.
+
+<a id="timeouts"></a>
+## Timeouts
+
+`aws_dms_replication_instance` provides the following
+[Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
+
+- `create` - (Default `30 minutes`) Used for Creating Instances
+- `update` - (Default `30 minutes`) Used for Database modifications
+- `delete` - (Default `30 minutes`) Used for destroying databases.
 
 ## Import
 

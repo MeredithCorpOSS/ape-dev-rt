@@ -145,7 +145,7 @@ func TestDecodeConfig(t *testing.T) {
 	}
 
 	// RPC configs
-	input = `{"ports": {"http": 1234, "https": 1243, "rpc": 8100}, "client_addr": "0.0.0.0"}`
+	input = `{"ports": {"http": 1234, "https": 1243}, "client_addr": "0.0.0.0"}`
 	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -160,10 +160,6 @@ func TestDecodeConfig(t *testing.T) {
 	}
 
 	if config.Ports.HTTPS != 1243 {
-		t.Fatalf("bad: %#v", config)
-	}
-
-	if config.Ports.RPC != 8100 {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -282,6 +278,17 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 	if config.TranslateWanAddrs != true {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// raft protocol
+	input = `{"raft_protocol": 3}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.RaftProtocol != 3 {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -900,7 +907,7 @@ func TestDecodeConfig(t *testing.T) {
 	}
 
 	// Address overrides
-	input = `{"addresses": {"dns": "0.0.0.0", "http": "127.0.0.1", "https": "127.0.0.1", "rpc": "127.0.0.1"}}`
+	input = `{"addresses": {"dns": "0.0.0.0", "http": "127.0.0.1", "https": "127.0.0.1"}}`
 	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -913,9 +920,6 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("bad: %#v", config)
 	}
 	if config.Addresses.HTTPS != "127.0.0.1" {
-		t.Fatalf("bad: %#v", config)
-	}
-	if config.Addresses.RPC != "127.0.0.1" {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -1098,6 +1102,31 @@ func TestDecodeConfig_Performance(t *testing.T) {
 	}
 }
 
+func TestDecodeConfig_Autopilot(t *testing.T) {
+	input := `{"autopilot": {
+	  "cleanup_dead_servers": true,
+	  "last_contact_threshold": "100ms",
+	  "max_trailing_logs": 10,
+	  "server_stabilization_time": "10s"
+	 }}`
+	config, err := DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if config.Autopilot.CleanupDeadServers == nil || !*config.Autopilot.CleanupDeadServers {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Autopilot.LastContactThreshold == nil || *config.Autopilot.LastContactThreshold != 100*time.Millisecond {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Autopilot.MaxTrailingLogs == nil || *config.Autopilot.MaxTrailingLogs != 10 {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Autopilot.ServerStabilizationTime == nil || *config.Autopilot.ServerStabilizationTime != 10*time.Second {
+		t.Fatalf("bad: %#v", config)
+	}
+}
+
 func TestDecodeConfig_Services(t *testing.T) {
 	input := `{
 		"services": [
@@ -1220,18 +1249,13 @@ func TestDecodeConfig_verifyUniqueListeners(t *testing.T) {
 		pass bool
 	}{
 		{
-			"http_rpc1",
-			`{"addresses": {"http": "0.0.0.0", "rpc": "127.0.0.1"}, "ports": {"rpc": 8000, "dns": 8000}}`,
+			"http_dns1",
+			`{"addresses": {"http": "0.0.0.0", "dns": "127.0.0.1"}, "ports": {"dns": 8000}}`,
 			true,
 		},
 		{
-			"http_rpc IP identical",
-			`{"addresses": {"http": "0.0.0.0", "rpc": "0.0.0.0"}, "ports": {"rpc": 8000, "dns": 8000}}`,
-			false,
-		},
-		{
-			"http_rpc unix identical (diff ports)",
-			`{"addresses": {"http": "unix:///tmp/.consul.sock", "rpc": "unix:///tmp/.consul.sock"}, "ports": {"rpc": 8000, "dns": 8001}}`,
+			"http_dns IP identical",
+			`{"addresses": {"http": "0.0.0.0", "dns": "0.0.0.0"}, "ports": {"http": 8000, "dns": 8000}}`,
 			false,
 		},
 	}
@@ -1604,7 +1628,6 @@ func TestMergeConfig(t *testing.T) {
 		Ports: PortConfig{
 			DNS:     1,
 			HTTP:    2,
-			RPC:     3,
 			SerfLan: 4,
 			SerfWan: 5,
 			Server:  6,
@@ -1613,12 +1636,18 @@ func TestMergeConfig(t *testing.T) {
 		Addresses: AddressConfig{
 			DNS:   "127.0.0.1",
 			HTTP:  "127.0.0.2",
-			RPC:   "127.0.0.3",
 			HTTPS: "127.0.0.4",
 		},
-		Server:                 true,
-		LeaveOnTerm:            Bool(true),
-		SkipLeaveOnInt:         Bool(true),
+		Server:         true,
+		LeaveOnTerm:    Bool(true),
+		SkipLeaveOnInt: Bool(true),
+		RaftProtocol:   3,
+		Autopilot: Autopilot{
+			CleanupDeadServers:      Bool(true),
+			LastContactThreshold:    Duration(time.Duration(10)),
+			MaxTrailingLogs:         Uint64(10),
+			ServerStabilizationTime: Duration(time.Duration(100)),
+		},
 		EnableDebug:            true,
 		VerifyIncoming:         true,
 		VerifyOutgoing:         true,

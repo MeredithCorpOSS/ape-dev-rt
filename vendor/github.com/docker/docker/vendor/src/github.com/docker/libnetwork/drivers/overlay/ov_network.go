@@ -500,9 +500,13 @@ func (n *network) initSubnetSandbox(s *subnet, restore bool) error {
 	vxlanName := n.generateVxlanName(s)
 
 	if restore {
-		n.restoreSubnetSandbox(s, brName, vxlanName)
+		if err := n.restoreSubnetSandbox(s, brName, vxlanName); err != nil {
+			return err
+		}
 	} else {
-		n.setupSubnetSandbox(s, brName, vxlanName)
+		if err := n.setupSubnetSandbox(s, brName, vxlanName); err != nil {
+			return err
+		}
 	}
 
 	n.Lock()
@@ -637,6 +641,10 @@ func (n *network) watchMiss(nlSock *nl.NetlinkSocket) {
 				continue
 			}
 
+			if !n.driver.isSerfAlive() {
+				continue
+			}
+
 			mac, IPmask, vtep, err := n.driver.resolvePeer(n.id, neigh.IP)
 			if err != nil {
 				logrus.Errorf("could not resolve peer %q: %v", neigh.IP, err)
@@ -664,17 +672,17 @@ func (d *driver) deleteNetwork(nid string) {
 
 func (d *driver) network(nid string) *network {
 	d.Lock()
-	networks := d.networks
+	n, ok := d.networks[nid]
 	d.Unlock()
-
-	n, ok := networks[nid]
 	if !ok {
 		n = d.getNetworkFromStore(nid)
 		if n != nil {
 			n.driver = d
 			n.endpoints = endpointTable{}
 			n.once = &sync.Once{}
-			networks[nid] = n
+			d.Lock()
+			d.networks[nid] = n
+			d.Unlock()
 		}
 	}
 

@@ -7,6 +7,9 @@ import (
 
 	"github.com/Microsoft/hcsshim"
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types"
+	pblkiodev "github.com/docker/docker/api/types/blkiodev"
+	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/idtools"
@@ -14,9 +17,6 @@ import (
 	"github.com/docker/docker/pkg/sysinfo"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/runconfig"
-	"github.com/docker/engine-api/types"
-	pblkiodev "github.com/docker/engine-api/types/blkiodev"
-	containertypes "github.com/docker/engine-api/types/container"
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
 	winlibnetwork "github.com/docker/libnetwork/drivers/windows"
@@ -165,7 +165,7 @@ func checkSystem() error {
 		return fmt.Errorf("This version of Windows does not support the docker daemon")
 	}
 	if osv.Build < 14300 {
-		return fmt.Errorf("The Windows daemon requires Windows Server 2016 Technical Preview 5 build 14300 or later")
+		return fmt.Errorf("The docker daemon requires Windows Server 2016 Technical Preview 5 build 14300 or later")
 	}
 	return nil
 }
@@ -432,5 +432,12 @@ func rootFSToAPIType(rootfs *image.RootFS) types.RootFS {
 }
 
 func setupDaemonProcess(config *Config) error {
+	return nil
+}
+
+// verifyVolumesInfo is a no-op on windows.
+// This is called during daemon initialization to migrate volumes from pre-1.7.
+// volumes were not supported on windows pre-1.7
+func (daemon *Daemon) verifyVolumesInfo(container *container.Container) error {
 	return nil
 }

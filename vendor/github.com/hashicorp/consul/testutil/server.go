@@ -13,6 +13,7 @@ package testutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -39,7 +40,6 @@ type TestPerformanceConfig struct {
 type TestPortConfig struct {
 	DNS     int `json:"dns,omitempty"`
 	HTTP    int `json:"http,omitempty"`
-	RPC     int `json:"rpc,omitempty"`
 	SerfLan int `json:"serf_lan,omitempty"`
 	SerfWan int `json:"serf_wan,omitempty"`
 	Server  int `json:"server,omitempty"`
@@ -65,6 +65,7 @@ type TestServerConfig struct {
 	Bind              string                 `json:"bind_addr,omitempty"`
 	Addresses         *TestAddressConfig     `json:"addresses,omitempty"`
 	Ports             *TestPortConfig        `json:"ports,omitempty"`
+	RaftProtocol      int                    `json:"raft_protocol,omitempty"`
 	ACLMasterToken    string                 `json:"acl_master_token,omitempty"`
 	ACLDatacenter     string                 `json:"acl_datacenter,omitempty"`
 	ACLDefaultPolicy  string                 `json:"acl_default_policy,omitempty"`
@@ -94,7 +95,6 @@ func defaultServerConfig() *TestServerConfig {
 		Ports: &TestPortConfig{
 			DNS:     randomPort(),
 			HTTP:    randomPort(),
-			RPC:     randomPort(),
 			SerfLan: randomPort(),
 			SerfWan: randomPort(),
 			Server:  randomPort(),
@@ -223,7 +223,7 @@ func NewTestServerConfig(t TestingT, cb ServerConfigCallback) *TestServer {
 	if strings.HasPrefix(consulConfig.Addresses.HTTP, "unix://") {
 		httpAddr = consulConfig.Addresses.HTTP
 		trans := cleanhttp.DefaultTransport()
-		trans.Dial = func(_, _ string) (net.Conn, error) {
+		trans.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", httpAddr[7:])
 		}
 		client = &http.Client{

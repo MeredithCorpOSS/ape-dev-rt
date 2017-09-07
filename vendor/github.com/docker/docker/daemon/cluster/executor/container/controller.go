@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/events"
 	executorpkg "github.com/docker/docker/daemon/cluster/executor"
-	"github.com/docker/engine-api/types"
-	"github.com/docker/engine-api/types/events"
+	"github.com/docker/libnetwork"
 	"github.com/docker/swarmkit/agent/exec"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
@@ -19,7 +20,6 @@ import (
 // Most operations against docker's API are done through the container name,
 // which is unique to the task.
 type controller struct {
-	backend executorpkg.Backend
 	task    *api.Task
 	adapter *containerAdapter
 	closed  chan struct{}
@@ -32,7 +32,7 @@ type controller struct {
 
 var _ exec.Controller = &controller{}
 
-// NewController returns a dockerexec runner for the provided task.
+// NewController returns a docker exec runner for the provided task.
 func newController(b executorpkg.Backend, task *api.Task) (*controller, error) {
 	adapter, err := newContainerAdapter(b, task)
 	if err != nil {
@@ -40,7 +40,6 @@ func newController(b executorpkg.Backend, task *api.Task) (*controller, error) {
 	}
 
 	return &controller{
-		backend: b,
 		task:    task,
 		adapter: adapter,
 		closed:  make(chan struct{}),
@@ -85,7 +84,7 @@ func (r *controller) Prepare(ctx context.Context) error {
 	}
 
 	// Make sure all the volumes that the task needs are created.
-	if err := r.adapter.createVolumes(ctx, r.backend); err != nil {
+	if err := r.adapter.createVolumes(ctx); err != nil {
 		return err
 	}
 
@@ -127,7 +126,7 @@ func (r *controller) Prepare(ctx context.Context) error {
 		}
 	}
 
-	if err := r.adapter.create(ctx, r.backend); err != nil {
+	if err := r.adapter.create(ctx); err != nil {
 		if isContainerCreateNameConflict(err) {
 			if _, err := r.adapter.inspect(ctx); err != nil {
 				return err
@@ -163,8 +162,23 @@ func (r *controller) Start(ctx context.Context) error {
 		return exec.ErrTaskStarted
 	}
 
-	if err := r.adapter.start(ctx); err != nil {
-		return errors.Wrap(err, "starting container failed")
+	for {
+		if err := r.adapter.start(ctx); err != nil {
+			if _, ok := err.(libnetwork.ErrNoSuchNetwork); ok {
+				// Retry network creation again if we
+				// failed because some of the networks
+				// were not found.
+				if err := r.adapter.createNetworks(ctx); err != nil {
+					return err
+				}
+
+				continue
+			}
+
+			return errors.Wrap(err, "starting container failed")
+		}
+
+		break
 	}
 
 	// no health check

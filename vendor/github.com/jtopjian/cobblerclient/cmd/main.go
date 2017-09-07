@@ -72,6 +72,7 @@ func main() {
 	eth1 := cobbler.Interface{
 		MACAddress: "aa:bb:cc:dd:ee:fa",
 		Static:     true,
+		Management: true,
 	}
 
 	s := cobbler.System{
@@ -115,13 +116,19 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("%+v\n", interfaces)
+	fmt.Printf("%+v\n\n", interfaces)
 
 	iface, err := s2.GetInterface("eth0")
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("%+v\n", iface)
+	fmt.Printf("eth0:\n%+v\n\n", iface)
+
+	iface, err = s2.GetInterface("eth1")
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("eth1:\n%+v\n\n", iface)
 
 	fmt.Println("Deleting Interface")
 	err = s2.DeleteInterface("eth0")

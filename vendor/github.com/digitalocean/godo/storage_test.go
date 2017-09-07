@@ -52,7 +52,7 @@ func TestStorageVolumes_ListStorageVolumes(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	volumes, _, err := client.Storage.ListVolumes(nil)
+	volumes, _, err := client.Storage.ListVolumes(ctx, nil)
 	if err != nil {
 		t.Errorf("Storage.ListVolumes returned error: %v", err)
 	}
@@ -118,12 +118,69 @@ func TestStorageVolumes_Get(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	got, _, err := client.Storage.GetVolume("80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
+	got, _, err := client.Storage.GetVolume(ctx, "80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
 	if err != nil {
 		t.Errorf("Storage.GetVolume returned error: %v", err)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Storage.GetVolume returned %+v, want %+v", got, want)
+	}
+}
+
+func TestStorageVolumes_ListVolumesByName(t *testing.T) {
+	setup()
+	defer teardown()
+
+	jBlob :=
+		`{
+			"volumes": [
+				{
+					"region": {"slug": "nyc3"},
+					"id": "80d414c6-295e-4e3a-ac58-eb9456c1e1d1",
+					"name": "myvolume",
+					"description": "my description",
+					"size_gigabytes": 100,
+					"droplet_ids": [10],
+					"created_at": "2002-10-02T15:00:00.05Z"
+				}
+			],
+			"links": {},
+		  "meta": {
+				"total": 1
+			}
+		}`
+
+	expected := []Volume{
+		{
+			Region:        &Region{Slug: "nyc3"},
+			ID:            "80d414c6-295e-4e3a-ac58-eb9456c1e1d1",
+			Name:          "myvolume",
+			Description:   "my description",
+			SizeGigaBytes: 100,
+			DropletIDs:    []int{10},
+			CreatedAt:     time.Date(2002, 10, 02, 15, 00, 00, 50000000, time.UTC),
+		},
+	}
+
+	mux.HandleFunc("/v2/volumes", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "myvolume" || r.URL.Query().Get("region") != "nyc3" {
+			t.Errorf("Storage.GetVolumeByName did not request the correct name or region")
+		}
+		testMethod(t, r, "GET")
+		fmt.Fprint(w, jBlob)
+	})
+
+	options := &ListVolumeParams{
+		Name:   "myvolume",
+		Region: "nyc3",
+	}
+	volumes, _, err := client.Storage.ListVolumes(ctx, options)
+	if err != nil {
+		t.Errorf("Storage.GetVolumeByName returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(volumes, expected) {
+		t.Errorf("Storage.GetVolumeByName returned %+v, expected %+v", volumes, expected)
 	}
 }
 
@@ -173,7 +230,62 @@ func TestStorageVolumes_Create(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	got, _, err := client.Storage.CreateVolume(createRequest)
+	got, _, err := client.Storage.CreateVolume(ctx, createRequest)
+	if err != nil {
+		t.Errorf("Storage.CreateVolume returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Storage.CreateVolume returned %+v, want %+v", got, want)
+	}
+}
+
+func TestStorageVolumes_CreateFromSnapshot(t *testing.T) {
+	setup()
+	defer teardown()
+
+	createRequest := &VolumeCreateRequest{
+		Name:          "my-volume-from-a-snapshot",
+		Description:   "my description",
+		SizeGigaBytes: 100,
+		SnapshotID:    "0d165eff-0b4c-11e7-9093-0242ac110207",
+	}
+
+	want := &Volume{
+		Region:        &Region{Slug: "nyc3"},
+		ID:            "80d414c6-295e-4e3a-ac58-eb9456c1e1d1",
+		Name:          "my-volume-from-a-snapshot",
+		Description:   "my description",
+		SizeGigaBytes: 100,
+		CreatedAt:     time.Date(2002, 10, 02, 15, 00, 00, 50000000, time.UTC),
+	}
+	jBlob := `{
+		"volume":{
+			"region": {"slug":"nyc3"},
+			"id": "80d414c6-295e-4e3a-ac58-eb9456c1e1d1",
+			"name": "my-volume-from-a-snapshot",
+			"description": "my description",
+			"size_gigabytes": 100,
+			"created_at": "2002-10-02T15:00:00.05Z"
+		},
+		"links": {}
+	}`
+
+	mux.HandleFunc("/v2/volumes", func(w http.ResponseWriter, r *http.Request) {
+		v := new(VolumeCreateRequest)
+		err := json.NewDecoder(r.Body).Decode(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		testMethod(t, r, "POST")
+		if !reflect.DeepEqual(v, createRequest) {
+			t.Errorf("Request body = %+v, expected %+v", v, createRequest)
+		}
+
+		fmt.Fprint(w, jBlob)
+	})
+
+	got, _, err := client.Storage.CreateVolume(ctx, createRequest)
 	if err != nil {
 		t.Errorf("Storage.CreateVolume returned error: %v", err)
 	}
@@ -190,7 +302,7 @@ func TestStorageVolumes_Destroy(t *testing.T) {
 		testMethod(t, r, "DELETE")
 	})
 
-	_, err := client.Storage.DeleteVolume("80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
+	_, err := client.Storage.DeleteVolume(ctx, "80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
 	if err != nil {
 		t.Errorf("Storage.DeleteVolume returned error: %v", err)
 	}
@@ -234,7 +346,7 @@ func TestStorageSnapshots_ListStorageSnapshots(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	volumes, _, err := client.Storage.ListSnapshots("98d414c6-295e-4e3a-ac58-eb9456c1e1d1", nil)
+	volumes, _, err := client.Storage.ListSnapshots(ctx, "98d414c6-295e-4e3a-ac58-eb9456c1e1d1", nil)
 	if err != nil {
 		t.Errorf("Storage.ListSnapshots returned error: %v", err)
 	}
@@ -294,7 +406,7 @@ func TestStorageSnapshots_Get(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	got, _, err := client.Storage.GetSnapshot("80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
+	got, _, err := client.Storage.GetSnapshot(ctx, "80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
 	if err != nil {
 		t.Errorf("Storage.GetSnapshot returned error: %v", err)
 	}
@@ -355,7 +467,7 @@ func TestStorageSnapshots_Create(t *testing.T) {
 		fmt.Fprint(w, jBlob)
 	})
 
-	got, _, err := client.Storage.CreateSnapshot(createRequest)
+	got, _, err := client.Storage.CreateSnapshot(ctx, createRequest)
 	if err != nil {
 		t.Errorf("Storage.CreateSnapshot returned error: %v", err)
 	}
@@ -372,7 +484,7 @@ func TestStorageSnapshots_Destroy(t *testing.T) {
 		testMethod(t, r, "DELETE")
 	})
 
-	_, err := client.Storage.DeleteSnapshot("80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
+	_, err := client.Storage.DeleteSnapshot(ctx, "80d414c6-295e-4e3a-ac58-eb9456c1e1d1")
 	if err != nil {
 		t.Errorf("Storage.DeleteSnapshot returned error: %v", err)
 	}

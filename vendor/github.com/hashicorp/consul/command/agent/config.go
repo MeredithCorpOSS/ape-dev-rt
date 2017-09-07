@@ -26,7 +26,6 @@ type PortConfig struct {
 	DNS     int // DNS Query interface
 	HTTP    int // HTTP API
 	HTTPS   int // HTTPS API
-	RPC     int // CLI RPC
 	SerfLan int `mapstructure:"serf_lan"` // LAN gossip (Client + Server)
 	SerfWan int `mapstructure:"serf_wan"` // WAN gossip (Server only)
 	Server  int // Server internal RPC
@@ -39,7 +38,6 @@ type AddressConfig struct {
 	DNS   string // DNS Query interface
 	HTTP  string // HTTP API
 	HTTPS string // HTTPS API
-	RPC   string // CLI RPC
 }
 
 type AdvertiseAddrsConfig struct {
@@ -262,6 +260,28 @@ type Telemetry struct {
 	CirconusBrokerSelectTag string `mapstructure:"circonus_broker_select_tag"`
 }
 
+// Autopilot is used to configure helpful features for operating Consul servers.
+type Autopilot struct {
+	// CleanupDeadServers enables the automatic cleanup of dead servers when new ones
+	// are added to the peer list. Defaults to true.
+	CleanupDeadServers *bool `mapstructure:"cleanup_dead_servers"`
+
+	// LastContactThreshold is the limit on the amount of time a server can go
+	// without leader contact before being considered unhealthy.
+	LastContactThreshold    *time.Duration `mapstructure:"-" json:"-"`
+	LastContactThresholdRaw string         `mapstructure:"last_contact_threshold"`
+
+	// MaxTrailingLogs is the amount of entries in the Raft Log that a server can
+	// be behind before being considered unhealthy.
+	MaxTrailingLogs *uint64 `mapstructure:"max_trailing_logs"`
+
+	// ServerStabilizationTime is the minimum amount of time a server must be
+	// in a stable, healthy state before it can be added to the cluster. Only
+	// applicable with Raft protocol version 3 or higher.
+	ServerStabilizationTime    *time.Duration `mapstructure:"-" json:"-"`
+	ServerStabilizationTimeRaw string         `mapstructure:"server_stabilization_time"`
+}
+
 // Config is the configuration that can be set for an Agent.
 // Some of this is configurable as CLI flags, but most must
 // be set using a configuration file.
@@ -387,10 +407,16 @@ type Config struct {
 	// servers. This can be changed on reload.
 	SkipLeaveOnInt *bool `mapstructure:"skip_leave_on_interrupt"`
 
+	// Autopilot is used to configure helpful features for operating Consul servers.
+	Autopilot Autopilot `mapstructure:"autopilot"`
+
 	Telemetry Telemetry `mapstructure:"telemetry"`
 
 	// Protocol is the Consul protocol version to use.
 	Protocol int `mapstructure:"protocol"`
+
+	// RaftProtocol sets the Raft protocol version to use on this server.
+	RaftProtocol int `mapstructure:"raft_protocol"`
 
 	// EnableDebug is used to enable various debugging features
 	EnableDebug bool `mapstructure:"enable_debug"`
@@ -681,6 +707,16 @@ func Bool(b bool) *bool {
 	return &b
 }
 
+// Uint64 is used to initialize uint64 pointers in struct literals.
+func Uint64(i uint64) *uint64 {
+	return &i
+}
+
+// Duration is used to initialize time.Duration pointers in struct literals.
+func Duration(d time.Duration) *time.Duration {
+	return &d
+}
+
 // UnixSocketPermissions contains information about a unix socket, and
 // implements the FilePermissions interface.
 type UnixSocketPermissions struct {
@@ -737,7 +773,6 @@ func DefaultConfig() *Config {
 			DNS:     8600,
 			HTTP:    8500,
 			HTTPS:   -1,
-			RPC:     8400,
 			SerfLan: consul.DefaultLANSerfPort,
 			SerfWan: consul.DefaultWANSerfPort,
 			Server:  8300,
@@ -1031,6 +1066,21 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 		result.ReconnectTimeoutWan = dur
 	}
 
+	if raw := result.Autopilot.LastContactThresholdRaw; raw != "" {
+		dur, err := time.ParseDuration(raw)
+		if err != nil {
+			return nil, fmt.Errorf("LastContactThreshold invalid: %v", err)
+		}
+		result.Autopilot.LastContactThreshold = &dur
+	}
+	if raw := result.Autopilot.ServerStabilizationTimeRaw; raw != "" {
+		dur, err := time.ParseDuration(raw)
+		if err != nil {
+			return nil, fmt.Errorf("ServerStabilizationTime invalid: %v", err)
+		}
+		result.Autopilot.ServerStabilizationTime = &dur
+	}
+
 	// Merge the single recursor
 	if result.DNSRecursor != "" {
 		result.DNSRecursors = append(result.DNSRecursors, result.DNSRecursor)
@@ -1283,6 +1333,9 @@ func MergeConfig(a, b *Config) *Config {
 	if b.Protocol > 0 {
 		result.Protocol = b.Protocol
 	}
+	if b.RaftProtocol > 0 {
+		result.RaftProtocol = b.RaftProtocol
+	}
 	if b.NodeID != "" {
 		result.NodeID = b.NodeID
 	}
@@ -1330,6 +1383,18 @@ func MergeConfig(a, b *Config) *Config {
 	}
 	if b.SkipLeaveOnInt != nil {
 		result.SkipLeaveOnInt = b.SkipLeaveOnInt
+	}
+	if b.Autopilot.CleanupDeadServers != nil {
+		result.Autopilot.CleanupDeadServers = b.Autopilot.CleanupDeadServers
+	}
+	if b.Autopilot.LastContactThreshold != nil {
+		result.Autopilot.LastContactThreshold = b.Autopilot.LastContactThreshold
+	}
+	if b.Autopilot.MaxTrailingLogs != nil {
+		result.Autopilot.MaxTrailingLogs = b.Autopilot.MaxTrailingLogs
+	}
+	if b.Autopilot.ServerStabilizationTime != nil {
+		result.Autopilot.ServerStabilizationTime = b.Autopilot.ServerStabilizationTime
 	}
 	if b.Telemetry.DisableHostname == true {
 		result.Telemetry.DisableHostname = true
@@ -1430,9 +1495,6 @@ func MergeConfig(a, b *Config) *Config {
 	if b.Ports.HTTPS != 0 {
 		result.Ports.HTTPS = b.Ports.HTTPS
 	}
-	if b.Ports.RPC != 0 {
-		result.Ports.RPC = b.Ports.RPC
-	}
 	if b.Ports.SerfLan != 0 {
 		result.Ports.SerfLan = b.Ports.SerfLan
 	}
@@ -1450,9 +1512,6 @@ func MergeConfig(a, b *Config) *Config {
 	}
 	if b.Addresses.HTTPS != "" {
 		result.Addresses.HTTPS = b.Addresses.HTTPS
-	}
-	if b.Addresses.RPC != "" {
-		result.Addresses.RPC = b.Addresses.RPC
 	}
 	if b.EnableUi {
 		result.EnableUi = true

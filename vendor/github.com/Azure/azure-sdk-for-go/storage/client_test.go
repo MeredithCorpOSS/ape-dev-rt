@@ -1,13 +1,24 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/base64"
+	"io/ioutil"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Azure/go-autorest/autorest/azure"
+	"github.com/dnaeon/go-vcr/cassette"
+	"github.com/dnaeon/go-vcr/recorder"
 	chk "gopkg.in/check.v1"
 )
 
@@ -18,21 +29,164 @@ type StorageClientSuite struct{}
 
 var _ = chk.Suite(&StorageClientSuite{})
 
-var now = time.Now()
-
 // getBasicClient returns a test client from storage credentials in the env
-func getBasicClient(c *chk.C) Client {
+func getBasicClient(c *chk.C) *Client {
 	name := os.Getenv("ACCOUNT_NAME")
 	if name == "" {
-		c.Fatal("ACCOUNT_NAME not set, need an empty storage account to test")
+		name = dummyStorageAccount
 	}
 	key := os.Getenv("ACCOUNT_KEY")
 	if key == "" {
-		c.Fatal("ACCOUNT_KEY not set")
+		key = dummyMiniStorageKey
 	}
 	cli, err := NewBasicClient(name, key)
 	c.Assert(err, chk.IsNil)
-	return cli
+
+	return &cli
+}
+
+func (client *Client) appendRecorder(c *chk.C) *recorder.Recorder {
+	tests := strings.Split(c.TestName(), ".")
+	path := filepath.Join(recordingsFolder, tests[0], tests[1])
+	rec, err := recorder.New(path)
+	c.Assert(err, chk.IsNil)
+	client.HTTPClient = &http.Client{
+		Transport: rec,
+	}
+	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		return compareMethods(r, i) &&
+			compareURLs(r, i) &&
+			compareHeaders(r, i) &&
+			compareBodies(r, i)
+	})
+	return rec
+}
+
+func (client *Client) usesDummies() bool {
+	key, err := base64.StdEncoding.DecodeString(dummyMiniStorageKey)
+	if err != nil {
+		return false
+	}
+	if string(client.accountKey) == string(key) &&
+		client.accountName == dummyStorageAccount {
+		return true
+	}
+	return false
+}
+
+func compareMethods(r *http.Request, i cassette.Request) bool {
+	return r.Method == i.Method
+}
+
+func compareURLs(r *http.Request, i cassette.Request) bool {
+	newURL := modifyURL(r.URL)
+	return newURL.String() == i.URL
+}
+
+func modifyURL(url *url.URL) *url.URL {
+	// The URL host looks like this...
+	// accountname.service.storageEndpointSuffix
+	parts := strings.Split(url.Host, ".")
+	// parts[0] corresponds to the storage account name, so it can be (almost) any string
+	// parts[1] corresponds to the service name (table, blob, etc.).
+	if !(parts[1] == blobServiceName ||
+		parts[1] == tableServiceName ||
+		parts[1] == queueServiceName ||
+		parts[1] == fileServiceName) {
+		return nil
+	}
+	// The rest of the host depends on which Azure cloud is used
+	storageEndpointSuffix := strings.Join(parts[2:], ".")
+	if !(storageEndpointSuffix == azure.PublicCloud.StorageEndpointSuffix ||
+		storageEndpointSuffix == azure.USGovernmentCloud.StorageEndpointSuffix ||
+		storageEndpointSuffix == azure.ChinaCloud.StorageEndpointSuffix ||
+		storageEndpointSuffix == azure.GermanCloud.StorageEndpointSuffix) {
+		return nil
+	}
+
+	host := dummyStorageAccount + "." + parts[1] + "." + azure.PublicCloud.StorageEndpointSuffix
+	newURL := url
+	newURL.Host = host
+	return newURL
+}
+
+func compareHeaders(r *http.Request, i cassette.Request) bool {
+	requestHeaders := r.Header
+	cassetteHeaders := i.Headers
+	// Some headers shall not be compared...
+	requestHeaders.Del("User-Agent")
+	requestHeaders.Del("Authorization")
+	requestHeaders.Del("X-Ms-Date")
+
+	cassetteHeaders.Del("User-Agent")
+	cassetteHeaders.Del("Authorization")
+	cassetteHeaders.Del("X-Ms-Date")
+
+	srcURLstr := requestHeaders.Get("X-Ms-Copy-Source")
+	if srcURLstr != "" {
+		srcURL, err := url.Parse(srcURLstr)
+		if err != nil {
+			return false
+		}
+		modifiedURL := modifyURL(srcURL)
+		requestHeaders.Set("X-Ms-Copy-Source", modifiedURL.String())
+	}
+
+	// Do not compare the complete Content-Type header in table batch requests
+	if isBatchOp(r.URL.String()) {
+		// They all start like this, but then they have a UUID...
+		ctPrefixBatch := "multipart/mixed; boundary=batch_"
+		contentTypeRequest := requestHeaders.Get("Content-Type")
+		contentTypeCassette := cassetteHeaders.Get("Content-Type")
+		if !(strings.HasPrefix(contentTypeRequest, ctPrefixBatch) &&
+			strings.HasPrefix(contentTypeCassette, ctPrefixBatch)) {
+			return false
+		}
+		requestHeaders.Del("Content-Type")
+		cassetteHeaders.Del("Content-Type")
+	}
+
+	return reflect.DeepEqual(requestHeaders, cassetteHeaders)
+}
+
+func compareBodies(r *http.Request, i cassette.Request) bool {
+	body := bytes.Buffer{}
+	if r.Body != nil {
+		_, err := body.ReadFrom(r.Body)
+		if err != nil {
+			return false
+		}
+		r.Body = ioutil.NopCloser(&body)
+	}
+	// Comparing bodies in table batch operations is trickier, because the bodies include UUIDs
+	if isBatchOp(r.URL.String()) {
+		return compareBatchBodies(body.String(), i.Body)
+	}
+	return body.String() == i.Body
+}
+
+func compareBatchBodies(rBody, cBody string) bool {
+	// UUIDs in the batch body look like this...
+	// 2d7f2323-1e42-11e7-8c6c-6451064d81e8
+	exp, err := regexp.Compile("[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}")
+	if err != nil {
+		return false
+	}
+	rBody = replaceStorageAccount(replaceUUIDs(rBody, exp))
+	cBody = replaceUUIDs(cBody, exp)
+	return rBody == cBody
+}
+
+func replaceUUIDs(body string, exp *regexp.Regexp) string {
+	indexes := exp.FindAllStringIndex(body, -1)
+	for _, pair := range indexes {
+		body = strings.Replace(body, body[pair[0]:pair[1]], "00000000-0000-0000-0000-000000000000", -1)
+	}
+	return body
+}
+
+func isBatchOp(url string) bool {
+	return url == "https://golangrocksonazure.table.core.windows.net/$batch"
 }
 
 //getEmulatorClient returns a test client for Azure Storeage Emulator
@@ -51,25 +205,44 @@ func (s *StorageClientSuite) TestNewEmulatorClient(c *chk.C) {
 	c.Assert(cli.accountKey, chk.DeepEquals, expectedKey)
 }
 
+func (s *StorageClientSuite) TestIsValidStorageAccount(c *chk.C) {
+	type test struct {
+		account  string
+		expected bool
+	}
+	testCases := []test{
+		{"name1", true},
+		{"Name2", false},
+		{"reallyLongName1234567891011", false},
+		{"", false},
+		{"concated&name", false},
+		{"formatted name", false},
+	}
+
+	for _, tc := range testCases {
+		c.Assert(IsValidStorageAccount(tc.account), chk.Equals, tc.expected)
+	}
+}
+
 func (s *StorageClientSuite) TestMalformedKeyError(c *chk.C) {
-	_, err := NewBasicClient("foo", "malformed")
+	_, err := NewBasicClient(dummyStorageAccount, "malformed")
 	c.Assert(err, chk.ErrorMatches, "azure: malformed storage account key: .*")
 }
 
 func (s *StorageClientSuite) TestGetBaseURL_Basic_Https(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, dummyMiniStorageKey)
 	c.Assert(err, chk.IsNil)
 	c.Assert(cli.apiVersion, chk.Equals, DefaultAPIVersion)
 	c.Assert(err, chk.IsNil)
-	c.Assert(cli.getBaseURL("table"), chk.Equals, "https://foo.table.core.windows.net")
+	c.Assert(cli.getBaseURL("table").String(), chk.Equals, "https://golangrocksonazure.table.core.windows.net")
 }
 
 func (s *StorageClientSuite) TestGetBaseURL_Custom_NoHttps(c *chk.C) {
 	apiVersion := "2015-01-01" // a non existing one
-	cli, err := NewClient("foo", "YmFy", "core.chinacloudapi.cn", apiVersion, false)
+	cli, err := NewClient(dummyStorageAccount, dummyMiniStorageKey, "core.chinacloudapi.cn", apiVersion, false)
 	c.Assert(err, chk.IsNil)
 	c.Assert(cli.apiVersion, chk.Equals, apiVersion)
-	c.Assert(cli.getBaseURL("table"), chk.Equals, "http://foo.table.core.chinacloudapi.cn")
+	c.Assert(cli.getBaseURL("table").String(), chk.Equals, "http://golangrocksonazure.table.core.chinacloudapi.cn")
 }
 
 func (s *StorageClientSuite) TestGetBaseURL_StorageEmulator(c *chk.C) {
@@ -84,42 +257,42 @@ func (s *StorageClientSuite) TestGetBaseURL_StorageEmulator(c *chk.C) {
 	}
 	for _, i := range tests {
 		baseURL := cli.getBaseURL(i.service)
-		c.Assert(baseURL, chk.Equals, i.expected)
+		c.Assert(baseURL.String(), chk.Equals, i.expected)
 	}
 }
 
 func (s *StorageClientSuite) TestGetEndpoint_None(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 	output := cli.getEndpoint(blobServiceName, "", url.Values{})
-	c.Assert(output, chk.Equals, "https://foo.blob.core.windows.net/")
+	c.Assert(output, chk.Equals, "https://golangrocksonazure.blob.core.windows.net/")
 }
 
 func (s *StorageClientSuite) TestGetEndpoint_PathOnly(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 	output := cli.getEndpoint(blobServiceName, "path", url.Values{})
-	c.Assert(output, chk.Equals, "https://foo.blob.core.windows.net/path")
+	c.Assert(output, chk.Equals, "https://golangrocksonazure.blob.core.windows.net/path")
 }
 
 func (s *StorageClientSuite) TestGetEndpoint_ParamsOnly(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 	params := url.Values{}
 	params.Set("a", "b")
 	params.Set("c", "d")
 	output := cli.getEndpoint(blobServiceName, "", params)
-	c.Assert(output, chk.Equals, "https://foo.blob.core.windows.net/?a=b&c=d")
+	c.Assert(output, chk.Equals, "https://golangrocksonazure.blob.core.windows.net/?a=b&c=d")
 }
 
 func (s *StorageClientSuite) TestGetEndpoint_Mixed(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 	params := url.Values{}
 	params.Set("a", "b")
 	params.Set("c", "d")
 	output := cli.getEndpoint(blobServiceName, "path", params)
-	c.Assert(output, chk.Equals, "https://foo.blob.core.windows.net/path?a=b&c=d")
+	c.Assert(output, chk.Equals, "https://golangrocksonazure.blob.core.windows.net/path?a=b&c=d")
 }
 
 func (s *StorageClientSuite) TestGetEndpoint_StorageEmulator(c *chk.C) {
@@ -139,7 +312,7 @@ func (s *StorageClientSuite) TestGetEndpoint_StorageEmulator(c *chk.C) {
 }
 
 func (s *StorageClientSuite) Test_getStandardHeaders(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 
 	headers := cli.getStandardHeaders()
@@ -153,7 +326,12 @@ func (s *StorageClientSuite) Test_getStandardHeaders(c *chk.C) {
 
 func (s *StorageClientSuite) TestReturnsStorageServiceError(c *chk.C) {
 	// attempt to delete a nonexisting container
-	_, err := getBlobClient(c).deleteContainer(randContainer())
+	cli := getBlobClient(c)
+	rec := cli.client.appendRecorder(c)
+	defer rec.Stop()
+
+	cnt := cli.GetContainerReference(containerName(c))
+	_, err := cnt.delete(nil)
 	c.Assert(err, chk.NotNil)
 
 	v, ok := err.(AzureStorageServiceError)
@@ -166,7 +344,13 @@ func (s *StorageClientSuite) TestReturnsStorageServiceError(c *chk.C) {
 
 func (s *StorageClientSuite) TestReturnsStorageServiceError_withoutResponseBody(c *chk.C) {
 	// HEAD on non-existing blob
-	_, err := getBlobClient(c).GetBlobProperties("non-existing-blob", "non-existing-container")
+	cli := getBlobClient(c)
+	rec := cli.client.appendRecorder(c)
+	defer rec.Stop()
+
+	cnt := cli.GetContainerReference("non-existing-container")
+	b := cnt.GetBlobReference("non-existing-blob")
+	err := b.GetProperties(nil)
 
 	c.Assert(err, chk.NotNil)
 	c.Assert(err, chk.FitsTypeOf, AzureStorageServiceError{})
@@ -180,7 +364,7 @@ func (s *StorageClientSuite) TestReturnsStorageServiceError_withoutResponseBody(
 }
 
 func (s *StorageClientSuite) Test_createServiceClients(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 
 	ua := cli.getDefaultUserAgent()
@@ -207,14 +391,14 @@ func (s *StorageClientSuite) Test_createServiceClients(c *chk.C) {
 }
 
 func (s *StorageClientSuite) TestAddToUserAgent(c *chk.C) {
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 
 	ua := cli.getDefaultUserAgent()
 
-	err = cli.AddToUserAgent("bar")
+	err = cli.AddToUserAgent("rofl")
 	c.Assert(err, chk.IsNil)
-	c.Assert(cli.userAgent, chk.Equals, ua+" bar")
+	c.Assert(cli.userAgent, chk.Equals, ua+" rofl")
 
 	err = cli.AddToUserAgent("")
 	c.Assert(err, chk.NotNil)
@@ -228,7 +412,7 @@ func (s *StorageClientSuite) Test_protectUserAgent(c *chk.C) {
 		userAgentHeader: "four",
 	}
 
-	cli, err := NewBasicClient("foo", "YmFy")
+	cli, err := NewBasicClient(dummyStorageAccount, "YmFy")
 	c.Assert(err, chk.IsNil)
 
 	ua := cli.getDefaultUserAgent()
@@ -241,4 +425,48 @@ func (s *StorageClientSuite) Test_protectUserAgent(c *chk.C) {
 		"2": "two",
 		"3": "three",
 	})
+}
+
+func (s *StorageClientSuite) Test_doRetry(c *chk.C) {
+	cli := getBasicClient(c)
+	rec := cli.appendRecorder(c)
+	defer rec.Stop()
+
+	// Prepare request that will fail with 404 (delete non extising table)
+	uri, err := url.Parse(cli.getEndpoint(tableServiceName, "(retry)", url.Values{"timeout": {strconv.Itoa(30)}}))
+	c.Assert(err, chk.IsNil)
+	req := http.Request{
+		Method: http.MethodDelete,
+		URL:    uri,
+		Header: http.Header{
+			"Accept":       {"application/json;odata=nometadata"},
+			"Prefer":       {"return-no-content"},
+			"X-Ms-Version": {"2016-05-31"},
+		},
+	}
+
+	ds, ok := cli.Sender.(*DefaultSender)
+	c.Assert(ok, chk.Equals, true)
+	// Modify sender so it retries quickly
+	ds.RetryAttempts = 3
+	ds.RetryDuration = time.Second
+	// include 404 as a valid status code for retries
+	ds.ValidStatusCodes = []int{http.StatusNotFound}
+	cli.Sender = ds
+
+	now := time.Now()
+	resp, err := cli.Sender.Send(cli, &req)
+	afterRetries := time.Since(now)
+	c.Assert(err, chk.IsNil)
+	c.Assert(resp.StatusCode, chk.Equals, http.StatusNotFound)
+
+	// Was it the correct amount of retries... ?
+	c.Assert(cli.Sender.(*DefaultSender).attempts, chk.Equals, cli.Sender.(*DefaultSender).RetryAttempts)
+	// What about time... ?
+	// Note, seconds are rounded
+	sum := 0
+	for i := 0; i < ds.RetryAttempts; i++ {
+		sum += int(ds.RetryDuration.Seconds() * math.Pow(2, float64(i))) // same formula used in autorest.DelayForBackoff
+	}
+	c.Assert(int(afterRetries.Seconds()), chk.Equals, sum)
 }

@@ -182,7 +182,10 @@ func validateServiceSpec(spec *api.ServiceSpec) error {
 
 // checkPortConflicts does a best effort to find if the passed in spec has port
 // conflicts with existing services.
-func (s *Server) checkPortConflicts(spec *api.ServiceSpec) error {
+// `serviceID string` is the service ID of the spec in service update. If
+// `serviceID` is not "", then conflicts check will be skipped against this
+// service (the service being updated).
+func (s *Server) checkPortConflicts(spec *api.ServiceSpec, serviceID string) error {
 	if spec.Endpoint == nil {
 		return nil
 	}
@@ -215,17 +218,21 @@ func (s *Server) checkPortConflicts(spec *api.ServiceSpec) error {
 	}
 
 	for _, service := range services {
+		// If service ID is the same (and not "") then this is an update
+		if serviceID != "" && serviceID == service.ID {
+			continue
+		}
 		if service.Spec.Endpoint != nil {
 			for _, pc := range service.Spec.Endpoint.Ports {
 				if reqPorts[pcToString(pc)] {
-					return grpc.Errorf(codes.InvalidArgument, "port '%d' is already in use by service %s", pc.PublishedPort, service.ID)
+					return grpc.Errorf(codes.InvalidArgument, "port '%d' is already in use by service '%s' (%s)", pc.PublishedPort, service.Spec.Annotations.Name, service.ID)
 				}
 			}
 		}
 		if service.Endpoint != nil {
 			for _, pc := range service.Endpoint.Ports {
 				if reqPorts[pcToString(pc)] {
-					return grpc.Errorf(codes.InvalidArgument, "port '%d' is already in use by service %s", pc.PublishedPort, service.ID)
+					return grpc.Errorf(codes.InvalidArgument, "port '%d' is already in use by service '%s' (%s)", pc.PublishedPort, service.Spec.Annotations.Name, service.ID)
 				}
 			}
 		}
@@ -243,7 +250,7 @@ func (s *Server) CreateService(ctx context.Context, request *api.CreateServiceRe
 		return nil, err
 	}
 
-	if err := s.checkPortConflicts(request.Spec); err != nil {
+	if err := s.checkPortConflicts(request.Spec, ""); err != nil {
 		return nil, err
 	}
 
@@ -309,7 +316,7 @@ func (s *Server) UpdateService(ctx context.Context, request *api.UpdateServiceRe
 	}
 
 	if request.Spec.Endpoint != nil && !reflect.DeepEqual(request.Spec.Endpoint, service.Spec.Endpoint) {
-		if err := s.checkPortConflicts(request.Spec); err != nil {
+		if err := s.checkPortConflicts(request.Spec, request.ServiceID); err != nil {
 			return nil, err
 		}
 	}
@@ -320,8 +327,20 @@ func (s *Server) UpdateService(ctx context.Context, request *api.UpdateServiceRe
 			return nil
 		}
 		// temporary disable network update
-		if request.Spec != nil && !reflect.DeepEqual(request.Spec.Networks, service.Spec.Networks) {
-			return errNetworkUpdateNotSupported
+		if request.Spec != nil {
+			requestSpecNetworks := request.Spec.Task.Networks
+			if len(requestSpecNetworks) == 0 {
+				requestSpecNetworks = request.Spec.Networks
+			}
+
+			specNetworks := service.Spec.Task.Networks
+			if len(specNetworks) == 0 {
+				specNetworks = service.Spec.Networks
+			}
+
+			if !reflect.DeepEqual(requestSpecNetworks, specNetworks) {
+				return errNetworkUpdateNotSupported
+			}
 		}
 
 		// orchestrator is designed to be stateless, so it should not deal

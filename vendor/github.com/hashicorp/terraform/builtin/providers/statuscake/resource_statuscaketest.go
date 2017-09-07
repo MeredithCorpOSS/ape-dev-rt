@@ -70,6 +70,12 @@ func resourceStatusCakeTest() *schema.Resource {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
+
+			"trigger_rate": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Default:  5,
+			},
 		},
 	}
 }
@@ -87,6 +93,7 @@ func CreateTest(d *schema.ResourceData, meta interface{}) error {
 		ContactID:    d.Get("contact_id").(int),
 		Confirmation: d.Get("confirmations").(int),
 		Port:         d.Get("port").(int),
+		TriggerRate:  d.Get("trigger_rate").(int),
 	}
 
 	log.Printf("[DEBUG] Creating new StatusCake Test: %s", d.Get("website_name").(string))
@@ -151,6 +158,7 @@ func ReadTest(d *schema.ResourceData, meta interface{}) error {
 	d.Set("contact_id", testResp.ContactID)
 	d.Set("confirmations", testResp.Confirmation)
 	d.Set("port", testResp.Port)
+	d.Set("trigger_rate", testResp.TriggerRate)
 
 	return nil
 }
@@ -193,5 +201,16 @@ func getStatusCakeTestInput(d *schema.ResourceData) *statuscake.Test {
 	if v, ok := d.GetOk("port"); ok {
 		test.Port = v.(int)
 	}
+	if v, ok := d.GetOk("trigger_rate"); ok {
+		test.TriggerRate = v.(int)
+	}
+
+	defaultStatusCodes := "204, 205, 206, 303, 400, 401, 403, 404, 405, 406, " +
+		"408, 410, 413, 444, 429, 494, 495, 496, 499, 500, 501, 502, 503, " +
+		"504, 505, 506, 507, 508, 509, 510, 511, 521, 522, 523, 524, 520, " +
+		"598, 599"
+
+	test.StatusCodes = defaultStatusCodes
+
 	return test
 }

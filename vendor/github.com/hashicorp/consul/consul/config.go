@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/hashicorp/consul/consul/structs"
 	"github.com/hashicorp/consul/tlsutil"
 	"github.com/hashicorp/consul/types"
 	"github.com/hashicorp/memberlist"
@@ -274,6 +275,19 @@ type Config struct {
 	// This period is meant to be long enough for a leader election to take
 	// place, and a small jitter is applied to avoid a thundering herd.
 	RPCHoldTimeout time.Duration
+
+	// AutopilotConfig is used to apply the initial autopilot config when
+	// bootstrapping.
+	AutopilotConfig *structs.AutopilotConfig
+
+	// ServerHealthInterval is the frequency with which the health of the
+	// servers in the cluster will be updated.
+	ServerHealthInterval time.Duration
+
+	// AutopilotInterval is the frequency with which the leader will perform
+	// autopilot tasks, such as promoting eligible non-voters and removing
+	// dead servers.
+	AutopilotInterval time.Duration
 }
 
 // CheckVersion is used to check if the ProtocolVersion is valid
@@ -346,6 +360,15 @@ func DefaultConfig() *Config {
 		RPCHoldTimeout: 7 * time.Second,
 
 		TLSMinVersion: "tls10",
+
+		AutopilotConfig: &structs.AutopilotConfig{
+			CleanupDeadServers:      true,
+			LastContactThreshold:    200 * time.Millisecond,
+			MaxTrailingLogs:         250,
+			ServerStabilizationTime: 10 * time.Second,
+		},
+		ServerHealthInterval: 2 * time.Second,
+		AutopilotInterval:    10 * time.Second,
 	}
 
 	// Increase our reap interval to 3 days instead of 24h.
@@ -360,9 +383,10 @@ func DefaultConfig() *Config {
 	conf.SerfLANConfig.MemberlistConfig.BindPort = DefaultLANSerfPort
 	conf.SerfWANConfig.MemberlistConfig.BindPort = DefaultWANSerfPort
 
-	// Enable interoperability with unversioned Raft library, and don't
-	// start using new ID-based features yet.
-	conf.RaftConfig.ProtocolVersion = 1
+	// TODO: default to 3 in Consul 0.9
+	// Use a transitional version of the raft protocol to interoperate with
+	// versions 1 and 3
+	conf.RaftConfig.ProtocolVersion = 2
 	conf.ScaleRaft(DefaultRaftMultiplier)
 
 	// Disable shutdown on removal

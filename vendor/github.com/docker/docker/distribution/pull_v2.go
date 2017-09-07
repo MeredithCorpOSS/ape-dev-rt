@@ -32,7 +32,11 @@ import (
 	"golang.org/x/net/context"
 )
 
-var errRootFSMismatch = errors.New("layers from manifest don't match image configuration")
+var (
+	errRootFSMismatch  = errors.New("layers from manifest don't match image configuration")
+	errMediaTypePlugin = errors.New("target is a plugin")
+	errRootFSInvalid   = errors.New("invalid rootfs in image configuration")
+)
 
 // ImageConfigPullError is an error pulling the image config blob
 // (only applies to schema2).
@@ -356,6 +360,12 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdat
 		return false, fmt.Errorf("image manifest does not exist for tag or digest %q", tagOrDigest)
 	}
 
+	if m, ok := manifest.(*schema2.DeserializedManifest); ok {
+		if m.Manifest.Config.MediaType == schema2.MediaTypePluginConfig {
+			return false, errMediaTypePlugin
+		}
+	}
+
 	// If manSvc.Get succeeded, we can be confident that the registry on
 	// the other side speaks the v2 protocol.
 	p.confirmedV2 = true
@@ -540,9 +550,26 @@ func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *s
 	)
 
 	// https://github.com/docker/docker/issues/24766 - Err on the side of caution,
-	// explicitly blocking images intended for linux from the Windows daemon
-	if runtime.GOOS == "windows" && unmarshalledConfig.OS == "linux" {
-		return "", "", fmt.Errorf("image operating system %q cannot be used on this platform", unmarshalledConfig.OS)
+	// explicitly blocking images intended for linux from the Windows daemon. On
+	// Windows, we do this before the attempt to download, effectively serialising
+	// the download slightly slowing it down. We have to do it this way, as
+	// chances are the download of layers itself would fail due to file names
+	// which aren't suitable for NTFS. At some point in the future, if a similar
+	// check to block Windows images being pulled on Linux is implemented, it
+	// may be necessary to perform the same type of serialisation.
+	if runtime.GOOS == "windows" {
+		configJSON, unmarshalledConfig, err = receiveConfig(configChan, errChan)
+		if err != nil {
+			return "", "", err
+		}
+
+		if unmarshalledConfig.RootFS == nil {
+			return "", "", errRootFSInvalid
+		}
+
+		if unmarshalledConfig.OS == "linux" {
+			return "", "", fmt.Errorf("image operating system %q cannot be used on this platform", unmarshalledConfig.OS)
+		}
 	}
 
 	downloadRootFS = *image.NewRootFS()
@@ -571,6 +598,10 @@ func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *s
 		configJSON, unmarshalledConfig, err = receiveConfig(configChan, errChan)
 		if err != nil {
 			return "", "", err
+		}
+
+		if unmarshalledConfig.RootFS == nil {
+			return "", "", errRootFSInvalid
 		}
 	}
 

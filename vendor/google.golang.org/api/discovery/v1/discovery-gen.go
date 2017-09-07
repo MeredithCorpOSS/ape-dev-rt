@@ -55,9 +55,10 @@ func New(client *http.Client) (*Service, error) {
 }
 
 type Service struct {
-	client    *http.Client
-	BasePath  string // API endpoint base URL
-	UserAgent string // optional additional User-Agent fragment
+	client                    *http.Client
+	BasePath                  string // API endpoint base URL
+	UserAgent                 string // optional additional User-Agent fragment
+	GoogleClientHeaderElement string // client header fragment, for Google use only
 
 	Apis *ApisService
 }
@@ -67,6 +68,10 @@ func (s *Service) userAgent() string {
 		return googleapi.UserAgent
 	}
 	return googleapi.UserAgent + " " + s.UserAgent
+}
+
+func (s *Service) clientHeader() string {
+	return gensupport.GoogleClientHeader("20170210", s.GoogleClientHeaderElement)
 }
 
 func NewApisService(s *Service) *ApisService {
@@ -557,7 +562,7 @@ func (s *RestDescriptionAuth) MarshalJSON() ([]byte, error) {
 // RestDescriptionAuthOauth2: OAuth 2.0 authentication information.
 type RestDescriptionAuthOauth2 struct {
 	// Scopes: Available OAuth 2.0 scopes.
-	Scopes *RestDescriptionAuthOauth2Scopes `json:"scopes,omitempty"`
+	Scopes map[string]RestDescriptionAuthOauth2Scopes `json:"scopes,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "Scopes") to
 	// unconditionally include in API requests. By default, fields with
@@ -582,8 +587,32 @@ func (s *RestDescriptionAuthOauth2) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// RestDescriptionAuthOauth2Scopes: Available OAuth 2.0 scopes.
+// RestDescriptionAuthOauth2Scopes: The scope value.
 type RestDescriptionAuthOauth2Scopes struct {
+	// Description: Description of scope.
+	Description string `json:"description,omitempty"`
+
+	// ForceSendFields is a list of field names (e.g. "Description") to
+	// unconditionally include in API requests. By default, fields with
+	// empty values are omitted from API requests. However, any non-pointer,
+	// non-interface field appearing in ForceSendFields will be sent to the
+	// server regardless of whether the field is empty or not. This may be
+	// used to include empty fields in Patch requests.
+	ForceSendFields []string `json:"-"`
+
+	// NullFields is a list of field names (e.g. "Description") to include
+	// in API requests with the JSON null value. By default, fields with
+	// empty values are omitted from API requests. However, any field with
+	// an empty value appearing in NullFields will be sent to the server as
+	// null. It is an error if a field in this list has a non-empty value.
+	// This may be used to include null fields in Patch requests.
+	NullFields []string `json:"-"`
+}
+
+func (s *RestDescriptionAuthOauth2Scopes) MarshalJSON() ([]byte, error) {
+	type noMethod RestDescriptionAuthOauth2Scopes
+	raw := noMethod(*s)
+	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
 // RestDescriptionIcons: Links to 16x16 and 32x32 icons representing the
@@ -981,6 +1010,7 @@ func (c *ApisGetRestCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -1135,6 +1165,7 @@ func (c *ApisListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}

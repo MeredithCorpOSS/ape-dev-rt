@@ -2,7 +2,6 @@ package profitbricks
 
 import (
 	"testing"
-	"fmt"
 )
 
 var locid string

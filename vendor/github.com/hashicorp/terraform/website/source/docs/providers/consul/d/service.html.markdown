@@ -6,7 +6,7 @@ description: |-
   Provides details about a specific Consul service
 ---
 
-# consul\_catalog\_service
+# consul_catalog_service
 
 `consul_catalog_service` provides details about a specific Consul service in a
 given datacenter.  The results include a list of nodes advertising the specified
@@ -19,20 +19,21 @@ source, which provides a summary of the current Consul services.
 
 ## Example Usage
 
-```
+```hcl
 data "consul_catalog_service" "read-consul-dc1" {
-    # query_options {
-    #    # Optional parameter: implicitly uses the current datacenter of the agent
-    #    datacenter = "dc1"
-    # }
+  query_options {
+    # Optional parameter: implicitly uses the current datacenter of the agent  
+    datacenter = "dc1"
+  }
 
-    name = "consul"
+  name = "consul"
 }
 
 # Set the description to a whitespace delimited list of the node names
 resource "example_resource" "app" {
-    description = "${join(" ", data.consul_catalog_service.nodes)}"
-    ...
+  description = "${join(" ", data.consul_catalog_service.nodes)}"
+
+  # ...
 }
 ```
 

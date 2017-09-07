@@ -3,14 +3,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// +build integration
+
 package tests
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/google/go-github/github"
-	"reflect"
 )
 
 func TestRepositories_CRUD(t *testing.T) {
@@ -112,34 +114,74 @@ func TestRepositories_EditBranches(t *testing.T) {
 		t.Fatalf("Repositories.GetBranch() returned error: %v", err)
 	}
 
-	if *branch.Protection.Enabled {
+	if *branch.Protected {
 		t.Fatalf("Branch %v of repo %v is already protected", "master", *repo.Name)
 	}
 
-	branch.Protection.Enabled = github.Bool(true)
-	branch.Protection.RequiredStatusChecks = &github.RequiredStatusChecks{
-		EnforcementLevel: github.String("everyone"),
-		Contexts:         &[]string{"continous-integration"},
+	protectionRequest := &github.ProtectionRequest{
+		RequiredStatusChecks: &github.RequiredStatusChecks{
+			IncludeAdmins: true,
+			Strict:        true,
+			Contexts:      []string{"continuous-integration"},
+		},
+		RequiredPullRequestReviews: &github.RequiredPullRequestReviews{
+			IncludeAdmins: true,
+		},
+		// TODO: Only organization repositories can have users and team restrictions.
+		//       In order to be able to test these Restrictions, need to add support
+		//       for creating temporary organization repositories.
+		Restrictions: nil,
 	}
-	branch, _, err = client.Repositories.EditBranch(*repo.Owner.Login, *repo.Name, "master", branch)
+
+	protection, _, err := client.Repositories.UpdateBranchProtection(*repo.Owner.Login, *repo.Name, "master", protectionRequest)
 	if err != nil {
-		t.Fatalf("Repositories.EditBranch() returned error: %v", err)
+		t.Fatalf("Repositories.UpdateBranchProtection() returned error: %v", err)
 	}
 
-	if !*branch.Protection.Enabled {
-		t.Fatalf("Branch %v of repo %v should be protected, but is not!", "master", *repo.Name)
+	want := &github.Protection{
+		RequiredStatusChecks: &github.RequiredStatusChecks{
+			IncludeAdmins: true,
+			Strict:        true,
+			Contexts:      []string{"continuous-integration"},
+		},
+		RequiredPullRequestReviews: &github.RequiredPullRequestReviews{
+			IncludeAdmins: true,
+		},
+		Restrictions: nil,
 	}
-	if *branch.Protection.RequiredStatusChecks.EnforcementLevel != "everyone" {
-		t.Fatalf("RequiredStatusChecks should be enabled for everyone, set for: %v", *branch.Protection.RequiredStatusChecks.EnforcementLevel)
-	}
-
-	wantedContexts := []string{"continous-integration"}
-	if !reflect.DeepEqual(*branch.Protection.RequiredStatusChecks.Contexts, wantedContexts) {
-		t.Fatalf("RequiredStatusChecks.Contexts should be: %v but is: %v", wantedContexts, *branch.Protection.RequiredStatusChecks.Contexts)
+	if !reflect.DeepEqual(protection, want) {
+		t.Errorf("Repositories.UpdateBranchProtection() returned %+v, want %+v", protection, want)
 	}
 
 	_, err = client.Repositories.Delete(*repo.Owner.Login, *repo.Name)
 	if err != nil {
 		t.Fatalf("Repositories.Delete() returned error: %v", err)
+	}
+}
+
+func TestRepositories_List(t *testing.T) {
+	if !checkAuth("TestRepositories_List") {
+		return
+	}
+
+	_, _, err := client.Repositories.List("", nil)
+	if err != nil {
+		t.Fatalf("Repositories.List('') returned error: %v", err)
+	}
+
+	_, _, err = client.Repositories.List("google", nil)
+	if err != nil {
+		t.Fatalf("Repositories.List('google') returned error: %v", err)
+	}
+
+	opt := github.RepositoryListOptions{Sort: "created"}
+	repos, _, err := client.Repositories.List("google", &opt)
+	if err != nil {
+		t.Fatalf("Repositories.List('google') with Sort opt returned error: %v", err)
+	}
+	for i, repo := range repos {
+		if i > 0 && (*repos[i-1].CreatedAt).Time.Before((*repo.CreatedAt).Time) {
+			t.Fatalf("Repositories.List('google') with default descending Sort returned incorrect order")
+		}
 	}
 }

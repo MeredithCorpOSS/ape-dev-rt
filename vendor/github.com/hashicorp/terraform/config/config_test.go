@@ -187,6 +187,26 @@ func TestConfigValidate_table(t *testing.T) {
 			true,
 			"data sources cannot have",
 		},
+
+		{
+			"basic provisioners",
+			"validate-basic-provisioners",
+			false,
+			"",
+		},
+
+		{
+			"backend config with interpolations",
+			"validate-backend-interpolate",
+			true,
+			"cannot contain interp",
+		},
+		{
+			"nested types in variable default",
+			"validate-var-nested",
+			false,
+			"",
+		},
 	}
 
 	for i, tc := range cases {
@@ -266,29 +286,8 @@ func TestConfigValidate_countCountVar(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_countModuleVar(t *testing.T) {
-	c := testConfig(t, "validate-count-module-var")
-	if err := c.Validate(); err == nil {
-		t.Fatal("should not be valid")
-	}
-}
-
 func TestConfigValidate_countNotInt(t *testing.T) {
 	c := testConfig(t, "validate-count-not-int")
-	if err := c.Validate(); err == nil {
-		t.Fatal("should not be valid")
-	}
-}
-
-func TestConfigValidate_countResourceVar(t *testing.T) {
-	c := testConfig(t, "validate-count-resource-var")
-	if err := c.Validate(); err == nil {
-		t.Fatal("should not be valid")
-	}
-}
-
-func TestConfigValidate_countResourceVarMulti(t *testing.T) {
-	c := testConfig(t, "validate-count-resource-var-multi")
 	if err := c.Validate(); err == nil {
 		t.Fatal("should not be valid")
 	}
@@ -573,6 +572,13 @@ func TestConfigValidate_varDefaultInterpolate(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_varDefaultInterpolateEscaped(t *testing.T) {
+	c := testConfig(t, "validate-var-default-interpolate-escaped")
+	if err := c.Validate(); err != nil {
+		t.Fatalf("should be valid, but got err: %s", err)
+	}
+}
+
 func TestConfigValidate_varDup(t *testing.T) {
 	c := testConfig(t, "validate-var-dup")
 	if err := c.Validate(); err == nil {
@@ -584,20 +590,6 @@ func TestConfigValidate_varMultiExactNonSlice(t *testing.T) {
 	c := testConfig(t, "validate-var-multi-exact-non-slice")
 	if err := c.Validate(); err != nil {
 		t.Fatalf("should be valid: %s", err)
-	}
-}
-
-func TestConfigValidate_varMultiNonSlice(t *testing.T) {
-	c := testConfig(t, "validate-var-multi-non-slice")
-	if err := c.Validate(); err == nil {
-		t.Fatal("should not be valid")
-	}
-}
-
-func TestConfigValidate_varMultiNonSliceProvisioner(t *testing.T) {
-	c := testConfig(t, "validate-var-multi-non-slice-provisioner")
-	if err := c.Validate(); err == nil {
-		t.Fatal("should not be valid")
 	}
 }
 

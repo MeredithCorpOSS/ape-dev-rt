@@ -1,6 +1,9 @@
 package azurerm
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"reflect"
@@ -60,6 +63,7 @@ func Provider() terraform.ResourceProvider {
 
 		DataSourcesMap: map[string]*schema.Resource{
 			"azurerm_client_config": dataSourceArmClientConfig(),
+			"azurerm_public_ip":     dataSourceArmPublicIP(),
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -75,12 +79,16 @@ func Provider() terraform.ResourceProvider {
 			"azurerm_eventhub_consumer_group":     resourceArmEventHubConsumerGroup(),
 			"azurerm_eventhub_namespace":          resourceArmEventHubNamespace(),
 
+			"azurerm_express_route_circuit": resourceArmExpressRouteCircuit(),
+
 			"azurerm_lb":                      resourceArmLoadBalancer(),
 			"azurerm_lb_backend_address_pool": resourceArmLoadBalancerBackendAddressPool(),
 			"azurerm_lb_nat_rule":             resourceArmLoadBalancerNatRule(),
 			"azurerm_lb_nat_pool":             resourceArmLoadBalancerNatPool(),
 			"azurerm_lb_probe":                resourceArmLoadBalancerProbe(),
 			"azurerm_lb_rule":                 resourceArmLoadBalancerRule(),
+
+			"azurerm_managed_disk": resourceArmManagedDisk(),
 
 			"azurerm_key_vault":                 resourceArmKeyVault(),
 			"azurerm_local_network_gateway":     resourceArmLocalNetworkGateway(),
@@ -94,6 +102,7 @@ func Provider() terraform.ResourceProvider {
 			"azurerm_servicebus_namespace":      resourceArmServiceBusNamespace(),
 			"azurerm_servicebus_subscription":   resourceArmServiceBusSubscription(),
 			"azurerm_servicebus_topic":          resourceArmServiceBusTopic(),
+			"azurerm_sql_elasticpool":           resourceArmSqlElasticPool(),
 			"azurerm_storage_account":           resourceArmStorageAccount(),
 			"azurerm_storage_blob":              resourceArmStorageBlob(),
 			"azurerm_storage_container":         resourceArmStorageContainer(),
@@ -190,6 +199,12 @@ func providerConfigure(p *schema.Provider) schema.ConfigureFunc {
 		}
 
 		client.StopContext = p.StopContext()
+
+		// replaces the context between tests
+		p.MetaReset = func() error {
+			client.StopContext = p.StopContext()
+			return nil
+		}
 
 		// List all the available providers and their registration state to avoid unnecessary
 		// requests. This also lets us check if the provider credentials are correct.
@@ -322,4 +337,32 @@ func ignoreCaseDiffSuppressFunc(k, old, new string, d *schema.ResourceData) bool
 // supplied value to lower before saving to state for consistency.
 func ignoreCaseStateFunc(val interface{}) string {
 	return strings.ToLower(val.(string))
+}
+
+func userDataStateFunc(v interface{}) string {
+	switch s := v.(type) {
+	case string:
+		s = base64Encode(s)
+		hash := sha1.Sum([]byte(s))
+		return hex.EncodeToString(hash[:])
+	default:
+		return ""
+	}
+}
+
+// base64Encode encodes data if the input isn't already encoded using
+// base64.StdEncoding.EncodeToString. If the input is already base64 encoded,
+// return the original input unchanged.
+func base64Encode(data string) string {
+	// Check whether the data is already Base64 encoded; don't double-encode
+	if isBase64Encoded(data) {
+		return data
+	}
+	// data has not been encoded encode and return
+	return base64.StdEncoding.EncodeToString([]byte(data))
+}
+
+func isBase64Encoded(data string) bool {
+	_, err := base64.StdEncoding.DecodeString(data)
+	return err == nil
 }

@@ -12,19 +12,19 @@ Provides a DigitalOcean DNS record resource.
 
 ## Example Usage
 
-```
-# Create a new domain 
+```hcl
+# Create a new domain
 resource "digitalocean_domain" "default" {
-    name = "www.example.com"
-    ip_address = "${digitalocean_droplet.foo.ipv4_address}"
+  name       = "www.example.com"
+  ip_address = "${digitalocean_droplet.foo.ipv4_address}"
 }
 
 # Add a record to the domain
 resource "digitalocean_record" "foobar" {
-    domain = "${digitalocean_domain.default.name}"
-    type = "A"
-    name = "foobar"
-    value = "192.168.0.11"
+  domain = "${digitalocean_domain.default.name}"
+  type   = "A"
+  name   = "foobar"
+  value  = "192.168.0.11"
 }
 ```
 
@@ -40,6 +40,7 @@ The following arguments are supported:
 * `port` - (Optional) The port of the record, for SRV records.
 * `priority` - (Optional) The priority of the record, for MX and SRV
    records.
+* `ttl` - (Optional) The time to live for the record, in seconds.
 
 ## Attributes Reference
 
@@ -47,4 +48,3 @@ The following attributes are exported:
 
 * `id` - The record ID
 * `fqdn` - The FQDN of the record
-

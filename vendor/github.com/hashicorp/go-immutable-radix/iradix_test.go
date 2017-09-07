@@ -605,6 +605,31 @@ func TestMergeChildVisibility(t *testing.T) {
 	}
 }
 
+// isClosed returns true if the given channel is closed.
+func isClosed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// hasAnyClosedMutateCh scans the given tree and returns true if there are any
+// closed mutate channels on any nodes or leaves.
+func hasAnyClosedMutateCh(r *Tree) bool {
+	for iter := r.root.rawIterator(); iter.Front() != nil; iter.Next() {
+		n := iter.Front()
+		if isClosed(n.mutateCh) {
+			return true
+		}
+		if n.isLeaf() && isClosed(n.leaf.mutateCh) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTrackMutate_SeekPrefixWatch(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		r := New()
@@ -646,11 +671,14 @@ func TestTrackMutate_SeekPrefixWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		// Verify root and parent triggered, and leaf affected
@@ -700,11 +728,14 @@ func TestTrackMutate_SeekPrefixWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		// Verify root and parent triggered, and leaf affected
@@ -785,11 +816,14 @@ func TestTrackMutate_GetWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		// Verify root and parent triggered, not leaf affected
@@ -833,11 +867,14 @@ func TestTrackMutate_GetWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		select {
@@ -888,11 +925,14 @@ func TestTrackMutate_GetWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		// Verify root and parent triggered, not leaf affected
@@ -936,11 +976,14 @@ func TestTrackMutate_GetWatch(t *testing.T) {
 		case 0:
 			r = txn.Commit()
 		case 1:
-			r = txn.commit()
-			txn.notify()
+			r = txn.CommitOnly()
+			txn.Notify()
 		default:
-			r = txn.commit()
+			r = txn.CommitOnly()
 			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
 		}
 
 		select {
@@ -1050,13 +1093,18 @@ func TestTrackMutate_HugeTxn(t *testing.T) {
 	txn.Insert([]byte("foobarbaz"), nil)
 
 	// Commit and make sure we overflowed but didn't take on extra stuff.
-	r = txn.commit()
-	if !txn.trackOverflow || len(txn.trackChannels) != defaultModifiedCache {
+	r = txn.CommitOnly()
+	if !txn.trackOverflow || txn.trackChannels != nil {
 		t.Fatalf("bad")
 	}
 
 	// Now do the trigger.
-	txn.notify()
+	txn.Notify()
+
+	// Make sure no closed channels escaped the transaction.
+	if hasAnyClosedMutateCh(r) {
+		t.Fatalf("bad")
+	}
 
 	// Verify the watches fired as expected.
 	select {
@@ -1088,5 +1136,143 @@ func TestTrackMutate_HugeTxn(t *testing.T) {
 	case <-afterWatch:
 	default:
 		t.Fatalf("bad")
+	}
+}
+
+func TestTrackMutate_mergeChild(t *testing.T) {
+	// This case does a delete of the "acb" leaf, which causes the "aca"
+	// leaf to get merged with the old "ac" node:
+	//
+	//    [root]                [root]
+	//      |a                    |a
+	//    [node]                [node]
+	//   b/    \c              b/    \c
+	//  (ab)  [node]          (ab)  (aca)
+	//       a/    \b
+	//     (aca)  (acb)
+	//
+	for i := 0; i < 3; i++ {
+		r := New()
+		r, _, _ = r.Insert([]byte("ab"), nil)
+		r, _, _ = r.Insert([]byte("aca"), nil)
+		r, _, _ = r.Insert([]byte("acb"), nil)
+		snapIter := r.root.rawIterator()
+
+		// Run through all notification methods as there were bugs in
+		// both that affected these operations. The slowNotify path
+		// would detect copied but otherwise identical leaves as changed
+		// and wrongly close channels. The normal path would fail to
+		// notify on a child node that had been merged.
+		txn := r.Txn()
+		txn.TrackMutate(true)
+		txn.Delete([]byte("acb"))
+		switch i {
+		case 0:
+			r = txn.Commit()
+		case 1:
+			r = txn.CommitOnly()
+			txn.Notify()
+		default:
+			r = txn.CommitOnly()
+			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
+		}
+
+		// Run through the old tree and make sure the exact channels we
+		// expected were closed.
+		for ; snapIter.Front() != nil; snapIter.Next() {
+			n := snapIter.Front()
+			path := snapIter.Path()
+			switch path {
+			case "", "a", "ac": // parent nodes all change
+				if !isClosed(n.mutateCh) || n.leaf != nil {
+					t.Fatalf("bad")
+				}
+			case "ab": // unrelated node / sees no change
+				if isClosed(n.mutateCh) || isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			case "aca": // this node gets merged, but the leaf doesn't change
+				if !isClosed(n.mutateCh) || isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			case "acb": // this node / leaf gets deleted
+				if !isClosed(n.mutateCh) || !isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			default:
+				t.Fatalf("bad: %s", path)
+			}
+		}
+	}
+}
+
+func TestTrackMutate_cachedNodeChange(t *testing.T) {
+	// This case does a delete of the "acb" leaf, which causes the "aca"
+	// leaf to get merged with the old "ac" node:
+	//
+	//    [root]                [root]
+	//      |a                    |a
+	//    [node]                [node]
+	//   b/    \c              b/    \c
+	//  (ab)  [node]          (ab)  (aca) <- then this leaf gets modified
+	//       a/    \b
+	//     (aca)  (acb)
+	//
+	// Then it makes a modification to the "aca" leaf on a node that will
+	// be in the cache, so this makes sure that the leaf watch fires.
+	for i := 0; i < 3; i++ {
+		r := New()
+		r, _, _ = r.Insert([]byte("ab"), nil)
+		r, _, _ = r.Insert([]byte("aca"), nil)
+		r, _, _ = r.Insert([]byte("acb"), nil)
+		snapIter := r.root.rawIterator()
+
+		txn := r.Txn()
+		txn.TrackMutate(true)
+		txn.Delete([]byte("acb"))
+		txn.Insert([]byte("aca"), nil)
+		switch i {
+		case 0:
+			r = txn.Commit()
+		case 1:
+			r = txn.CommitOnly()
+			txn.Notify()
+		default:
+			r = txn.CommitOnly()
+			txn.slowNotify()
+		}
+		if hasAnyClosedMutateCh(r) {
+			t.Fatalf("bad")
+		}
+
+		// Run through the old tree and make sure the exact channels we
+		// expected were closed.
+		for ; snapIter.Front() != nil; snapIter.Next() {
+			n := snapIter.Front()
+			path := snapIter.Path()
+			switch path {
+			case "", "a", "ac": // parent nodes all change
+				if !isClosed(n.mutateCh) || n.leaf != nil {
+					t.Fatalf("bad")
+				}
+			case "ab": // unrelated node / sees no change
+				if isClosed(n.mutateCh) || isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			case "aca": // merge changes the node, then we update the leaf
+				if !isClosed(n.mutateCh) || !isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			case "acb": // this node / leaf gets deleted
+				if !isClosed(n.mutateCh) || !isClosed(n.leaf.mutateCh) {
+					t.Fatalf("bad")
+				}
+			default:
+				t.Fatalf("bad: %s", path)
+			}
+		}
 	}
 }

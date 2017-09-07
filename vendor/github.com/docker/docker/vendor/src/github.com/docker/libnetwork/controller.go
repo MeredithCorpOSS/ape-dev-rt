@@ -97,7 +97,7 @@ type NetworkController interface {
 	// Sandboxes returns the list of Sandbox(s) managed by this controller.
 	Sandboxes() []Sandbox
 
-	// WlakSandboxes uses the provided function to walk the Sandbox(s) managed by this controller.
+	// WalkSandboxes uses the provided function to walk the Sandbox(s) managed by this controller.
 	WalkSandboxes(walker SandboxWalker)
 
 	// SandboxByID returns the Sandbox which has the passed id. If not found, a types.NotFoundError is returned.
@@ -250,6 +250,21 @@ func (c *controller) SetKeys(keys []*types.EncryptionKey) error {
 	clusterConfigAvailable := c.clusterConfigAvailable
 	agent := c.agent
 	c.Unlock()
+
+	subsysKeys := make(map[string]int)
+	for _, key := range keys {
+		if key.Subsystem != subsysGossip &&
+			key.Subsystem != subsysIPSec {
+			return fmt.Errorf("key received for unrecognized subsystem")
+		}
+		subsysKeys[key.Subsystem]++
+	}
+	for s, count := range subsysKeys {
+		if count != keyringSize {
+			return fmt.Errorf("incorrect number of keys for susbsystem %v", s)
+		}
+	}
+
 	if len(existingKeys) == 0 {
 		c.Lock()
 		c.keys = keys
@@ -268,9 +283,6 @@ func (c *controller) SetKeys(keys []*types.EncryptionKey) error {
 		c.keys = keys
 		c.Unlock()
 		return nil
-	}
-	if len(keys) < keyringSize {
-		return c.handleKeyChangeV1(keys)
 	}
 	return c.handleKeyChange(keys)
 }
@@ -295,8 +307,41 @@ func (c *controller) clusterAgentInit() {
 			c.Lock()
 			c.clusterConfigAvailable = false
 			c.agentInitDone = make(chan struct{})
+			c.keys = nil
 			c.Unlock()
+
+			// We are leaving the cluster. Make sure we
+			// close the gossip so that we stop all
+			// incoming gossip updates before cleaning up
+			// any remaining service bindings. But before
+			// deleting the networks since the networks
+			// should still be present when cleaning up
+			// service bindings
 			c.agentClose()
+			c.cleanupServiceBindings("")
+
+			c.Lock()
+			ingressSandbox := c.ingressSandbox
+			c.ingressSandbox = nil
+			c.Unlock()
+
+			if ingressSandbox != nil {
+				if err := ingressSandbox.Delete(); err != nil {
+					log.Warnf("Could not delete ingress sandbox while leaving: %v", err)
+				}
+			}
+
+			n, err := c.NetworkByName("ingress")
+			if err != nil {
+				log.Warnf("Could not find ingress network while leaving: %v", err)
+			}
+
+			if n != nil {
+				if err := n.Delete(); err != nil {
+					log.Warnf("Could not delete ingress network while leaving: %v", err)
+				}
+			}
+
 			return
 		}
 	}
@@ -305,7 +350,13 @@ func (c *controller) clusterAgentInit() {
 // AgentInitWait waits for agent initialization to be completed in the
 // controller.
 func (c *controller) AgentInitWait() {
-	<-c.agentInitDone
+	c.Lock()
+	agentInitDone := c.agentInitDone
+	c.Unlock()
+
+	if agentInitDone != nil {
+		<-agentInitDone
+	}
 }
 
 func (c *controller) makeDriverConfig(ntype string) map[string]interface{} {
@@ -648,6 +699,9 @@ func (c *controller) NewNetwork(networkType, name string, id string, options ...
 	}
 
 	joinCluster(network)
+	if !c.isDistributedControl() {
+		arrangeIngressFilterRule()
+	}
 
 	return network, nil
 }

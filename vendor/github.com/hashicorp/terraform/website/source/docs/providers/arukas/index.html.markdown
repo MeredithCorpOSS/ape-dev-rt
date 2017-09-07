@@ -8,6 +8,11 @@ description: |-
 
 # Arukas Provider
 
+!> **NOTE:** Arukas' beta service will end on **July 31, 2017**.
+    After that, official service will be started (however, the release date is undecided).
+    We plan to upgrade this provider after official service starts.
+    Until that time, this provider will not be maintained.
+
 The Arukas provider is used to manage [Arukas](https://arukas.io/en/) resources.
 
 Use the navigation to the left to read about the available resources.
@@ -28,23 +33,25 @@ Add the below to a file called `arukas.tf` and run the `terraform` command from 
 
 ```hcl
 provider "arukas" {
-    token = ""
-    secret = ""
+  token  = ""
+  secret = ""
 }
 
 resource "arukas_container" "foobar" {
-    name = "terraform_for_arukas_test_foobar"
-    image = "nginx:latest"
-    instances = 1
-    memory = 256
-    ports = {
-        protocol = "tcp"
-        number = "80"
-    }
-    environments {
-        key = "key1"
-        value = "value1"
-    }
+  name      = "terraform_for_arukas_test_foobar"
+  image     = "nginx:latest"
+  instances = 1
+  memory    = 256
+
+  ports = {
+    protocol = "tcp"
+    number   = "80"
+  }
+
+  environments {
+    key   = "key1"
+    value = "value1"
+  }
 }
 ```
 
@@ -53,7 +60,7 @@ so that Terraform can connect. If you don't want to put
 credentials in your configuration file, you can leave them
 out:
 
-```
+```hcl
 provider "arukas" {}
 ```
 

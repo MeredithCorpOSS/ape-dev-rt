@@ -23,51 +23,51 @@ func resourceDatadogMonitor() *schema.Resource {
 		},
 
 		Schema: map[string]*schema.Schema{
-			"name": &schema.Schema{
+			"name": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"message": &schema.Schema{
+			"message": {
 				Type:     schema.TypeString,
 				Required: true,
 				StateFunc: func(val interface{}) string {
 					return strings.TrimSpace(val.(string))
 				},
 			},
-			"escalation_message": &schema.Schema{
+			"escalation_message": {
 				Type:     schema.TypeString,
 				Optional: true,
 				StateFunc: func(val interface{}) string {
 					return strings.TrimSpace(val.(string))
 				},
 			},
-			"query": &schema.Schema{
+			"query": {
 				Type:     schema.TypeString,
 				Required: true,
 				StateFunc: func(val interface{}) string {
 					return strings.TrimSpace(val.(string))
 				},
 			},
-			"type": &schema.Schema{
+			"type": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
 
 			// Options
-			"thresholds": &schema.Schema{
+			"thresholds": {
 				Type:     schema.TypeMap,
 				Optional: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"ok": &schema.Schema{
+						"ok": {
 							Type:     schema.TypeFloat,
 							Optional: true,
 						},
-						"warning": &schema.Schema{
+						"warning": {
 							Type:     schema.TypeFloat,
 							Optional: true,
 						},
-						"critical": &schema.Schema{
+						"critical": {
 							Type:     schema.TypeFloat,
 							Optional: true,
 						},
@@ -75,12 +75,17 @@ func resourceDatadogMonitor() *schema.Resource {
 				},
 				DiffSuppressFunc: suppressDataDogFloatIntDiff,
 			},
-			"notify_no_data": &schema.Schema{
+			"notify_no_data": {
 				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  true,
+				Default:  false,
 			},
 			"new_host_delay": {
+				Type:     schema.TypeInt,
+				Computed: true,
+				Optional: true,
+			},
+			"evaluation_delay": {
 				Type:     schema.TypeInt,
 				Computed: true,
 				Optional: true,
@@ -89,43 +94,38 @@ func resourceDatadogMonitor() *schema.Resource {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
-			"renotify_interval": &schema.Schema{
+			"renotify_interval": {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
-			"notify_audit": &schema.Schema{
+			"notify_audit": {
 				Type:     schema.TypeBool,
 				Optional: true,
 			},
-			"timeout_h": &schema.Schema{
+			"timeout_h": {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
-			"require_full_window": &schema.Schema{
+			"require_full_window": {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  true,
 			},
-			"locked": &schema.Schema{
+			"locked": {
 				Type:     schema.TypeBool,
 				Optional: true,
 			},
-			// TODO should actually be map[string]int
-			"silenced": &schema.Schema{
+			"silenced": {
 				Type:     schema.TypeMap,
 				Optional: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-					Elem: &schema.Schema{
-						Type: schema.TypeInt},
-				},
+				Elem:     schema.TypeInt,
 			},
-			"include_tags": &schema.Schema{
+			"include_tags": {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  true,
 			},
-			"tags": &schema.Schema{
+			"tags": {
 				Type:     schema.TypeList,
 				Optional: true,
 				Elem:     &schema.Schema{Type: schema.TypeString},
@@ -158,7 +158,7 @@ func buildMonitorStruct(d *schema.ResourceData) *datadog.Monitor {
 		s := make(map[string]int)
 		// TODO: this is not very defensive, test if we can fail on non int input
 		for k, v := range attr.(map[string]interface{}) {
-			s[k], _ = strconv.Atoi(v.(string))
+			s[k] = v.(int)
 		}
 		o.Silenced = s
 	}
@@ -167,6 +167,9 @@ func buildMonitorStruct(d *schema.ResourceData) *datadog.Monitor {
 	}
 	if attr, ok := d.GetOk("new_host_delay"); ok {
 		o.SetNewHostDelay(attr.(int))
+	}
+	if attr, ok := d.GetOk("evaluation_delay"); ok {
+		o.SetEvaluationDelay(attr.(int))
 	}
 	if attr, ok := d.GetOk("no_data_timeframe"); ok {
 		o.NoDataTimeframe = datadog.NoDataTimeframe(attr.(int))
@@ -279,6 +282,7 @@ func resourceDatadogMonitorRead(d *schema.ResourceData, meta interface{}) error 
 	d.Set("thresholds", thresholds)
 
 	d.Set("new_host_delay", m.Options.GetNewHostDelay())
+	d.Set("evaluation_delay", m.Options.GetEvaluationDelay())
 	d.Set("notify_no_data", m.Options.GetNotifyNoData())
 	d.Set("no_data_timeframe", m.Options.NoDataTimeframe)
 	d.Set("renotify_interval", m.Options.GetRenotifyInterval())
@@ -324,7 +328,9 @@ func resourceDatadogMonitorUpdate(d *schema.ResourceData, meta interface{}) erro
 	}
 
 	o := datadog.Options{
-		NotifyNoData: datadog.Bool(d.Get("notify_no_data").(bool)),
+		NotifyNoData:      datadog.Bool(d.Get("notify_no_data").(bool)),
+		RequireFullWindow: datadog.Bool(d.Get("require_full_window").(bool)),
+		IncludeTags:       datadog.Bool(d.Get("include_tags").(bool)),
 	}
 	if attr, ok := d.GetOk("thresholds"); ok {
 		thresholds := attr.(map[string]interface{})
@@ -340,11 +346,11 @@ func resourceDatadogMonitorUpdate(d *schema.ResourceData, meta interface{}) erro
 		}
 	}
 
-	if attr, ok := d.GetOk("notify_no_data"); ok {
-		o.SetNotifyNoData(attr.(bool))
-	}
 	if attr, ok := d.GetOk("new_host_delay"); ok {
 		o.SetNewHostDelay(attr.(int))
+	}
+	if attr, ok := d.GetOk("evaluation_delay"); ok {
+		o.SetEvaluationDelay(attr.(int))
 	}
 	if attr, ok := d.GetOk("no_data_timeframe"); ok {
 		o.NoDataTimeframe = datadog.NoDataTimeframe(attr.(int))
@@ -365,15 +371,9 @@ func resourceDatadogMonitorUpdate(d *schema.ResourceData, meta interface{}) erro
 		// TODO: this is not very defensive, test if we can fail non int input
 		s := make(map[string]int)
 		for k, v := range attr.(map[string]interface{}) {
-			s[k], _ = strconv.Atoi(v.(string))
+			s[k] = v.(int)
 		}
 		o.Silenced = s
-	}
-	if attr, ok := d.GetOk("include_tags"); ok {
-		o.SetIncludeTags(attr.(bool))
-	}
-	if attr, ok := d.GetOk("require_full_window"); ok {
-		o.SetRequireFullWindow(attr.(bool))
 	}
 	if attr, ok := d.GetOk("locked"); ok {
 		o.SetLocked(attr.(bool))

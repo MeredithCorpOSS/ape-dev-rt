@@ -20,7 +20,7 @@ a restricted host and strong password.
 
 Example creating a SQL Database.
 
-```js
+```hcl
 resource "google_sql_database_instance" "master" {
   name = "master-instance"
 
@@ -79,7 +79,7 @@ The required `settings` block supports:
 * `crash_safe_replication` - (Optional) Specific to read instances, indicates
     when crash-safe replication flags are enabled.
 
-* `disk_autoresize` - (Optional, Second Generation, Default: `false`) Configuration to increase storage size automatically.
+* `disk_autoresize` - (Optional, Second Generation, Default: `true`) Configuration to increase storage size automatically.
 
 * `disk_size` - (Optional, Second Generation, Default: `10`) The size of data disk, in GB. Size of a running instance cannot be reduced but can be increased.
 
@@ -163,6 +163,11 @@ to work, cannot be updated, and supports:
 * `dump_file_path` - (Optional) Path to a SQL file in GCS from which slave
     instances are created. Format is `gs://bucket/filename`.
 
+* `failover_target` - (Optional) Specifies if the replica is the failover target.
+    If the field is set to true the replica will be designated as a failover replica.
+    If the master instance fails, the replica instance will be promoted as
+    the new master instance.
+
 * `master_heartbeat_period` - (Optional) Time in ms between replication
     heartbeats.
 
@@ -180,9 +185,9 @@ to work, cannot be updated, and supports:
 In addition to the arguments listed above, the following computed attributes are
 exported:
 
-* `ip_address.ip_address` - The IPv4 address assigned.
+* `ip_address.0.ip_address` - The IPv4 address assigned.
 
-* `ip_address.time_to_retire` - The time this IP address will be retired, in RFC
+* `ip_address.0.time_to_retire` - The time this IP address will be retired, in RFC
     3339 format.
 
 * `self_link` - The URI of the created resource.

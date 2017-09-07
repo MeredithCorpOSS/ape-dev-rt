@@ -36,15 +36,16 @@ Wm7DCfrPNGVwFWUQOmsPue9rZBgO
 	var s *Syslog
 	record(t, "syslogs/create", func(c *Client) {
 		s, err = c.CreateSyslog(&CreateSyslogInput{
-			Service:   testServiceID,
-			Version:   tv.Number,
-			Name:      "test-syslog",
-			Address:   "example.com",
-			Port:      1234,
-			UseTLS:    CBool(true),
-			TLSCACert: cert,
-			Token:     "abcd1234",
-			Format:    "format",
+			Service:       testServiceID,
+			Version:       tv.Number,
+			Name:          "test-syslog",
+			Address:       "example.com",
+			Port:          1234,
+			UseTLS:        CBool(true),
+			TLSCACert:     cert,
+			Token:         "abcd1234",
+			Format:        "format",
+			FormatVersion: 2,
 		})
 	})
 	if err != nil {
@@ -88,6 +89,9 @@ Wm7DCfrPNGVwFWUQOmsPue9rZBgO
 	}
 	if s.Format != "format" {
 		t.Errorf("bad format: %q", s.Format)
+	}
+	if s.FormatVersion != 2 {
+		t.Errorf("bad format_version: %d", s.FormatVersion)
 	}
 
 	// List
@@ -138,15 +142,19 @@ Wm7DCfrPNGVwFWUQOmsPue9rZBgO
 	if s.Format != ns.Format {
 		t.Errorf("bad format: %q", s.Format)
 	}
+	if s.FormatVersion != ns.FormatVersion {
+		t.Errorf("bad format_version: %q", s.FormatVersion)
+	}
 
 	// Update
 	var us *Syslog
 	record(t, "syslogs/update", func(c *Client) {
 		us, err = c.UpdateSyslog(&UpdateSyslogInput{
-			Service: testServiceID,
-			Version: tv.Number,
-			Name:    "test-syslog",
-			NewName: "new-test-syslog",
+			Service:       testServiceID,
+			Version:       tv.Number,
+			Name:          "test-syslog",
+			NewName:       "new-test-syslog",
+			FormatVersion: 2,
 		})
 	})
 	if err != nil {
@@ -154,6 +162,10 @@ Wm7DCfrPNGVwFWUQOmsPue9rZBgO
 	}
 	if us.Name != "new-test-syslog" {
 		t.Errorf("bad name: %q", us.Name)
+	}
+
+	if us.FormatVersion != 2 {
+		t.Errorf("bad format_version: %d", us.FormatVersion)
 	}
 
 	// Delete
@@ -180,7 +192,7 @@ func TestClient_ListSyslogs_validation(t *testing.T) {
 
 	_, err = testClient.ListSyslogs(&ListSyslogsInput{
 		Service: "foo",
-		Version: "",
+		Version: 0,
 	})
 	if err != ErrMissingVersion {
 		t.Errorf("bad error: %s", err)
@@ -198,7 +210,7 @@ func TestClient_CreateSyslog_validation(t *testing.T) {
 
 	_, err = testClient.CreateSyslog(&CreateSyslogInput{
 		Service: "foo",
-		Version: "",
+		Version: 0,
 	})
 	if err != ErrMissingVersion {
 		t.Errorf("bad error: %s", err)
@@ -216,7 +228,7 @@ func TestClient_GetSyslog_validation(t *testing.T) {
 
 	_, err = testClient.GetSyslog(&GetSyslogInput{
 		Service: "foo",
-		Version: "",
+		Version: 0,
 	})
 	if err != ErrMissingVersion {
 		t.Errorf("bad error: %s", err)
@@ -224,7 +236,7 @@ func TestClient_GetSyslog_validation(t *testing.T) {
 
 	_, err = testClient.GetSyslog(&GetSyslogInput{
 		Service: "foo",
-		Version: "1",
+		Version: 1,
 		Name:    "",
 	})
 	if err != ErrMissingName {
@@ -243,7 +255,7 @@ func TestClient_UpdateSyslog_validation(t *testing.T) {
 
 	_, err = testClient.UpdateSyslog(&UpdateSyslogInput{
 		Service: "foo",
-		Version: "",
+		Version: 0,
 	})
 	if err != ErrMissingVersion {
 		t.Errorf("bad error: %s", err)
@@ -251,7 +263,7 @@ func TestClient_UpdateSyslog_validation(t *testing.T) {
 
 	_, err = testClient.UpdateSyslog(&UpdateSyslogInput{
 		Service: "foo",
-		Version: "1",
+		Version: 1,
 		Name:    "",
 	})
 	if err != ErrMissingName {
@@ -270,7 +282,7 @@ func TestClient_DeleteSyslog_validation(t *testing.T) {
 
 	err = testClient.DeleteSyslog(&DeleteSyslogInput{
 		Service: "foo",
-		Version: "",
+		Version: 0,
 	})
 	if err != ErrMissingVersion {
 		t.Errorf("bad error: %s", err)
@@ -278,7 +290,7 @@ func TestClient_DeleteSyslog_validation(t *testing.T) {
 
 	err = testClient.DeleteSyslog(&DeleteSyslogInput{
 		Service: "foo",
-		Version: "1",
+		Version: 1,
 		Name:    "",
 	})
 	if err != ErrMissingName {

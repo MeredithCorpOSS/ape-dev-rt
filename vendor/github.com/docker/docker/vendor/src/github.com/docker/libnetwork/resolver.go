@@ -255,6 +255,9 @@ func (r *resolver) handleSRVQuery(svc string, query *dns.Msg) (*dns.Msg, error) 
 	if err != nil {
 		return nil, err
 	}
+	if len(srv) == 0 {
+		return nil, nil
+	}
 	if len(srv) != len(ip) {
 		return nil, fmt.Errorf("invalid reply for SRV query %s", svc)
 	}
@@ -361,7 +364,10 @@ func (r *resolver) ServeDNS(w dns.ResponseWriter, query *dns.Msg) {
 
 			// Timeout has to be set for every IO operation.
 			extConn.SetDeadline(time.Now().Add(extIOTimeout))
-			co := &dns.Conn{Conn: extConn}
+			co := &dns.Conn{
+				Conn:    extConn,
+				UDPSize: uint16(maxSize),
+			}
 			defer co.Close()
 
 			// limits the number of outstanding concurrent queries.

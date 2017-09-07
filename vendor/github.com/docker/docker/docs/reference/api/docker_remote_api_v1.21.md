@@ -200,7 +200,6 @@ Create a container
              "RestartPolicy": { "Name": "", "MaximumRetryCount": 0 },
              "NetworkMode": "bridge",
              "Devices": [],
-             "Sysctls": { "net.ipv4.ip_forward": "1" },
              "Ulimits": [{}],
              "LogConfig": { "Type": "json-file", "Config": {} },
              "SecurityOpt": [],
@@ -230,7 +229,7 @@ Create a container
 -   **AttachStdout** - Boolean value, attaches to `stdout`.
 -   **AttachStderr** - Boolean value, attaches to `stderr`.
 -   **Tty** - Boolean value, Attach standard streams to a `tty`, including `stdin` if it is not closed.
--   **OpenStdin** - Boolean value, opens stdin,
+-   **OpenStdin** - Boolean value, opens `stdin`,
 -   **StdinOnce** - Boolean value, close `stdin` after the 1 attached client disconnects.
 -   **Env** - A list of environment variables in the form of `["VAR=value"[,"VAR2=value2"]]`
 -   **Labels** - Adds a map of labels to a container. To specify a map: `{"key":"value"[,"key2":"value2"]}`
@@ -351,7 +350,7 @@ Return low-level information on the container `id`
     HTTP/1.1 200 OK
     Content-Type: application/json
 
-    {
+	{
 		"AppArmorProfile": "",
 		"Args": [
 			"-c",
@@ -463,14 +462,14 @@ Return low-level information on the container `id`
 			"MacAddress": "",
 			"Networks": {
 				"bridge": {
-					"EndpointID": "",
-					"Gateway": "",
-					"IPAddress": "",
-					"IPPrefixLen": 0,
+					"EndpointID": "7587b82f0dada3656fda26588aee72630c6fab1536d36e394b2bfbcf898c971d",
+					"Gateway": "172.17.0.1",
+					"IPAddress": "172.17.0.2",
+					"IPPrefixLen": 16,
 					"IPv6Gateway": "",
 					"GlobalIPv6Address": "",
 					"GlobalIPv6PrefixLen": 0,
-					"MacAddress": ""
+					"MacAddress": "02:42:ac:12:00:02"
 				}
 			}
 		},
@@ -1454,14 +1453,18 @@ or being killed.
 
 **Query parameters**:
 
--   **dockerfile** - Path within the build context to the Dockerfile. This is
-        ignored if `remote` is specified and points to an individual filename.
+-   **dockerfile** - Path within the build context to the `Dockerfile`. This is
+        ignored if `remote` is specified and points to an external `Dockerfile`.
 -   **t** – A name and optional tag to apply to the image in the `name:tag` format.
         If you omit the `tag` the default `latest` value is assumed.
         You can provide one or more `t` parameters.
--   **remote** – A Git repository URI or HTTP/HTTPS URI build source. If the
-        URI specifies a filename, the file's contents are placed into a file
-        called `Dockerfile`.
+-   **remote** – A Git repository URI or HTTP/HTTPS context URI. If the
+        URI points to a single text file, the file's contents are placed into
+        a file called `Dockerfile` and the image is built from that file. If
+        the URI points to a tarball, the file is downloaded by the daemon and
+        the contents therein used as the context for the build. If the URI
+        points to a tarball and the `dockerfile` parameter is also specified,
+        there must be a file with the corresponding path inside the tarball.
 -   **q** – Suppress verbose build output.
 -   **nocache** – Do not use the cache when building the image.
 -   **pull** - Attempt to pull the image even if an older image exists locally.
@@ -1479,7 +1482,7 @@ or being killed.
         variable expansion in other Dockerfile instructions. This is not meant for
         passing secret values. [Read more about the buildargs instruction](../../reference/builder.md#arg)
 
-    Request Headers:
+**Request Headers**:
 
 -   **Content-type** – Set to `"application/tar"`.
 -   **X-Registry-Config** – A base64-url-safe-encoded Registry Auth Config JSON
@@ -1546,7 +1549,7 @@ a base64-encoded AuthConfig object.
         an image.
 -   **tag** – Tag or digest.
 
-    Request Headers:
+**Request Headers**:
 
 -   **X-Registry-Auth** – base64-encoded AuthConfig object
 
@@ -1755,10 +1758,9 @@ then be used in the URL. This duplicates the command line's flow.
 
 -   **tag** – The tag to associate with the image on the registry. This is optional.
 
-Request Headers:
+**Request Headers**:
 
--   **X-Registry-Auth** – Include a base64-encoded AuthConfig.
-        object.
+-   **X-Registry-Auth** – base64-encoded AuthConfig object.
 
 **Status codes**:
 
@@ -1894,8 +1896,8 @@ Get the default username and email
     Content-Type: application/json
 
     {
-         "username":" hannibal",
-         "password: "xxxx",
+         "username": "hannibal",
+         "password": "xxxx",
          "email": "hannibal@a-team.com",
          "serveraddress": "https://index.docker.io/v1/"
     }
@@ -2110,14 +2112,13 @@ Create a new image from a container's changes
 
 `GET /events`
 
-Get container events from docker, either in real time via streaming, or via
-polling (using since).
+Get container events from docker, in real time via streaming.
 
 Docker containers report the following events:
 
     attach, commit, copy, create, destroy, die, exec_create, exec_start, export, kill, oom, pause, rename, resize, restart, start, stop, top, unpause
 
-and Docker images report:
+Docker images report the following events:
 
     delete, import, pull, push, tag, untag
 
@@ -2137,8 +2138,8 @@ and Docker images report:
 
 **Query parameters**:
 
--   **since** – Timestamp used for polling
--   **until** – Timestamp used for polling
+-   **since** – Timestamp. Show all events created since timestamp and then stream
+-   **until** – Timestamp. Show events created until given timestamp and stop streaming
 -   **filters** – A json encoded value of the filters (a map[string][]string) to process on the event list. Available filters:
   -   `container=<string>`; -- container to filter
   -   `event=<string>`; -- event to filter
@@ -2180,7 +2181,7 @@ See the [image tarball format](#image-tarball-format) for more details.
 -   **200** – no error
 -   **500** – server error
 
-### Get a tarball containing all images.
+### Get a tarball containing all images
 
 `GET /images/get`
 
@@ -2440,36 +2441,36 @@ Return low-level information about the `exec` command `id`.
           "SecurityOpt" : null
         },
         "Image" : "5506de2b643be1e6febbf3b8a240760c6843244c41e12aa2f60ccbb7153d17f5",
-        "NetworkSettings": {
-            "Bridge": "",
-            "SandboxID": "",
-            "HairpinMode": false,
-            "LinkLocalIPv6Address": "",
-            "LinkLocalIPv6PrefixLen": 0,
-            "Ports": null,
-            "SandboxKey": "",
-            "SecondaryIPAddresses": null,
-            "SecondaryIPv6Addresses": null,
-            "EndpointID": "",
-            "Gateway": "",
-            "GlobalIPv6Address": "",
-            "GlobalIPv6PrefixLen": 0,
-            "IPAddress": "",
-            "IPPrefixLen": 0,
-            "IPv6Gateway": "",
-            "MacAddress": "",
-            "Networks": {
-                "bridge": {
-                    "EndpointID": "",
-                    "Gateway": "",
-                    "IPAddress": "",
-                    "IPPrefixLen": 0,
-                    "IPv6Gateway": "",
-                    "GlobalIPv6Address": "",
-                    "GlobalIPv6PrefixLen": 0,
-                    "MacAddress": ""
-                }
+        "NetworkSettings" : {
+          "Bridge": "",
+          "SandboxID": "",
+          "HairpinMode": false,
+          "LinkLocalIPv6Address": "",
+          "LinkLocalIPv6PrefixLen": 0,
+          "Ports": null,
+          "SandboxKey": "",
+          "SecondaryIPAddresses": null,
+          "SecondaryIPv6Addresses": null,
+          "EndpointID": "",
+          "Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "MacAddress": "",
+          "Networks": {
+            "bridge": {
+              "EndpointID": "",
+              "Gateway": "",
+              "IPAddress": "",
+              "IPPrefixLen": 0,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "MacAddress": ""
             }
+          }
         },
         "ResolvConfPath" : "/var/lib/docker/containers/8f177a186b977fb451136e0fdf182abff5599a08b3c7f6ef0d36a55aaf89634c/resolv.conf",
         "HostnamePath" : "/var/lib/docker/containers/8f177a186b977fb451136e0fdf182abff5599a08b3c7f6ef0d36a55aaf89634c/hostname",
@@ -2762,11 +2763,14 @@ Content-Type: application/json
   "Name":"isolated_nw",
   "Driver":"bridge",
   "IPAM":{
-    "Config":[{
-      "Subnet":"172.20.0.0/16",
-      "IPRange":"172.20.10.0/24",
-      "Gateway":"172.20.10.11"
-    }]
+    "Config":[
+      {
+        "Subnet":"172.20.0.0/16",
+        "IPRange":"172.20.10.0/24",
+        "Gateway":"172.20.10.11"
+      }
+    ]
+  }
 }
 ```
 
@@ -2919,4 +2923,4 @@ To set cross origin requests to the remote api please give values to
 `--api-cors-header` when running Docker in daemon mode. Set * (asterisk) allows all,
 default or blank means CORS disabled
 
-    $ docker daemon -H="192.168.1.9:2375" --api-cors-header="http://foo.bar"
+    $ dockerd -H="192.168.1.9:2375" --api-cors-header="http://foo.bar"

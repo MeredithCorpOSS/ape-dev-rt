@@ -8,10 +8,10 @@ import (
 	"strconv"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/daemon/exec"
 	"github.com/docker/docker/libcontainerd"
 	"github.com/docker/docker/runconfig"
-	"github.com/docker/engine-api/types"
 )
 
 // StateChanged updates daemon state changes from containerd
@@ -99,11 +99,17 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 	case libcontainerd.StatePause:
 		// Container is already locked in this case
 		c.Paused = true
+		if err := c.ToDisk(); err != nil {
+			return err
+		}
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "pause")
 	case libcontainerd.StateResume:
 		// Container is already locked in this case
 		c.Paused = false
+		if err := c.ToDisk(); err != nil {
+			return err
+		}
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "unpause")
 	}

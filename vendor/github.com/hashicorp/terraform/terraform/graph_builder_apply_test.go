@@ -366,6 +366,78 @@ func TestApplyGraphBuilder_moduleDestroy(t *testing.T) {
 		"module.A.null_resource.foo (destroy)")
 }
 
+func TestApplyGraphBuilder_provisioner(t *testing.T) {
+	diff := &Diff{
+		Modules: []*ModuleDiff{
+			&ModuleDiff{
+				Path: []string{"root"},
+				Resources: map[string]*InstanceDiff{
+					"null_resource.foo": &InstanceDiff{
+						Attributes: map[string]*ResourceAttrDiff{
+							"name": &ResourceAttrDiff{
+								Old: "",
+								New: "foo",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	b := &ApplyGraphBuilder{
+		Module:       testModule(t, "graph-builder-apply-provisioner"),
+		Diff:         diff,
+		Providers:    []string{"null"},
+		Provisioners: []string{"local"},
+	}
+
+	g, err := b.Build(RootModulePath)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testGraphContains(t, g, "provisioner.local")
+	testGraphHappensBefore(
+		t, g,
+		"provisioner.local",
+		"null_resource.foo")
+}
+
+func TestApplyGraphBuilder_provisionerDestroy(t *testing.T) {
+	diff := &Diff{
+		Modules: []*ModuleDiff{
+			&ModuleDiff{
+				Path: []string{"root"},
+				Resources: map[string]*InstanceDiff{
+					"null_resource.foo": &InstanceDiff{
+						Destroy: true,
+					},
+				},
+			},
+		},
+	}
+
+	b := &ApplyGraphBuilder{
+		Destroy:      true,
+		Module:       testModule(t, "graph-builder-apply-provisioner"),
+		Diff:         diff,
+		Providers:    []string{"null"},
+		Provisioners: []string{"local"},
+	}
+
+	g, err := b.Build(RootModulePath)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testGraphContains(t, g, "provisioner.local")
+	testGraphHappensBefore(
+		t, g,
+		"provisioner.local",
+		"null_resource.foo (destroy)")
+}
+
 func TestApplyGraphBuilder_targetModule(t *testing.T) {
 	diff := &Diff{
 		Modules: []*ModuleDiff{
@@ -438,6 +510,18 @@ module.child.provider.aws
   provider.aws
 module.child.provisioner.exec
 provider.aws
+provider.aws (close)
+  aws_instance.create
+  aws_instance.other
+  module.child.aws_instance.create
+  module.child.aws_instance.other
+  provider.aws
+provisioner.exec (close)
+  module.child.aws_instance.create
+root
+  meta.count-boundary (count boundary fixup)
+  provider.aws (close)
+  provisioner.exec (close)
 `
 
 const testApplyGraphBuilderDoubleCBDStr = `
@@ -461,6 +545,15 @@ meta.count-boundary (count boundary fixup)
   aws_instance.B (destroy)
   provider.aws
 provider.aws
+provider.aws (close)
+  aws_instance.A
+  aws_instance.A (destroy)
+  aws_instance.B
+  aws_instance.B (destroy)
+  provider.aws
+root
+  meta.count-boundary (count boundary fixup)
+  provider.aws (close)
 `
 
 const testApplyGraphBuilderDestroyCountStr = `
@@ -474,4 +567,11 @@ meta.count-boundary (count boundary fixup)
   aws_instance.B
   provider.aws
 provider.aws
+provider.aws (close)
+  aws_instance.A[1] (destroy)
+  aws_instance.B
+  provider.aws
+root
+  meta.count-boundary (count boundary fixup)
+  provider.aws (close)
 `

@@ -28,6 +28,7 @@
 		people = [
 			"aaronlehmann",
 			"aluzzardi",
+			"anusha",
 			"coolljt0725",
 			"cpuguy83",
 			"crosbymichael",
@@ -41,6 +42,7 @@
 			"mavenugo",
 			"mhbauer",
 			"mlaventure",
+			"mrjana",
 			"runcom",
 			"stevvooe",
 			"tianon",
@@ -57,6 +59,7 @@
 
 		people = [
 			"jamtur01",
+			"misty",
 			"moxiegirl",
 			"sfsmithcha",
 			"sven",
@@ -161,6 +164,11 @@
 	Email = "al@docker.com"
 	GitHub = "aluzzardi"
 
+	[people.anusha]
+	Name = "Anusha Ragunathan"
+	Email = "anusha@docker.com"
+	GitHub = "anusha-ragunathan"
+
 	[people.calavera]
 	Name = "David Calavera"
 	Email = "david.calavera@gmail.com"
@@ -246,6 +254,11 @@
 	Email = "mbauer@us.ibm.com"
 	GitHub = "mhbauer"
 
+	[people.misty]
+	Name = "Misty Stanley-Jones"
+	Email = "misty@docker.com"
+	GitHub = "mstanleyjones"
+
 	[people.mlaventure]
 	Name = "Kenfe-Mickaël Laventure"
 	Email = "mickael.laventure@docker.com"
@@ -255,6 +268,11 @@
 	Name = "Mary Anthony"
 	Email = "mary.anthony@docker.com"
 	GitHub = "moxiegirl"
+
+	[people.mrjana]
+	Name = "Jana Radhakrishnan"
+	Email = "mrjana@docker.com"
+	GitHub = "mrjana"
 
 	[people.programmerq]
 	Name = "Jeff Anderson"
