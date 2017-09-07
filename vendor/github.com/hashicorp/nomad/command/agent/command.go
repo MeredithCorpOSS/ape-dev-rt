@@ -25,8 +25,10 @@ import (
 	"github.com/hashicorp/nomad/helper/flag-helpers"
 	"github.com/hashicorp/nomad/helper/gated-writer"
 	"github.com/hashicorp/nomad/nomad/structs/config"
+	"github.com/hashicorp/nomad/version"
 	"github.com/hashicorp/scada-client/scada"
 	"github.com/mitchellh/cli"
+	"github.com/posener/complete"
 )
 
 // gracefulTimeout controls how long we wait before forcefully terminating
@@ -37,11 +39,9 @@ const gracefulTimeout = 5 * time.Second
 // ShutdownCh. If two messages are sent on the ShutdownCh it will forcibly
 // exit.
 type Command struct {
-	Revision          string
-	Version           string
-	VersionPrerelease string
-	Ui                cli.Ui
-	ShutdownCh        <-chan struct{}
+	Version    *version.VersionInfo
+	Ui         cli.Ui
+	ShutdownCh <-chan struct{}
 
 	args           []string
 	agent          *Agent
@@ -120,6 +120,7 @@ func (c *Command) readConfig() *Config {
 	}), "vault-allow-unauthenticated", "")
 	flags.StringVar(&cmdConfig.Vault.Token, "vault-token", "", "")
 	flags.StringVar(&cmdConfig.Vault.Addr, "vault-address", "", "")
+	flags.StringVar(&cmdConfig.Vault.Role, "vault-create-from-role", "", "")
 	flags.StringVar(&cmdConfig.Vault.TLSCaFile, "vault-ca-file", "", "")
 	flags.StringVar(&cmdConfig.Vault.TLSCaPath, "vault-ca-path", "", "")
 	flags.StringVar(&cmdConfig.Vault.TLSCertFile, "vault-cert-file", "", "")
@@ -197,9 +198,7 @@ func (c *Command) readConfig() *Config {
 	config = config.Merge(cmdConfig)
 
 	// Set the version info
-	config.Revision = c.Revision
 	config.Version = c.Version
-	config.VersionPrerelease = c.VersionPrerelease
 
 	// Normalize binds, ports, addresses, and advertise
 	if err := config.normalizeAddrs(); err != nil {
@@ -349,7 +348,7 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer) error {
 	}
 
 	// Setup the HTTP server
-	http, err := NewHTTPServer(agent, config, logOutput)
+	http, err := NewHTTPServer(agent, config)
 	if err != nil {
 		agent.Shutdown()
 		c.Ui.Error(fmt.Sprintf("Error starting http server: %s", err))
@@ -359,9 +358,9 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer) error {
 
 	// Setup update checking
 	if !config.DisableUpdateCheck {
-		version := config.Version
-		if config.VersionPrerelease != "" {
-			version += fmt.Sprintf("-%s", config.VersionPrerelease)
+		version := config.Version.Version
+		if config.Version.VersionPrerelease != "" {
+			version += fmt.Sprintf("-%s", config.Version.VersionPrerelease)
 		}
 		updateParams := &checkpoint.CheckParams{
 			Product: "nomad",
@@ -390,12 +389,7 @@ func (c *Command) checkpointResults(results *checkpoint.CheckResponse, err error
 		return
 	}
 	if results.Outdated {
-		versionStr := c.Version
-		if c.VersionPrerelease != "" {
-			versionStr += fmt.Sprintf("-%s", c.VersionPrerelease)
-		}
-
-		c.Ui.Error(fmt.Sprintf("Newer Nomad version available: %s (currently running: %s)", results.CurrentVersion, versionStr))
+		c.Ui.Error(fmt.Sprintf("Newer Nomad version available: %s (currently running: %s)", results.CurrentVersion, c.Version.VersionNumber()))
 	}
 	for _, alert := range results.Alerts {
 		switch alert.Level {
@@ -405,6 +399,20 @@ func (c *Command) checkpointResults(results *checkpoint.CheckResponse, err error
 			c.Ui.Error(fmt.Sprintf("Bulletin [%s]: %s (%s)", alert.Level, alert.Message, alert.URL))
 		}
 	}
+}
+
+func (c *Command) AutocompleteFlags() complete.Flags {
+	configFilePredictor := complete.PredictOr(
+		complete.PredictFiles("*.json"),
+		complete.PredictFiles("*.hcl"))
+
+	return map[string]complete.Predictor{
+		"-config": configFilePredictor,
+	}
+}
+
+func (c *Command) AutocompleteArgs() complete.Predictor {
+	return nil
 }
 
 func (c *Command) Run(args []string) int {
@@ -443,6 +451,7 @@ func (c *Command) Run(args []string) int {
 
 	// Create the agent
 	if err := c.setupAgent(config, logOutput); err != nil {
+		logGate.Flush()
 		return 1
 	}
 	defer c.agent.Shutdown()
@@ -468,17 +477,11 @@ func (c *Command) Run(args []string) int {
 
 	// Compile agent information for output later
 	info := make(map[string]string)
-	info["version"] = fmt.Sprintf("%s%s", config.Version, config.VersionPrerelease)
+	info["version"] = config.Version.VersionNumber()
 	info["client"] = strconv.FormatBool(config.Client.Enabled)
 	info["log level"] = config.LogLevel
 	info["server"] = strconv.FormatBool(config.Server.Enabled)
 	info["region"] = fmt.Sprintf("%s (DC: %s)", config.Region, config.Datacenter)
-	if config.Atlas != nil && config.Atlas.Infrastructure != "" {
-		info["atlas"] = fmt.Sprintf("(Infrastructure: '%s' Join: %v)",
-			config.Atlas.Infrastructure, config.Atlas.Join)
-	} else {
-		info["atlas"] = "<disabled>"
-	}
 
 	// Sort the keys for output
 	infoKeys := make([]string, 0, len(info))
@@ -600,6 +603,18 @@ func (c *Command) handleReload(config *Config) *Config {
 		// Keep the current log level
 		newConf.LogLevel = config.LogLevel
 	}
+
+	if s := c.agent.Server(); s != nil {
+		sconf, err := convertServerConfig(newConf, c.logOutput)
+		if err != nil {
+			c.agent.logger.Printf("[ERR] agent: failed to convert server config: %v", err)
+		} else {
+			if err := s.Reload(sconf); err != nil {
+				c.agent.logger.Printf("[ERR] agent: reloading server config failed: %v", err)
+			}
+		}
+	}
+
 	return newConf
 }
 
@@ -621,6 +636,10 @@ func (c *Command) setupTelemetry(config *Config) error {
 
 	metricsConf := metrics.DefaultConfig("nomad")
 	metricsConf.EnableHostname = !telConfig.DisableHostname
+	if telConfig.UseNodeName {
+		metricsConf.HostName = config.NodeName
+		metricsConf.EnableHostname = true
+	}
 
 	// Configure the statsite sink
 	var fanout metrics.FanoutSink
@@ -666,6 +685,10 @@ func (c *Command) setupTelemetry(config *Config) error {
 		cfg.CheckManager.Check.DisplayName = telConfig.CirconusCheckDisplayName
 		cfg.CheckManager.Broker.ID = telConfig.CirconusBrokerID
 		cfg.CheckManager.Broker.SelectTag = telConfig.CirconusBrokerSelectTag
+
+		if cfg.CheckManager.Check.DisplayName == "" {
+			cfg.CheckManager.Check.DisplayName = "Nomad"
+		}
 
 		if cfg.CheckManager.API.TokenApp == "" {
 			cfg.CheckManager.API.TokenApp = "nomad"
@@ -715,7 +738,7 @@ func (c *Command) setupSCADA(config *Config) error {
 
 	scadaConfig := &scada.Config{
 		Service:      "nomad",
-		Version:      fmt.Sprintf("%s%s", config.Version, config.VersionPrerelease),
+		Version:      config.Version.VersionNumber(),
 		ResourceType: "nomad-cluster",
 		Meta: map[string]string{
 			"auto-join":  strconv.FormatBool(config.Atlas.Join),
@@ -929,6 +952,9 @@ Vault Options:
     The Vault token used to derive tokens from Vault on behalf of clients.
     This only needs to be set on Servers. Overrides the Vault token read from
     the VAULT_TOKEN environment variable.
+
+  -vault-create-from-role=<role>
+    The role name to create tokens for tasks from.
 
   -vault-allow-unauthenticated
     Whether to allow jobs to be sumbitted that request Vault Tokens but do not

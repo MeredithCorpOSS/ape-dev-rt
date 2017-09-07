@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,13 +14,11 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-plugin"
-	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/config"
 	"github.com/hashicorp/nomad/client/driver/executor"
 	dstructs "github.com/hashicorp/nomad/client/driver/structs"
 	"github.com/hashicorp/nomad/client/fingerprint"
 	cstructs "github.com/hashicorp/nomad/client/structs"
-	"github.com/hashicorp/nomad/helper/discover"
 	"github.com/hashicorp/nomad/helper/fields"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/mitchellh/mapstructure"
@@ -41,6 +40,8 @@ const (
 type QemuDriver struct {
 	DriverContext
 	fingerprint.StaticFingerprinter
+
+	driverConfig *QemuDriverConfig
 }
 
 type QemuDriverConfig struct {
@@ -55,7 +56,6 @@ type qemuHandle struct {
 	pluginClient   *plugin.Client
 	userPid        int
 	executor       executor.Executor
-	allocDir       *allocdir.AllocDir
 	killTimeout    time.Duration
 	maxKillTimeout time.Duration
 	logger         *log.Logger
@@ -100,14 +100,15 @@ func (d *QemuDriver) Validate(config map[string]interface{}) error {
 func (d *QemuDriver) Abilities() DriverAbilities {
 	return DriverAbilities{
 		SendSignals: false,
+		Exec:        false,
 	}
 }
 
-func (d *QemuDriver) Fingerprint(cfg *config.Config, node *structs.Node) (bool, error) {
-	// Get the current status so that we can log any debug messages only if the
-	// state changes
-	_, currentlyEnabled := node.Attributes[qemuDriverAttr]
+func (d *QemuDriver) FSIsolation() cstructs.FSIsolation {
+	return cstructs.FSIsolationImage
+}
 
+func (d *QemuDriver) Fingerprint(cfg *config.Config, node *structs.Node) (bool, error) {
 	bin := "qemu-system-x86_64"
 	if runtime.GOOS == "windows" {
 		// On windows, the "qemu-system-x86_64" command does not respond to the
@@ -127,17 +128,12 @@ func (d *QemuDriver) Fingerprint(cfg *config.Config, node *structs.Node) (bool, 
 		return false, fmt.Errorf("Unable to parse Qemu version string: %#v", matches)
 	}
 
-	if !currentlyEnabled {
-		d.logger.Printf("[DEBUG] driver.qemu: enabling driver")
-	}
 	node.Attributes[qemuDriverAttr] = "1"
 	node.Attributes["driver.qemu.version"] = matches[1]
 	return true, nil
 }
 
-// Run an existing Qemu image. Start() will pull down an existing, valid Qemu
-// image and save it to the Drivers Allocation Dir
-func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, error) {
+func (d *QemuDriver) Prestart(_ *ExecContext, task *structs.Task) (*PrestartResponse, error) {
 	var driverConfig QemuDriverConfig
 	if err := mapstructure.WeakDecode(task.Config, &driverConfig); err != nil {
 		return nil, err
@@ -147,24 +143,32 @@ func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 		return nil, fmt.Errorf("Only one port_map block is allowed in the qemu driver config")
 	}
 
+	d.driverConfig = &driverConfig
+
+	r := NewPrestartResponse()
+	if len(driverConfig.PortMap) == 1 {
+		r.Network = &cstructs.DriverNetwork{
+			PortMap: driverConfig.PortMap[0],
+		}
+	}
+	return r, nil
+}
+
+// Run an existing Qemu image. Start() will pull down an existing, valid Qemu
+// image and save it to the Drivers Allocation Dir
+func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (*StartResponse, error) {
 	// Get the image source
-	vmPath := driverConfig.ImagePath
+	vmPath := d.driverConfig.ImagePath
 	if vmPath == "" {
 		return nil, fmt.Errorf("image_path must be set")
 	}
 	vmID := filepath.Base(vmPath)
 
-	// Get the tasks local directory.
-	taskDir, ok := ctx.AllocDir.TaskDirs[d.DriverContext.taskName]
-	if !ok {
-		return nil, fmt.Errorf("Could not find task directory for task: %v", d.DriverContext.taskName)
-	}
-
 	// Parse configuration arguments
 	// Create the base arguments
 	accelerator := "tcg"
-	if driverConfig.Accelerator != "" {
-		accelerator = driverConfig.Accelerator
+	if d.driverConfig.Accelerator != "" {
+		accelerator = d.driverConfig.Accelerator
 	}
 	// TODO: Check a lower bounds, e.g. the default 128 of Qemu
 	mem := fmt.Sprintf("%dM", task.Resources.MemoryMB)
@@ -188,7 +192,7 @@ func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 	// passed directly to the qemu driver as command line options.
 	// For example, args = [ "-nodefconfig", "-nodefaults" ]
 	// This will allow a VM with embedded configuration to boot successfully.
-	args = append(args, driverConfig.Args...)
+	args = append(args, d.driverConfig.Args...)
 
 	// Check the Resources required Networks to add port mappings. If no resources
 	// are required, we assume the VM is a purely compute job and does not require
@@ -196,13 +200,13 @@ func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 	// still reach out to the world, but without port mappings it is effectively
 	// firewalled
 	protocols := []string{"udp", "tcp"}
-	if len(task.Resources.Networks) > 0 && len(driverConfig.PortMap) == 1 {
+	if len(task.Resources.Networks) > 0 && len(d.driverConfig.PortMap) == 1 {
 		// Loop through the port map and construct the hostfwd string, to map
 		// reserved ports to the ports listenting in the VM
 		// Ex: hostfwd=tcp::22000-:22,hostfwd=tcp::80-:8080
 		var forwarding []string
-		taskPorts := task.Resources.Networks[0].MapLabelToValues(nil)
-		for label, guest := range driverConfig.PortMap[0] {
+		taskPorts := task.Resources.Networks[0].PortLabels()
+		for label, guest := range d.driverConfig.PortMap[0] {
 			host, ok := taskPorts[label]
 			if !ok {
 				return nil, fmt.Errorf("Unknown port label %q", label)
@@ -233,26 +237,23 @@ func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 	}
 
 	d.logger.Printf("[DEBUG] Starting QemuVM command: %q", strings.Join(args, " "))
-	bin, err := discover.NomadExecutable()
-	if err != nil {
-		return nil, fmt.Errorf("unable to find the nomad binary: %v", err)
+	pluginLogFile := filepath.Join(ctx.TaskDir.Dir, "executor.out")
+	executorConfig := &dstructs.ExecutorConfig{
+		LogFile:  pluginLogFile,
+		LogLevel: d.config.LogLevel,
 	}
 
-	pluginLogFile := filepath.Join(taskDir, fmt.Sprintf("%s-executor.out", task.Name))
-	pluginConfig := &plugin.ClientConfig{
-		Cmd: exec.Command(bin, "executor", pluginLogFile),
-	}
-
-	exec, pluginClient, err := createExecutor(pluginConfig, d.config.LogOutput, d.config)
+	exec, pluginClient, err := createExecutor(d.config.LogOutput, d.config, executorConfig)
 	if err != nil {
 		return nil, err
 	}
 	executorCtx := &executor.ExecutorContext{
-		TaskEnv:  d.taskEnv,
-		Driver:   "qemu",
-		AllocDir: ctx.AllocDir,
-		AllocID:  ctx.AllocID,
-		Task:     task,
+		TaskEnv: ctx.TaskEnv,
+		Driver:  "qemu",
+		AllocID: d.DriverContext.allocID,
+		Task:    task,
+		TaskDir: ctx.TaskDir.Dir,
+		LogDir:  ctx.TaskDir.LogDir,
 	}
 	if err := exec.SetContext(executorCtx); err != nil {
 		pluginClient.Kill()
@@ -277,20 +278,21 @@ func (d *QemuDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 		pluginClient:   pluginClient,
 		executor:       exec,
 		userPid:        ps.Pid,
-		allocDir:       ctx.AllocDir,
 		killTimeout:    GetKillTimeout(task.KillTimeout, maxKill),
 		maxKillTimeout: maxKill,
-		version:        d.config.Version,
+		version:        d.config.Version.VersionNumber(),
 		logger:         d.logger,
 		doneCh:         make(chan struct{}),
 		waitCh:         make(chan *dstructs.WaitResult, 1),
 	}
-
-	if err := h.executor.SyncServices(consulContext(d.config, "")); err != nil {
-		h.logger.Printf("[ERR] driver.qemu: error registering services for task: %q: %v", task.Name, err)
-	}
 	go h.run()
-	return h, nil
+	resp := &StartResponse{Handle: h}
+	if len(d.driverConfig.PortMap) == 1 {
+		resp.Network = &cstructs.DriverNetwork{
+			PortMap: d.driverConfig.PortMap[0],
+		}
+	}
+	return resp, nil
 }
 
 type qemuId struct {
@@ -299,7 +301,6 @@ type qemuId struct {
 	MaxKillTimeout time.Duration
 	UserPid        int
 	PluginConfig   *PluginReattachConfig
-	AllocDir       *allocdir.AllocDir
 }
 
 func (d *QemuDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, error) {
@@ -312,7 +313,7 @@ func (d *QemuDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 		Reattach: id.PluginConfig.PluginConfig(),
 	}
 
-	exec, pluginClient, err := createExecutor(pluginConfig, d.config.LogOutput, d.config)
+	exec, pluginClient, err := createExecutorWithConfig(pluginConfig, d.config.LogOutput)
 	if err != nil {
 		d.logger.Println("[ERR] driver.qemu: error connecting to plugin so destroying plugin pid and user pid")
 		if e := destroyPlugin(id.PluginConfig.Pid, id.UserPid); e != nil {
@@ -328,7 +329,6 @@ func (d *QemuDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 		pluginClient:   pluginClient,
 		executor:       exec,
 		userPid:        id.UserPid,
-		allocDir:       id.AllocDir,
 		logger:         d.logger,
 		killTimeout:    id.KillTimeout,
 		maxKillTimeout: id.MaxKillTimeout,
@@ -336,12 +336,11 @@ func (d *QemuDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 		doneCh:         make(chan struct{}),
 		waitCh:         make(chan *dstructs.WaitResult, 1),
 	}
-	if err := h.executor.SyncServices(consulContext(d.config, "")); err != nil {
-		h.logger.Printf("[ERR] driver.qemu: error registering services: %v", err)
-	}
 	go h.run()
 	return h, nil
 }
+
+func (d *QemuDriver) Cleanup(*ExecContext, *CreatedResources) error { return nil }
 
 func (h *qemuHandle) ID() string {
 	id := qemuId{
@@ -350,7 +349,6 @@ func (h *qemuHandle) ID() string {
 		MaxKillTimeout: h.maxKillTimeout,
 		PluginConfig:   NewPluginReattachConfig(h.pluginClient.ReattachConfig()),
 		UserPid:        h.userPid,
-		AllocDir:       h.allocDir,
 	}
 
 	data, err := json.Marshal(id)
@@ -371,6 +369,10 @@ func (h *qemuHandle) Update(task *structs.Task) error {
 
 	// Update is not possible
 	return nil
+}
+
+func (h *qemuHandle) Exec(ctx context.Context, cmd string, args []string) ([]byte, int, error) {
+	return nil, 0, fmt.Errorf("Qemu driver can't execute commands")
 }
 
 func (h *qemuHandle) Signal(s os.Signal) error {
@@ -412,16 +414,8 @@ func (h *qemuHandle) run() {
 		if e := killProcess(h.userPid); e != nil {
 			h.logger.Printf("[ERR] driver.qemu: error killing user process: %v", e)
 		}
-		if e := h.allocDir.UnmountAll(); e != nil {
-			h.logger.Printf("[ERR] driver.qemu: unmounting dev,proc and alloc dirs failed: %v", e)
-		}
 	}
 	close(h.doneCh)
-
-	// Remove services
-	if err := h.executor.DeregisterServices(); err != nil {
-		h.logger.Printf("[ERR] driver.qemu: failed to deregister services: %v", err)
-	}
 
 	// Exit the executor
 	h.executor.Exit()

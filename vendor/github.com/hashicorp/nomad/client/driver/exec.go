@@ -1,23 +1,20 @@
 package driver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/go-plugin"
 	"github.com/hashicorp/nomad/client/allocdir"
-	"github.com/hashicorp/nomad/client/config"
 	"github.com/hashicorp/nomad/client/driver/executor"
 	dstructs "github.com/hashicorp/nomad/client/driver/structs"
 	cstructs "github.com/hashicorp/nomad/client/structs"
-	"github.com/hashicorp/nomad/helper/discover"
 	"github.com/hashicorp/nomad/helper/fields"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/mitchellh/mapstructure"
@@ -33,6 +30,10 @@ const (
 // features.
 type ExecDriver struct {
 	DriverContext
+
+	// A tri-state boolean to know if the fingerprinting has happened and
+	// whether it has been successful
+	fingerprintSuccess *bool
 }
 
 type ExecDriverConfig struct {
@@ -46,7 +47,7 @@ type execHandle struct {
 	executor        executor.Executor
 	isolationConfig *dstructs.IsolationConfig
 	userPid         int
-	allocDir        *allocdir.AllocDir
+	taskDir         *allocdir.TaskDir
 	killTimeout     time.Duration
 	maxKillTimeout  time.Duration
 	logger          *log.Logger
@@ -85,14 +86,23 @@ func (d *ExecDriver) Validate(config map[string]interface{}) error {
 func (d *ExecDriver) Abilities() DriverAbilities {
 	return DriverAbilities{
 		SendSignals: true,
+		Exec:        true,
 	}
+}
+
+func (d *ExecDriver) FSIsolation() cstructs.FSIsolation {
+	return cstructs.FSIsolationChroot
 }
 
 func (d *ExecDriver) Periodic() (bool, time.Duration) {
 	return true, 15 * time.Second
 }
 
-func (d *ExecDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, error) {
+func (d *ExecDriver) Prestart(*ExecContext, *structs.Task) (*PrestartResponse, error) {
+	return nil, nil
+}
+
+func (d *ExecDriver) Start(ctx *ExecContext, task *structs.Task) (*StartResponse, error) {
 	var driverConfig ExecDriverConfig
 	if err := mapstructure.WeakDecode(task.Config, &driverConfig); err != nil {
 		return nil, err
@@ -104,36 +114,22 @@ func (d *ExecDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 		return nil, err
 	}
 
-	// Set the host environment variables.
-	filter := strings.Split(d.config.ReadDefault("env.blacklist", config.DefaultEnvBlacklist), ",")
-	d.taskEnv.AppendHostEnvvars(filter)
-
-	// Get the task directory for storing the executor logs.
-	taskDir, ok := ctx.AllocDir.TaskDirs[d.DriverContext.taskName]
-	if !ok {
-		return nil, fmt.Errorf("Could not find task directory for task: %v", d.DriverContext.taskName)
+	pluginLogFile := filepath.Join(ctx.TaskDir.Dir, "executor.out")
+	executorConfig := &dstructs.ExecutorConfig{
+		LogFile:  pluginLogFile,
+		LogLevel: d.config.LogLevel,
 	}
-
-	bin, err := discover.NomadExecutable()
-	if err != nil {
-		return nil, fmt.Errorf("unable to find the nomad binary: %v", err)
-	}
-	pluginLogFile := filepath.Join(taskDir, fmt.Sprintf("%s-executor.out", task.Name))
-	pluginConfig := &plugin.ClientConfig{
-		Cmd: exec.Command(bin, "executor", pluginLogFile),
-	}
-
-	exec, pluginClient, err := createExecutor(pluginConfig, d.config.LogOutput, d.config)
+	exec, pluginClient, err := createExecutor(d.config.LogOutput, d.config, executorConfig)
 	if err != nil {
 		return nil, err
 	}
 	executorCtx := &executor.ExecutorContext{
-		TaskEnv:   d.taskEnv,
-		Driver:    "exec",
-		AllocDir:  ctx.AllocDir,
-		AllocID:   ctx.AllocID,
-		ChrootEnv: d.config.ChrootEnv,
-		Task:      task,
+		TaskEnv: ctx.TaskEnv,
+		Driver:  "exec",
+		AllocID: d.DriverContext.allocID,
+		LogDir:  ctx.TaskDir.LogDir,
+		TaskDir: ctx.TaskDir.Dir,
+		Task:    task,
 	}
 	if err := exec.SetContext(executorCtx); err != nil {
 		pluginClient.Kill()
@@ -162,29 +158,26 @@ func (d *ExecDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, 
 		pluginClient:    pluginClient,
 		userPid:         ps.Pid,
 		executor:        exec,
-		allocDir:        ctx.AllocDir,
 		isolationConfig: ps.IsolationConfig,
 		killTimeout:     GetKillTimeout(task.KillTimeout, maxKill),
 		maxKillTimeout:  maxKill,
 		logger:          d.logger,
-		version:         d.config.Version,
+		version:         d.config.Version.VersionNumber(),
 		doneCh:          make(chan struct{}),
 		waitCh:          make(chan *dstructs.WaitResult, 1),
-	}
-	if err := exec.SyncServices(consulContext(d.config, "")); err != nil {
-		d.logger.Printf("[ERR] driver.exec: error registering services with consul for task: %q: %v", task.Name, err)
+		taskDir:         ctx.TaskDir,
 	}
 	go h.run()
-	return h, nil
+	return &StartResponse{Handle: h}, nil
 }
+
+func (d *ExecDriver) Cleanup(*ExecContext, *CreatedResources) error { return nil }
 
 type execId struct {
 	Version         string
 	KillTimeout     time.Duration
 	MaxKillTimeout  time.Duration
 	UserPid         int
-	TaskDir         string
-	AllocDir        *allocdir.AllocDir
 	IsolationConfig *dstructs.IsolationConfig
 	PluginConfig    *PluginReattachConfig
 }
@@ -198,7 +191,7 @@ func (d *ExecDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 	pluginConfig := &plugin.ClientConfig{
 		Reattach: id.PluginConfig.PluginConfig(),
 	}
-	exec, client, err := createExecutor(pluginConfig, d.config.LogOutput, d.config)
+	exec, client, err := createExecutorWithConfig(pluginConfig, d.config.LogOutput)
 	if err != nil {
 		merrs := new(multierror.Error)
 		merrs.Errors = append(merrs.Errors, err)
@@ -212,9 +205,6 @@ func (d *ExecDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 				merrs.Errors = append(merrs.Errors, fmt.Errorf("destroying cgroup failed: %v", e))
 			}
 		}
-		if e := ctx.AllocDir.UnmountAll(); e != nil {
-			merrs.Errors = append(merrs.Errors, e)
-		}
 		return nil, fmt.Errorf("error connecting to plugin: %v", merrs.ErrorOrNil())
 	}
 
@@ -225,7 +215,6 @@ func (d *ExecDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 		pluginClient:    client,
 		executor:        exec,
 		userPid:         id.UserPid,
-		allocDir:        id.AllocDir,
 		isolationConfig: id.IsolationConfig,
 		logger:          d.logger,
 		version:         id.Version,
@@ -233,9 +222,7 @@ func (d *ExecDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, erro
 		maxKillTimeout:  id.MaxKillTimeout,
 		doneCh:          make(chan struct{}),
 		waitCh:          make(chan *dstructs.WaitResult, 1),
-	}
-	if err := exec.SyncServices(consulContext(d.config, "")); err != nil {
-		d.logger.Printf("[ERR] driver.exec: error registering services with consul: %v", err)
+		taskDir:         ctx.TaskDir,
 	}
 	go h.run()
 	return h, nil
@@ -248,7 +235,6 @@ func (h *execHandle) ID() string {
 		MaxKillTimeout:  h.maxKillTimeout,
 		PluginConfig:    NewPluginReattachConfig(h.pluginClient.ReattachConfig()),
 		UserPid:         h.userPid,
-		AllocDir:        h.allocDir,
 		IsolationConfig: h.isolationConfig,
 	}
 
@@ -272,6 +258,15 @@ func (h *execHandle) Update(task *structs.Task) error {
 	return nil
 }
 
+func (h *execHandle) Exec(ctx context.Context, cmd string, args []string) ([]byte, int, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		// No deadline set on context; default to 1 minute
+		deadline = time.Now().Add(time.Minute)
+	}
+	return h.executor.Exec(deadline, cmd, args)
+}
+
 func (h *execHandle) Signal(s os.Signal) error {
 	return h.executor.Signal(s)
 }
@@ -286,17 +281,15 @@ func (h *execHandle) Kill() error {
 
 	select {
 	case <-h.doneCh:
-		return nil
 	case <-time.After(h.killTimeout):
 		if h.pluginClient.Exited() {
-			return nil
+			break
 		}
 		if err := h.executor.Exit(); err != nil {
 			return fmt.Errorf("executor Exit failed: %v", err)
 		}
-
-		return nil
 	}
+	return nil
 }
 
 func (h *execHandle) Stats() (*cstructs.TaskResourceUsage, error) {
@@ -319,14 +312,6 @@ func (h *execHandle) run() {
 				h.logger.Printf("[ERR] driver.exec: destroying resource container failed: %v", e)
 			}
 		}
-		if e := h.allocDir.UnmountAll(); e != nil {
-			h.logger.Printf("[ERR] driver.exec: unmounting dev,proc and alloc dirs failed: %v", e)
-		}
-	}
-
-	// Remove services
-	if err := h.executor.DeregisterServices(); err != nil {
-		h.logger.Printf("[ERR] driver.exec: failed to deregister services: %v", err)
 	}
 
 	// Exit the executor

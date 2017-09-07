@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/golang/snappy"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
 
@@ -57,7 +58,19 @@ func (s *HTTPServer) AllocSpecificRequest(resp http.ResponseWriter, req *http.Re
 	if out.Alloc == nil {
 		return nil, CodedError(404, "alloc not found")
 	}
-	return out.Alloc, nil
+
+	// Decode the payload if there is any
+	alloc := out.Alloc
+	if alloc.Job != nil && len(alloc.Job.Payload) != 0 {
+		decoded, err := snappy.Decode(nil, alloc.Job.Payload)
+		if err != nil {
+			return nil, err
+		}
+		alloc = alloc.Copy()
+		alloc.Job.Payload = decoded
+	}
+
+	return alloc, nil
 }
 
 func (s *HTTPServer) ClientAllocRequest(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
@@ -79,9 +92,22 @@ func (s *HTTPServer) ClientAllocRequest(resp http.ResponseWriter, req *http.Requ
 		return s.allocStats(allocID, resp, req)
 	case "snapshot":
 		return s.allocSnapshot(allocID, resp, req)
+	case "gc":
+		return s.allocGC(allocID, resp, req)
 	}
 
 	return nil, CodedError(404, resourceNotFoundErr)
+}
+
+func (s *HTTPServer) ClientGCRequest(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	if s.agent.client == nil {
+		return nil, clientNotRunning
+	}
+	return nil, s.agent.Client().CollectAllAllocs()
+}
+
+func (s *HTTPServer) allocGC(allocID string, resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	return nil, s.agent.Client().CollectAllocation(allocID)
 }
 
 func (s *HTTPServer) allocSnapshot(allocID string, resp http.ResponseWriter, req *http.Request) (interface{}, error) {

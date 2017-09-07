@@ -2,6 +2,7 @@ package serf
 
 import (
 	"io"
+	"log"
 	"os"
 	"time"
 
@@ -15,6 +16,7 @@ var ProtocolVersionMap map[uint8]uint8
 
 func init() {
 	ProtocolVersionMap = map[uint8]uint8{
+		5: 2,
 		4: 2,
 		3: 2,
 		2: 2,
@@ -121,12 +123,12 @@ type Config struct {
 	// prevent an unbounded growth of memory utilization
 	MaxQueueDepth int
 
-	// RecentIntentBuffer is used to set the size of recent join and leave intent
-	// messages that will be buffered. This is used to guard against
-	// the case where Serf broadcasts an intent that arrives before the
-	// Memberlist event. It is important that this not be too small to avoid
-	// continuous rebroadcasting of dead events.
-	RecentIntentBuffer int
+	// RecentIntentTimeout is used to determine how long we store recent
+	// join and leave intents. This is used to guard against the case where
+	// Serf broadcasts an intent that arrives before the Memberlist event.
+	// It is important that this not be too short to avoid continuous
+	// rebroadcasting of dead events.
+	RecentIntentTimeout time.Duration
 
 	// EventBuffer is used to control how many events are buffered.
 	// This is used to prevent re-delivery of events to a client. The buffer
@@ -181,6 +183,12 @@ type Config struct {
 	// LogOutput is the location to write logs to. If this is not set,
 	// logs will go to stderr.
 	LogOutput io.Writer
+
+	// Logger is a custom logger which you provide. If Logger is set, it will use
+	// this for the internal logger. If Logger is not set, it will fall back to the
+	// behavior for using LogOutput. You cannot specify both LogOutput and Logger
+	// at the same time.
+	Logger *log.Logger
 
 	// SnapshotPath if provided is used to snapshot live nodes as well
 	// as lamport clock values. When Serf is started with a snapshot,
@@ -240,9 +248,9 @@ func DefaultConfig() *Config {
 		EventBuffer:                  512,
 		QueryBuffer:                  512,
 		LogOutput:                    os.Stderr,
-		ProtocolVersion:              ProtocolVersionMax,
+		ProtocolVersion:              4,
 		ReapInterval:                 15 * time.Second,
-		RecentIntentBuffer:           128,
+		RecentIntentTimeout:          5 * time.Minute,
 		ReconnectInterval:            30 * time.Second,
 		ReconnectTimeout:             24 * time.Hour,
 		QueueDepthWarning:            128,

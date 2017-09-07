@@ -9,20 +9,26 @@ import (
 
 	"github.com/hashicorp/nomad/client/config"
 	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/hashicorp/nomad/testutil"
 
 	ctestutils "github.com/hashicorp/nomad/client/testutil"
 )
 
 // The fingerprinter test should always pass, even if QEMU is not installed.
 func TestQemuDriver_Fingerprint(t *testing.T) {
+	if !testutil.IsTravis() {
+		t.Parallel()
+	}
 	ctestutils.QemuCompatible(t)
 	task := &structs.Task{
 		Name:      "foo",
+		Driver:    "qemu",
 		Resources: structs.DefaultResources(),
 	}
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewQemuDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewQemuDriver(ctx.DriverCtx)
+
 	node := &structs.Node{
 		Attributes: make(map[string]string),
 	}
@@ -42,9 +48,13 @@ func TestQemuDriver_Fingerprint(t *testing.T) {
 }
 
 func TestQemuDriver_StartOpen_Wait(t *testing.T) {
+	if !testutil.IsTravis() {
+		t.Parallel()
+	}
 	ctestutils.QemuCompatible(t)
 	task := &structs.Task{
-		Name: "linux",
+		Name:   "linux",
+		Driver: "qemu",
 		Config: map[string]interface{}{
 			"image_path":  "linux-0.2.img",
 			"accelerator": "tcg",
@@ -63,35 +73,36 @@ func TestQemuDriver_StartOpen_Wait(t *testing.T) {
 			MemoryMB: 512,
 			Networks: []*structs.NetworkResource{
 				&structs.NetworkResource{
-					ReservedPorts: []structs.Port{{"main", 22000}, {"web", 80}},
+					ReservedPorts: []structs.Port{{Label: "main", Value: 22000}, {Label: "web", Value: 80}},
 				},
 			},
 		},
 	}
 
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewQemuDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewQemuDriver(ctx.DriverCtx)
 
 	// Copy the test image into the task's directory
-	dst, _ := execCtx.AllocDir.TaskDirs[task.Name]
+	dst := ctx.ExecCtx.TaskDir.Dir
 	copyFile("./test-resources/qemu/linux-0.2.img", filepath.Join(dst, "linux-0.2.img"), t)
 
-	handle, err := d.Start(execCtx, task)
+	if _, err := d.Prestart(ctx.ExecCtx, task); err != nil {
+		t.Fatalf("Prestart faild: %v", err)
+	}
+
+	resp, err := d.Start(ctx.ExecCtx, task)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if handle == nil {
-		t.Fatalf("missing handle")
-	}
 
 	// Ensure that sending a Signal returns an error
-	if err := handle.Signal(syscall.SIGINT); err == nil {
+	if err := resp.Handle.Signal(syscall.SIGINT); err == nil {
 		t.Fatalf("Expect an error when signalling")
 	}
 
 	// Attempt to open
-	handle2, err := d.Open(execCtx, handle.ID())
+	handle2, err := d.Open(ctx.ExecCtx, resp.Handle.ID())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -100,16 +111,20 @@ func TestQemuDriver_StartOpen_Wait(t *testing.T) {
 	}
 
 	// Clean up
-	if err := handle.Kill(); err != nil {
+	if err := resp.Handle.Kill(); err != nil {
 		fmt.Printf("\nError killing Qemu test: %s", err)
 	}
 }
 
 func TestQemuDriverUser(t *testing.T) {
+	if !testutil.IsTravis() {
+		t.Parallel()
+	}
 	ctestutils.QemuCompatible(t)
 	task := &structs.Task{
-		Name: "linux",
-		User: "alice",
+		Name:   "linux",
+		Driver: "qemu",
+		User:   "alice",
 		Config: map[string]interface{}{
 			"image_path":  "linux-0.2.img",
 			"accelerator": "tcg",
@@ -128,19 +143,23 @@ func TestQemuDriverUser(t *testing.T) {
 			MemoryMB: 512,
 			Networks: []*structs.NetworkResource{
 				&structs.NetworkResource{
-					ReservedPorts: []structs.Port{{"main", 22000}, {"web", 80}},
+					ReservedPorts: []structs.Port{{Label: "main", Value: 22000}, {Label: "web", Value: 80}},
 				},
 			},
 		},
 	}
 
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewQemuDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewQemuDriver(ctx.DriverCtx)
 
-	handle, err := d.Start(execCtx, task)
+	if _, err := d.Prestart(ctx.ExecCtx, task); err != nil {
+		t.Fatalf("Prestart faild: %v", err)
+	}
+
+	resp, err := d.Start(ctx.ExecCtx, task)
 	if err == nil {
-		handle.Kill()
+		resp.Handle.Kill()
 		t.Fatalf("Should've failed")
 	}
 	msg := "unknown user alice"

@@ -1,12 +1,19 @@
 package nomad
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"net"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/armon/go-metrics"
+	memdb "github.com/hashicorp/go-memdb"
+	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/serf/serf"
@@ -17,6 +24,10 @@ const (
 	// unblocked to re-enter the scheduler. A failed evaluation occurs under
 	// high contention when the schedulers plan does not make progress.
 	failedEvalUnblockInterval = 1 * time.Minute
+
+	// replicationRateLimit is used to rate limit how often data is replicated
+	// between the authoritative region and the local region
+	replicationRateLimit rate.Limit = 10.0
 )
 
 // monitorLeadership is used to monitor if we acquire or lose our role
@@ -68,8 +79,7 @@ RECONCILE:
 	// Check if we need to handle initial leadership actions
 	if !establishedLeader {
 		if err := s.establishLeadership(stopCh); err != nil {
-			s.logger.Printf("[ERR] nomad: failed to establish leadership: %v",
-				err)
+			s.logger.Printf("[ERR] nomad: failed to establish leadership: %v", err)
 			goto WAIT
 		}
 		establishedLeader = true
@@ -128,6 +138,11 @@ func (s *Server) establishLeadership(stopCh chan struct{}) error {
 	// Enable the blocked eval tracker, since we are now the leader
 	s.blockedEvals.SetEnabled(true)
 
+	// Enable the deployment watcher, since we are now the leader
+	if err := s.deploymentWatcher.SetEnabled(true, s.State()); err != nil {
+		return err
+	}
+
 	// Restore the eval broker state
 	if err := s.restoreEvals(); err != nil {
 		return err
@@ -141,7 +156,6 @@ func (s *Server) establishLeadership(stopCh chan struct{}) error {
 
 	// Enable the periodic dispatcher, since we are now the leader.
 	s.periodicDispatcher.SetEnabled(true)
-	s.periodicDispatcher.Start()
 
 	// Restore the periodic dispatcher state
 	if err := s.restorePeriodicDispatcher(); err != nil {
@@ -182,6 +196,13 @@ func (s *Server) establishLeadership(stopCh chan struct{}) error {
 	if err := s.reconcileJobSummaries(); err != nil {
 		return fmt.Errorf("unable to reconcile job summaries: %v", err)
 	}
+
+	// Start replication of ACLs and Policies if they are enabled,
+	// and we are not the authoritative region.
+	if s.config.ACLEnabled && s.config.Region != s.config.AuthoritativeRegion {
+		go s.replicateACLPolicies(stopCh)
+		go s.replicateACLTokens(stopCh)
+	}
 	return nil
 }
 
@@ -191,7 +212,8 @@ func (s *Server) establishLeadership(stopCh chan struct{}) error {
 // a leadership transition takes place.
 func (s *Server) restoreEvals() error {
 	// Get an iterator over every evaluation
-	iter, err := s.fsm.State().Evals()
+	ws := memdb.NewWatchSet()
+	iter, err := s.fsm.State().Evals(ws)
 	if err != nil {
 		return fmt.Errorf("failed to get evaluations: %v", err)
 	}
@@ -216,8 +238,9 @@ func (s *Server) restoreEvals() error {
 // revoked.
 func (s *Server) restoreRevokingAccessors() error {
 	// An accessor should be revoked if its allocation or node is terminal
+	ws := memdb.NewWatchSet()
 	state := s.fsm.State()
-	iter, err := state.VaultAccessors()
+	iter, err := state.VaultAccessors(ws)
 	if err != nil {
 		return fmt.Errorf("failed to get vault accessors: %v", err)
 	}
@@ -232,9 +255,9 @@ func (s *Server) restoreRevokingAccessors() error {
 		va := raw.(*structs.VaultAccessor)
 
 		// Check the allocation
-		alloc, err := state.AllocByID(va.AllocID)
+		alloc, err := state.AllocByID(ws, va.AllocID)
 		if err != nil {
-			return fmt.Errorf("failed to lookup allocation: %v", va.AllocID, err)
+			return fmt.Errorf("failed to lookup allocation %q: %v", va.AllocID, err)
 		}
 		if alloc == nil || alloc.Terminated() {
 			// No longer running and should be revoked
@@ -243,7 +266,7 @@ func (s *Server) restoreRevokingAccessors() error {
 		}
 
 		// Check the node
-		node, err := state.NodeByID(va.NodeID)
+		node, err := state.NodeByID(ws, va.NodeID)
 		if err != nil {
 			return fmt.Errorf("failed to lookup node %q: %v", va.NodeID, err)
 		}
@@ -269,7 +292,8 @@ func (s *Server) restoreRevokingAccessors() error {
 // dispatcher is maintained only by the leader, so it must be restored anytime a
 // leadership transition takes place.
 func (s *Server) restorePeriodicDispatcher() error {
-	iter, err := s.fsm.State().JobsByPeriodic(true)
+	ws := memdb.NewWatchSet()
+	iter, err := s.fsm.State().JobsByPeriodic(ws, true)
 	if err != nil {
 		return fmt.Errorf("failed to get periodic jobs: %v", err)
 	}
@@ -277,18 +301,25 @@ func (s *Server) restorePeriodicDispatcher() error {
 	now := time.Now()
 	for i := iter.Next(); i != nil; i = iter.Next() {
 		job := i.(*structs.Job)
+
+		// We skip adding parameterized jobs because they themselves aren't
+		// tracked, only the dispatched children are.
+		if job.IsParameterized() {
+			continue
+		}
+
 		s.periodicDispatcher.Add(job)
 
 		// If the periodic job has never been launched before, launch will hold
 		// the time the periodic job was added. Otherwise it has the last launch
 		// time of the periodic job.
-		launch, err := s.fsm.State().PeriodicLaunchByID(job.ID)
+		launch, err := s.fsm.State().PeriodicLaunchByID(ws, job.ID)
 		if err != nil || launch == nil {
 			return fmt.Errorf("failed to get periodic launch time: %v", err)
 		}
 
 		// nextLaunch is the next launch that should occur.
-		nextLaunch := job.Periodic.Next(launch.Launch)
+		nextLaunch := job.Periodic.Next(launch.Launch.In(job.Periodic.GetLocation()))
 
 		// We skip force launching the job if  there should be no next launch
 		// (the zero case) or if the next launch time is in the future. If it is
@@ -382,17 +413,24 @@ func (s *Server) reapFailedEvaluations(stopCh chan struct{}) {
 			}
 
 			// Update the status to failed
-			newEval := eval.Copy()
-			newEval.Status = structs.EvalStatusFailed
-			newEval.StatusDescription = fmt.Sprintf("evaluation reached delivery limit (%d)", s.config.EvalDeliveryLimit)
-			s.logger.Printf("[WARN] nomad: eval %#v reached delivery limit, marking as failed", newEval)
+			updateEval := eval.Copy()
+			updateEval.Status = structs.EvalStatusFailed
+			updateEval.StatusDescription = fmt.Sprintf("evaluation reached delivery limit (%d)", s.config.EvalDeliveryLimit)
+			s.logger.Printf("[WARN] nomad: eval %#v reached delivery limit, marking as failed", updateEval)
+
+			// Create a follow-up evaluation that will be used to retry the
+			// scheduling for the job after the cluster is hopefully more stable
+			// due to the fairly large backoff.
+			followupEvalWait := s.config.EvalFailedFollowupBaselineDelay +
+				time.Duration(rand.Int63n(int64(s.config.EvalFailedFollowupDelayRange)))
+			followupEval := eval.CreateFailedFollowUpEval(followupEvalWait)
 
 			// Update via Raft
 			req := structs.EvalUpdateRequest{
-				Evals: []*structs.Evaluation{newEval},
+				Evals: []*structs.Evaluation{updateEval, followupEval},
 			}
 			if _, _, err := s.raftApply(structs.EvalUpdateRequestType, &req); err != nil {
-				s.logger.Printf("[ERR] nomad: failed to update failed eval %#v: %v", newEval, err)
+				s.logger.Printf("[ERR] nomad: failed to update failed eval %#v and create a follow-up: %v", updateEval, err)
 				continue
 			}
 
@@ -469,6 +507,11 @@ func (s *Server) revokeLeadership() error {
 
 	// Disable the Vault client as it is only useful as a leader.
 	s.vault.SetActive(false)
+
+	// Disable the deployment watcher as it is only useful as a leader.
+	if err := s.deploymentWatcher.SetEnabled(false, nil); err != nil {
+		return err
+	}
 
 	// Clear the heartbeat timers on either shutdown or step down,
 	// since we are no longer responsible for TTL expirations.
@@ -549,6 +592,12 @@ func (s *Server) reconcileJobSummaries() error {
 
 // addRaftPeer is used to add a new Raft peer when a Nomad server joins
 func (s *Server) addRaftPeer(m serf.Member, parts *serverParts) error {
+	// Do not join ourselfs
+	if m.Name == s.config.NodeName {
+		s.logger.Printf("[DEBUG] nomad: adding self (%q) as raft peer skipped", m.Name)
+		return nil
+	}
+
 	// Check for possibility of multiple bootstrap nodes
 	if parts.Bootstrap {
 		members := s.serf.Members()
@@ -561,9 +610,26 @@ func (s *Server) addRaftPeer(m serf.Member, parts *serverParts) error {
 		}
 	}
 
+	// TODO (alexdadgar) - This will need to be changed once we support node IDs.
+	addr := (&net.TCPAddr{IP: m.Addr, Port: parts.Port}).String()
+
+	// See if it's already in the configuration. It's harmless to re-add it
+	// but we want to avoid doing that if possible to prevent useless Raft
+	// log entries.
+	configFuture := s.raft.GetConfiguration()
+	if err := configFuture.Error(); err != nil {
+		s.logger.Printf("[ERR] nomad: failed to get raft configuration: %v", err)
+		return err
+	}
+	for _, server := range configFuture.Configuration().Servers {
+		if server.Address == raft.ServerAddress(addr) {
+			return nil
+		}
+	}
+
 	// Attempt to add as a peer
-	future := s.raft.AddPeer(parts.Addr.String())
-	if err := future.Error(); err != nil && err != raft.ErrKnownPeer {
+	addFuture := s.raft.AddPeer(raft.ServerAddress(addr))
+	if err := addFuture.Error(); err != nil {
 		s.logger.Printf("[ERR] nomad: failed to add raft peer: %v", err)
 		return err
 	} else if err == nil {
@@ -575,14 +641,314 @@ func (s *Server) addRaftPeer(m serf.Member, parts *serverParts) error {
 // removeRaftPeer is used to remove a Raft peer when a Nomad server leaves
 // or is reaped
 func (s *Server) removeRaftPeer(m serf.Member, parts *serverParts) error {
-	// Attempt to remove as peer
-	future := s.raft.RemovePeer(parts.Addr.String())
-	if err := future.Error(); err != nil && err != raft.ErrUnknownPeer {
+	// TODO (alexdadgar) - This will need to be changed once we support node IDs.
+	addr := (&net.TCPAddr{IP: m.Addr, Port: parts.Port}).String()
+
+	// See if it's already in the configuration. It's harmless to re-remove it
+	// but we want to avoid doing that if possible to prevent useless Raft
+	// log entries.
+	configFuture := s.raft.GetConfiguration()
+	if err := configFuture.Error(); err != nil {
+		s.logger.Printf("[ERR] nomad: failed to get raft configuration: %v", err)
+		return err
+	}
+	for _, server := range configFuture.Configuration().Servers {
+		if server.Address == raft.ServerAddress(addr) {
+			goto REMOVE
+		}
+	}
+	return nil
+
+REMOVE:
+	// Attempt to remove as a peer.
+	future := s.raft.RemovePeer(raft.ServerAddress(addr))
+	if err := future.Error(); err != nil {
 		s.logger.Printf("[ERR] nomad: failed to remove raft peer '%v': %v",
 			parts, err)
 		return err
-	} else if err == nil {
-		s.logger.Printf("[INFO] nomad: removed server '%s' as peer", m.Name)
 	}
 	return nil
+}
+
+// replicateACLPolicies is used to replicate ACL policies from
+// the authoritative region to this region.
+func (s *Server) replicateACLPolicies(stopCh chan struct{}) {
+	req := structs.ACLPolicyListRequest{
+		QueryOptions: structs.QueryOptions{
+			Region:     s.config.AuthoritativeRegion,
+			AllowStale: true,
+		},
+	}
+	limiter := rate.NewLimiter(replicationRateLimit, int(replicationRateLimit))
+	s.logger.Printf("[DEBUG] nomad: starting ACL policy replication from authoritative region %q", req.Region)
+
+START:
+	for {
+		select {
+		case <-stopCh:
+			return
+		default:
+			// Rate limit how often we attempt replication
+			limiter.Wait(context.Background())
+
+			// Fetch the list of policies
+			var resp structs.ACLPolicyListResponse
+			req.SecretID = s.ReplicationToken()
+			err := s.forwardRegion(s.config.AuthoritativeRegion,
+				"ACL.ListPolicies", &req, &resp)
+			if err != nil {
+				s.logger.Printf("[ERR] nomad: failed to fetch policies from authoritative region: %v", err)
+				goto ERR_WAIT
+			}
+
+			// Perform a two-way diff
+			delete, update := diffACLPolicies(s.State(), req.MinQueryIndex, resp.Policies)
+
+			// Delete policies that should not exist
+			if len(delete) > 0 {
+				args := &structs.ACLPolicyDeleteRequest{
+					Names: delete,
+				}
+				_, _, err := s.raftApply(structs.ACLPolicyDeleteRequestType, args)
+				if err != nil {
+					s.logger.Printf("[ERR] nomad: failed to delete policies: %v", err)
+					goto ERR_WAIT
+				}
+			}
+
+			// Fetch any outdated policies
+			var fetched []*structs.ACLPolicy
+			if len(update) > 0 {
+				req := structs.ACLPolicySetRequest{
+					Names: update,
+					QueryOptions: structs.QueryOptions{
+						Region:        s.config.AuthoritativeRegion,
+						SecretID:      s.ReplicationToken(),
+						AllowStale:    true,
+						MinQueryIndex: resp.Index - 1,
+					},
+				}
+				var reply structs.ACLPolicySetResponse
+				if err := s.forwardRegion(s.config.AuthoritativeRegion,
+					"ACL.GetPolicies", &req, &reply); err != nil {
+					s.logger.Printf("[ERR] nomad: failed to fetch policies from authoritative region: %v", err)
+					goto ERR_WAIT
+				}
+				for _, policy := range reply.Policies {
+					fetched = append(fetched, policy)
+				}
+			}
+
+			// Update local policies
+			if len(fetched) > 0 {
+				args := &structs.ACLPolicyUpsertRequest{
+					Policies: fetched,
+				}
+				_, _, err := s.raftApply(structs.ACLPolicyUpsertRequestType, args)
+				if err != nil {
+					s.logger.Printf("[ERR] nomad: failed to update policies: %v", err)
+					goto ERR_WAIT
+				}
+			}
+
+			// Update the minimum query index, blocks until there
+			// is a change.
+			req.MinQueryIndex = resp.Index
+		}
+	}
+
+ERR_WAIT:
+	select {
+	case <-time.After(s.config.ReplicationBackoff):
+		goto START
+	case <-stopCh:
+		return
+	}
+}
+
+// diffACLPolicies is used to perform a two-way diff between the local
+// policies and the remote policies to determine which policies need to
+// be deleted or updated.
+func diffACLPolicies(state *state.StateStore, minIndex uint64, remoteList []*structs.ACLPolicyListStub) (delete []string, update []string) {
+	// Construct a set of the local and remote policies
+	local := make(map[string][]byte)
+	remote := make(map[string]struct{})
+
+	// Add all the local policies
+	iter, err := state.ACLPolicies(nil)
+	if err != nil {
+		panic("failed to iterate local policies")
+	}
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		policy := raw.(*structs.ACLPolicy)
+		local[policy.Name] = policy.Hash
+	}
+
+	// Iterate over the remote policies
+	for _, rp := range remoteList {
+		remote[rp.Name] = struct{}{}
+
+		// Check if the policy is missing locally
+		if localHash, ok := local[rp.Name]; !ok {
+			update = append(update, rp.Name)
+
+			// Check if policy is newer remotely and there is a hash mis-match.
+		} else if rp.ModifyIndex > minIndex && !bytes.Equal(localHash, rp.Hash) {
+			update = append(update, rp.Name)
+		}
+	}
+
+	// Check if policy should be deleted
+	for lp := range local {
+		if _, ok := remote[lp]; !ok {
+			delete = append(delete, lp)
+		}
+	}
+	return
+}
+
+// replicateACLTokens is used to replicate global ACL tokens from
+// the authoritative region to this region.
+func (s *Server) replicateACLTokens(stopCh chan struct{}) {
+	req := structs.ACLTokenListRequest{
+		GlobalOnly: true,
+		QueryOptions: structs.QueryOptions{
+			Region:     s.config.AuthoritativeRegion,
+			AllowStale: true,
+		},
+	}
+	limiter := rate.NewLimiter(replicationRateLimit, int(replicationRateLimit))
+	s.logger.Printf("[DEBUG] nomad: starting ACL token replication from authoritative region %q", req.Region)
+
+START:
+	for {
+		select {
+		case <-stopCh:
+			return
+		default:
+			// Rate limit how often we attempt replication
+			limiter.Wait(context.Background())
+
+			// Fetch the list of tokens
+			var resp structs.ACLTokenListResponse
+			req.SecretID = s.ReplicationToken()
+			err := s.forwardRegion(s.config.AuthoritativeRegion,
+				"ACL.ListTokens", &req, &resp)
+			if err != nil {
+				s.logger.Printf("[ERR] nomad: failed to fetch tokens from authoritative region: %v", err)
+				goto ERR_WAIT
+			}
+
+			// Perform a two-way diff
+			delete, update := diffACLTokens(s.State(), req.MinQueryIndex, resp.Tokens)
+
+			// Delete tokens that should not exist
+			if len(delete) > 0 {
+				args := &structs.ACLTokenDeleteRequest{
+					AccessorIDs: delete,
+				}
+				_, _, err := s.raftApply(structs.ACLTokenDeleteRequestType, args)
+				if err != nil {
+					s.logger.Printf("[ERR] nomad: failed to delete tokens: %v", err)
+					goto ERR_WAIT
+				}
+			}
+
+			// Fetch any outdated policies.
+			var fetched []*structs.ACLToken
+			if len(update) > 0 {
+				req := structs.ACLTokenSetRequest{
+					AccessorIDS: update,
+					QueryOptions: structs.QueryOptions{
+						Region:        s.config.AuthoritativeRegion,
+						SecretID:      s.ReplicationToken(),
+						AllowStale:    true,
+						MinQueryIndex: resp.Index - 1,
+					},
+				}
+				var reply structs.ACLTokenSetResponse
+				if err := s.forwardRegion(s.config.AuthoritativeRegion,
+					"ACL.GetTokens", &req, &reply); err != nil {
+					s.logger.Printf("[ERR] nomad: failed to fetch tokens from authoritative region: %v", err)
+					goto ERR_WAIT
+				}
+				for _, token := range reply.Tokens {
+					fetched = append(fetched, token)
+				}
+			}
+
+			// Update local tokens
+			if len(fetched) > 0 {
+				args := &structs.ACLTokenUpsertRequest{
+					Tokens: fetched,
+				}
+				_, _, err := s.raftApply(structs.ACLTokenUpsertRequestType, args)
+				if err != nil {
+					s.logger.Printf("[ERR] nomad: failed to update tokens: %v", err)
+					goto ERR_WAIT
+				}
+			}
+
+			// Update the minimum query index, blocks until there
+			// is a change.
+			req.MinQueryIndex = resp.Index
+		}
+	}
+
+ERR_WAIT:
+	select {
+	case <-time.After(s.config.ReplicationBackoff):
+		goto START
+	case <-stopCh:
+		return
+	}
+}
+
+// diffACLTokens is used to perform a two-way diff between the local
+// tokens and the remote tokens to determine which tokens need to
+// be deleted or updated.
+func diffACLTokens(state *state.StateStore, minIndex uint64, remoteList []*structs.ACLTokenListStub) (delete []string, update []string) {
+	// Construct a set of the local and remote policies
+	local := make(map[string][]byte)
+	remote := make(map[string]struct{})
+
+	// Add all the local global tokens
+	iter, err := state.ACLTokensByGlobal(nil, true)
+	if err != nil {
+		panic("failed to iterate local tokens")
+	}
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		token := raw.(*structs.ACLToken)
+		local[token.AccessorID] = token.Hash
+	}
+
+	// Iterate over the remote tokens
+	for _, rp := range remoteList {
+		remote[rp.AccessorID] = struct{}{}
+
+		// Check if the token is missing locally
+		if localHash, ok := local[rp.AccessorID]; !ok {
+			update = append(update, rp.AccessorID)
+
+			// Check if policy is newer remotely and there is a hash mis-match.
+		} else if rp.ModifyIndex > minIndex && !bytes.Equal(localHash, rp.Hash) {
+			update = append(update, rp.AccessorID)
+		}
+	}
+
+	// Check if local token should be deleted
+	for lp := range local {
+		if _, ok := remote[lp]; !ok {
+			delete = append(delete, lp)
+		}
+	}
+	return
 }

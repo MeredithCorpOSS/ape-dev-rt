@@ -49,44 +49,20 @@ func (c *Client) AllocFS() *AllocFS {
 	return &AllocFS{client: c}
 }
 
-// getNodeClient returns a Client that will dial the node. If the QueryOptions
-// is set, the function will ensure that it is initalized and that the Params
-// field is valid.
-func (a *AllocFS) getNodeClient(node *Node, allocID string, q **QueryOptions) (*Client, error) {
-	if node.HTTPAddr == "" {
-		return nil, fmt.Errorf("http addr of the node where alloc %q is running is not advertised", allocID)
-	}
-
-	// Get an API client for the node
-	nodeClient, err := NewClient(a.client.config.CopyConfig(node.HTTPAddr, node.TLSEnabled))
-	if err != nil {
-		return nil, err
-	}
-
-	// Set the query params
-	if q == nil {
-		return nodeClient, nil
-	}
-
-	if *q == nil {
-		*q = &QueryOptions{}
-	}
-	if actQ := *q; actQ.Params == nil {
-		actQ.Params = make(map[string]string)
-	}
-	return nodeClient, nil
-}
-
 // List is used to list the files at a given path of an allocation directory
 func (a *AllocFS) List(alloc *Allocation, path string, q *QueryOptions) ([]*AllocFileInfo, *QueryMeta, error) {
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, &QueryOptions{})
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, nil, err
+
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["path"] = path
 
 	var resp []*AllocFileInfo
@@ -100,14 +76,18 @@ func (a *AllocFS) List(alloc *Allocation, path string, q *QueryOptions) ([]*Allo
 
 // Stat is used to stat a file at a given path of an allocation directory
 func (a *AllocFS) Stat(alloc *Allocation, path string, q *QueryOptions) (*AllocFileInfo, *QueryMeta, error) {
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, &QueryOptions{})
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, nil, err
+
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["path"] = path
 
 	var resp AllocFileInfo
@@ -121,15 +101,18 @@ func (a *AllocFS) Stat(alloc *Allocation, path string, q *QueryOptions) (*AllocF
 // ReadAt is used to read bytes at a given offset until limit at the given path
 // in an allocation directory. If limit is <= 0, there is no limit.
 func (a *AllocFS) ReadAt(alloc *Allocation, path string, offset int64, limit int64, q *QueryOptions) (io.ReadCloser, error) {
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, &QueryOptions{})
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, err
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["path"] = path
 	q.Params["offset"] = strconv.FormatInt(offset, 10)
 	q.Params["limit"] = strconv.FormatInt(limit, 10)
@@ -144,15 +127,18 @@ func (a *AllocFS) ReadAt(alloc *Allocation, path string, offset int64, limit int
 // Cat is used to read contents of a file at the given path in an allocation
 // directory
 func (a *AllocFS) Cat(alloc *Allocation, path string, q *QueryOptions) (io.ReadCloser, error) {
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, &QueryOptions{})
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, err
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["path"] = path
 
 	r, err := nodeClient.rawQuery(fmt.Sprintf("/v1/client/fs/cat/%s", alloc.ID), q)
@@ -173,15 +159,18 @@ func (a *AllocFS) Cat(alloc *Allocation, path string, q *QueryOptions) (io.ReadC
 func (a *AllocFS) Stream(alloc *Allocation, path, origin string, offset int64,
 	cancel <-chan struct{}, q *QueryOptions) (<-chan *StreamFrame, error) {
 
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, q)
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, err
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["path"] = path
 	q.Params["offset"] = strconv.FormatInt(offset, 10)
 	q.Params["origin"] = origin
@@ -242,15 +231,18 @@ func (a *AllocFS) Stream(alloc *Allocation, path, origin string, offset int64,
 func (a *AllocFS) Logs(alloc *Allocation, follow bool, task, logType, origin string,
 	offset int64, cancel <-chan struct{}, q *QueryOptions) (<-chan *StreamFrame, error) {
 
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, q)
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeClient, err := a.getNodeClient(node, alloc.ID, &q)
-	if err != nil {
-		return nil, err
+	if q == nil {
+		q = &QueryOptions{}
 	}
+	if q.Params == nil {
+		q.Params = make(map[string]string)
+	}
+
 	q.Params["follow"] = strconv.FormatBool(follow)
 	q.Params["task"] = task
 	q.Params["type"] = logType

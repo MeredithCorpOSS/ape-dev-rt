@@ -32,7 +32,6 @@ vagrant@nomad:~$ sudo nomad agent -dev
 ==> Starting Nomad agent...
 ==> Nomad agent configuration:
 
-                 Atlas: <disabled>
                 Client: true
              Log Level: DEBUG
                 Region: global (DC: dc1)
@@ -100,7 +99,7 @@ ring using the [`server-members`](/docs/commands/server-members.html) command:
 ```text
 $ nomad server-members
 Name          Address    Port  Status  Leader  Protocol  Build  Datacenter  Region
-nomad.global  127.0.0.1  4648  alive   true    2         0.4.1  dc1         global
+nomad.global  127.0.0.1  4648  alive   true    2         0.6.0  dc1         global
 ```
 
 The output shows our own agent, the address it is running on, its

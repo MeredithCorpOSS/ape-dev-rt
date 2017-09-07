@@ -1,5 +1,5 @@
 hash: b7840c85c9038d41aee88cbfb2eec34a636b08c08240fda64dde8c09f1065690
-updated: 2017-04-03T16:20:10.474165524+01:00
+updated: 2017-09-07T09:32:16.599351477-04:00
 imports:
 - name: cloud.google.com/go
   version: 81b7822b1e798e8f17bf64b59512a5be4097e966
@@ -24,6 +24,10 @@ imports:
   - rundeck
 - name: github.com/armon/circbuf
   version: bbbad097214e2918d8543d5201d12bfd7bca254d
+- name: github.com/armon/go-metrics
+  version: 3df31a1ada83e310c2e24b267c8e8b68836547b4
+  subpackages:
+  - circonus
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
 - name: github.com/arukasio/cli
@@ -189,7 +193,7 @@ imports:
   - pkg/pathutil
   - pkg/types
 - name: github.com/coreos/go-systemd
-  version: 1f9909e51b2dab2487c26d64c8f2e7e580e4c9f5
+  version: d2196463941895ee908e13531a23a39feb9e1243
   subpackages:
   - unit
 - name: github.com/creack/goselect
@@ -229,8 +233,6 @@ imports:
   - pkg/random
   - pkg/stdcopy
   - pkg/system
-- name: github.com/docker/go-units
-  version: eb879ae3e2b84e2a142af415b679ddeda47ec71c
 - name: github.com/DreamItGetIT/statuscake
   version: 93fe653ce590267167708b20d7f49e0cc7021d99
 - name: github.com/dustin/go-humanize
@@ -274,11 +276,7 @@ imports:
 - name: github.com/go-chef/chef
   version: bf4e81635329d7a0fc8d7c858a899a72cdb69b9e
 - name: github.com/go-ini/ini
-  version: e7fea39b01aea8d5671f6858f0532f56e8bff3a5
-- name: github.com/go-ole/go-ole
-  version: 5e9c030faf78847db7aa77e3661b9cc449de29b7
-  subpackages:
-  - oleutil
+  version: c787282c39ac1fc618827141a1f762240def08a3
 - name: github.com/golang/protobuf
   version: 8ee79997227bf9b34611aee7946ae64735e6fd93
   subpackages:
@@ -344,7 +342,7 @@ imports:
 - name: github.com/gorhill/cronexpr
   version: f0984319b44273e83de132089ae42b1810f4933b
 - name: github.com/gorilla/websocket
-  version: a91eba7f97777409bc2c443f5534d41dd20c5720
+  version: 1f512fc3f05332ba7117626cdfb4e07474e58e60
 - name: github.com/gosimple/slug
   version: 32efb997950eba210b1880d8cf52b601c1b5abe3
 - name: github.com/grafana/grafana
@@ -364,17 +362,6 @@ imports:
   version: 48d7b069ad443a48ffa93364048ff8909b5d1fa2
   subpackages:
   - api
-  - lib
-- name: github.com/hashicorp/consul-template
-  version: 17cd016cdfa6601e82256b8d624b1331a0c188a7
-  subpackages:
-  - child
-  - config
-  - dependency
-  - manager
-  - signals
-  - template
-  - watch
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-cleanhttp
@@ -383,6 +370,8 @@ imports:
   version: c3d66e76678dce180a7b452653472f949aedfbcd
   subpackages:
   - helper/url
+- name: github.com/hashicorp/go-immutable-radix
+  version: 76b5f4e390910df355bfb9b16b41899538594a05
 - name: github.com/hashicorp/go-msgpack
   version: fa3f63826f7c23912c15263591e65d54d080b458
   subpackages:
@@ -401,6 +390,10 @@ imports:
   version: 36289988d83ca270bc07c234c36f364b0dd9c9a7
 - name: github.com/hashicorp/go-version
   version: deeb027c13a95d56c7585df3fe29207208c6706e
+- name: github.com/hashicorp/golang-lru
+  version: 0a025b7e63adc15a622f29b0b2c4c3848243bbf6
+  subpackages:
+  - simplelru
 - name: github.com/hashicorp/hcl
   version: 630949a3c5fa3c613328e1b8256052cbc2327c9b
   subpackages:
@@ -423,30 +416,18 @@ imports:
 - name: github.com/hashicorp/logutils
   version: 0dc08b1671f34c4250ce212759ebd880f743d883
 - name: github.com/hashicorp/nomad
-  version: 655c0385e75db974384052717b61b81c68ec2308
+  version: 9317318f49956729d63a067fafd43724a4c63b4a
   subpackages:
+  - acl
   - api
-  - client/allocdir
-  - client/config
-  - client/driver
-  - client/driver/env
-  - client/driver/executor
-  - client/driver/logging
-  - client/driver/structs
-  - client/fingerprint
-  - client/stats
-  - client/structs
-  - command/agent/consul
+  - api/contexts
+  - helper
   - helper/args
-  - helper/discover
-  - helper/fields
   - helper/flatmap
-  - helper/stats
-  - helper/tlsutil
   - jobspec
   - nomad/structs
-  - nomad/structs/config
-  - nomad/types
+- name: github.com/hashicorp/raft
+  version: aaad9f10266e089bd401e7a6487651a69275641b
 - name: github.com/hashicorp/serf
   version: e4ec8cc423bbe20d26584b96efbeb9102e16d05f
   subpackages:
@@ -563,11 +544,6 @@ imports:
   version: 6e9aa4b1a8a8b735ad14b4f1c9542ef183e82dc2
   subpackages:
   - librato
-- name: github.com/hpcloud/tail
-  version: a30252cb686a21eb2d0b98132633053ec2f7f1e5
-  subpackages:
-  - util
-  - watch
 - name: github.com/imdario/mergo
   version: 50d4dbd4eb0e84778abe37cefef140271d96fade
 - name: github.com/influxdata/influxdb
@@ -684,8 +660,6 @@ imports:
   version: 756f7b183b7ab78acdbbee5c7f392838ed459dda
 - name: github.com/mitchellh/go-linereader
   version: 07bab5fdd9580500aea6ada0e09df4aa28e68abd
-- name: github.com/mitchellh/go-ps
-  version: e2d21980687ce16e58469d98dcee92d27fbbd7fb
 - name: github.com/mitchellh/hashstructure
   version: 6b17d669fac5e2f71c16658d781ec3fdd3802b69
 - name: github.com/mitchellh/mapstructure
@@ -710,15 +684,6 @@ imports:
   version: 88d3399741b1dc65990e9b7c5580beaae3ec3e29
 - name: github.com/nu7hatch/gouuid
   version: 179d4d0c4d8d407a32af483c2354df1d2c91e6c3
-- name: github.com/opencontainers/runc
-  version: 0f764571384a3ff16c6fed25ace5b7c83f0f0379
-  subpackages:
-  - libcontainer/cgroups
-  - libcontainer/cgroups/fs
-  - libcontainer/configs
-  - libcontainer/system
-  - libcontainer/user
-  - libcontainer/utils
 - name: github.com/opsgenie/opsgenie-go-sdk
   version: 2654b36ec837f913b546aec27f7717b5ac664cc8
   subpackages:
@@ -754,8 +719,6 @@ imports:
   version: 248dadf4e9068a0b3e79f02ed0a610d935de5302
 - name: github.com/profitbricks/profitbricks-sdk-go
   version: b279e1adcaf1c9cae4d6520c1bdbbf4674e7806e
-- name: github.com/RackSec/srslog
-  version: 259aed10dfa74ea2961eddd1d9847619f6e98837
 - name: github.com/rainycape/unidecode
   version: cb7f23ec59bec0d61b19c56cd88cee3d0cc1870c
 - name: github.com/rancher/go-rancher
@@ -791,18 +754,6 @@ imports:
   version: 2a102734c18c43c74fd0664e06cd414cf9602b93
 - name: github.com/sethvargo/go-fastly
   version: 247f42f7ecc6677aa1b6e30978d06fcc38f5f769
-- name: github.com/shirou/gopsutil
-  version: 32b6636de04b303274daac3ca2b10d3b0e4afc35
-  subpackages:
-  - cpu
-  - disk
-  - host
-  - internal/common
-  - mem
-  - net
-  - process
-- name: github.com/shirou/w32
-  version: bb4de0191aa41b5507caa14b0650cdbddcd9280b
 - name: github.com/Sirupsen/logrus
   version: a283a10442df8dc09befd873fab202bf8a253d6a
 - name: github.com/soniah/dnsmadeeasy
@@ -813,8 +764,6 @@ imports:
   - spotinst
   - spotinst/util/stringutil
   - spotinst/util/uritemplates
-- name: github.com/StackExchange/wmi
-  version: e54cbda6595d7293a7a468ccf9525f6bc8887f99
 - name: github.com/tent/http-link-go
   version: ac974c61c2f990f4115b119354b5e0b47550e888
 - name: github.com/tomnomnom/linkheader
@@ -869,6 +818,7 @@ imports:
 - name: golang.org/x/crypto
   version: b8a2a83acfe6e6770b75de42d5ff4c67596675c0
   subpackages:
+  - blake2b
   - curve25519
   - ed25519
   - ed25519/internal/edwards25519
@@ -945,12 +895,8 @@ imports:
   - stats
   - tap
   - transport
-- name: gopkg.in/fsnotify.v1
-  version: a8a77c9133d2d6fd8334f3260d06f60e8d80a5fb
 - name: gopkg.in/ini.v1
   version: 6e4869b434bd001f6983749881c7ead3545887d8
-- name: gopkg.in/lxc/go-lxc.v2
-  version: f8a6938e600c634232eeef79dc04a1226f73a88b
 - name: gopkg.in/ns1/ns1-go.v2
   version: d8d10b7f448291ddbdce48d4594fb1b667014c8b
   subpackages:
@@ -962,8 +908,6 @@ imports:
   - rest/model/monitor
 - name: gopkg.in/resty.v0
   version: 24dc7ba4bc1ef9215048b28e7248f99c42901db5
-- name: gopkg.in/tomb.v1
-  version: dd632973f1e7218eb1089048e0798ec9ae7dceb8
 - name: gopkg.in/yaml.v2
   version: a5b47d31c556af34a302ce5d659e6fea44d90de0
 - name: gopkg.in/zorkian/go-datadog-api.v2

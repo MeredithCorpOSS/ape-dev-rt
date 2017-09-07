@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestClientEndpoint_Register(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -38,7 +40,8 @@ func TestClientEndpoint_Register(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -54,6 +57,7 @@ func TestClientEndpoint_Register(t *testing.T) {
 }
 
 func TestClientEndpoint_Register_NoSecret(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -85,7 +89,8 @@ func TestClientEndpoint_Register_NoSecret(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -101,6 +106,7 @@ func TestClientEndpoint_Register_NoSecret(t *testing.T) {
 }
 
 func TestClientEndpoint_Register_SecretMismatch(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -123,11 +129,12 @@ func TestClientEndpoint_Register_SecretMismatch(t *testing.T) {
 	node.SecretID = structs.GenerateUUID()
 	err := msgpackrpc.CallWithCodec(codec, "Node.Register", req, &resp)
 	if err == nil || !strings.Contains(err.Error(), "Not registering") {
-		t.Fatalf("Expecting error regarding mismatching secret id", err)
+		t.Fatalf("Expecting error regarding mismatching secret id: %v", err)
 	}
 }
 
 func TestClientEndpoint_Deregister(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -161,7 +168,8 @@ func TestClientEndpoint_Deregister(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -171,6 +179,7 @@ func TestClientEndpoint_Deregister(t *testing.T) {
 }
 
 func TestClientEndpoint_Deregister_Vault(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -215,7 +224,8 @@ func TestClientEndpoint_Deregister_Vault(t *testing.T) {
 	}
 
 	// Check for the node in the FSM
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -230,6 +240,7 @@ func TestClientEndpoint_Deregister_Vault(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateStatus(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -276,7 +287,8 @@ func TestClientEndpoint_UpdateStatus(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -289,6 +301,7 @@ func TestClientEndpoint_UpdateStatus(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateStatus_Vault(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -346,6 +359,7 @@ func TestClientEndpoint_UpdateStatus_Vault(t *testing.T) {
 }
 
 func TestClientEndpoint_Register_GetEvals(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -384,7 +398,8 @@ func TestClientEndpoint_Register_GetEvals(t *testing.T) {
 	}
 
 	evalID := resp.EvalIDs[0]
-	eval, err := state.EvalByID(evalID)
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, evalID)
 	if err != nil {
 		t.Fatalf("could not get eval %v", evalID)
 	}
@@ -394,7 +409,7 @@ func TestClientEndpoint_Register_GetEvals(t *testing.T) {
 	}
 
 	// Check for the node in the FSM
-	out, err := state.NodeByID(node.ID)
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -405,7 +420,7 @@ func TestClientEndpoint_Register_GetEvals(t *testing.T) {
 		t.Fatalf("index mis-match")
 	}
 
-	// Transistion it to down and then ready
+	// Transition it to down and then ready
 	node.Status = structs.NodeStatusDown
 	reg = &structs.NodeRegisterRequest{
 		Node:         node,
@@ -438,6 +453,7 @@ func TestClientEndpoint_Register_GetEvals(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateStatus_GetEvals(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -490,7 +506,8 @@ func TestClientEndpoint_UpdateStatus_GetEvals(t *testing.T) {
 	}
 
 	evalID := resp2.EvalIDs[0]
-	eval, err := state.EvalByID(evalID)
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, evalID)
 	if err != nil {
 		t.Fatalf("could not get eval %v", evalID)
 	}
@@ -506,7 +523,7 @@ func TestClientEndpoint_UpdateStatus_GetEvals(t *testing.T) {
 	}
 
 	// Check for the node in the FSM
-	out, err := state.NodeByID(node.ID)
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -519,6 +536,7 @@ func TestClientEndpoint_UpdateStatus_GetEvals(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateStatus_HeartbeatOnly(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 
@@ -536,8 +554,8 @@ func TestClientEndpoint_UpdateStatus_HeartbeatOnly(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -593,6 +611,7 @@ func TestClientEndpoint_UpdateStatus_HeartbeatOnly(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateDrain(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -627,7 +646,8 @@ func TestClientEndpoint_UpdateDrain(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -639,6 +659,7 @@ func TestClientEndpoint_UpdateDrain(t *testing.T) {
 // This test ensures that Nomad marks client state of allocations which are in
 // pending/running state to lost when a node is marked as down.
 func TestClientEndpoint_Drain_Down(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -683,11 +704,12 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 
 	// Wait for the scheduler to create an allocation
 	testutil.WaitForResult(func() (bool, error) {
-		allocs, err := s1.fsm.state.AllocsByJob(job.ID)
+		ws := memdb.NewWatchSet()
+		allocs, err := s1.fsm.state.AllocsByJob(ws, job.ID, true)
 		if err != nil {
 			return false, err
 		}
-		allocs1, err := s1.fsm.state.AllocsByJob(job1.ID)
+		allocs1, err := s1.fsm.state.AllocsByJob(ws, job1.ID, true)
 		if err != nil {
 			return false, err
 		}
@@ -719,7 +741,8 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 
 	// Ensure that the allocation has transitioned to lost
 	testutil.WaitForResult(func() (bool, error) {
-		summary, err := s1.fsm.state.JobSummaryByID(job.ID)
+		ws := memdb.NewWatchSet()
+		summary, err := s1.fsm.state.JobSummaryByID(ws, job.ID)
 		if err != nil {
 			return false, err
 		}
@@ -731,6 +754,7 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 					Lost:   1,
 				},
 			},
+			Children:    new(structs.JobChildrenSummary),
 			CreateIndex: jobResp.JobModifyIndex,
 			ModifyIndex: summary.ModifyIndex,
 		}
@@ -738,7 +762,7 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 			return false, fmt.Errorf("expected: %#v, actual: %#v", expectedSummary, summary)
 		}
 
-		summary1, err := s1.fsm.state.JobSummaryByID(job1.ID)
+		summary1, err := s1.fsm.state.JobSummaryByID(ws, job1.ID)
 		if err != nil {
 			return false, err
 		}
@@ -749,6 +773,7 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 					Lost: 1,
 				},
 			},
+			Children:    new(structs.JobChildrenSummary),
 			CreateIndex: jobResp1.JobModifyIndex,
 			ModifyIndex: summary1.ModifyIndex,
 		}
@@ -762,6 +787,7 @@ func TestClientEndpoint_Drain_Down(t *testing.T) {
 }
 
 func TestClientEndpoint_GetNode(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -820,6 +846,7 @@ func TestClientEndpoint_GetNode(t *testing.T) {
 }
 
 func TestClientEndpoint_GetNode_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -849,7 +876,7 @@ func TestClientEndpoint_GetNode_Blocking(t *testing.T) {
 		NodeID: node2.ID,
 		QueryOptions: structs.QueryOptions{
 			Region:        "global",
-			MinQueryIndex: 50,
+			MinQueryIndex: 150,
 		},
 	}
 	var resp structs.SingleNodeResponse
@@ -921,6 +948,7 @@ func TestClientEndpoint_GetNode_Blocking(t *testing.T) {
 }
 
 func TestClientEndpoint_GetAllocs(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -982,6 +1010,7 @@ func TestClientEndpoint_GetAllocs(t *testing.T) {
 }
 
 func TestClientEndpoint_GetClientAllocs(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1053,6 +1082,7 @@ func TestClientEndpoint_GetClientAllocs(t *testing.T) {
 }
 
 func TestClientEndpoint_GetClientAllocs_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1145,6 +1175,7 @@ func TestClientEndpoint_GetClientAllocs_Blocking(t *testing.T) {
 }
 
 func TestClientEndpoint_GetAllocs_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1236,6 +1267,7 @@ func TestClientEndpoint_GetAllocs_Blocking(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateAlloc(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1287,7 +1319,8 @@ func TestClientEndpoint_UpdateAlloc(t *testing.T) {
 	}
 
 	// Lookup the alloc
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1297,6 +1330,7 @@ func TestClientEndpoint_UpdateAlloc(t *testing.T) {
 }
 
 func TestClientEndpoint_BatchUpdate(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1342,7 +1376,8 @@ func TestClientEndpoint_BatchUpdate(t *testing.T) {
 	}
 
 	// Lookup the alloc
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1352,6 +1387,7 @@ func TestClientEndpoint_BatchUpdate(t *testing.T) {
 }
 
 func TestClientEndpoint_UpdateAlloc_Vault(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1413,7 +1449,8 @@ func TestClientEndpoint_UpdateAlloc_Vault(t *testing.T) {
 	}
 
 	// Lookup the alloc
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1427,6 +1464,7 @@ func TestClientEndpoint_UpdateAlloc_Vault(t *testing.T) {
 }
 
 func TestClientEndpoint_CreateNodeEvals(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -1458,9 +1496,10 @@ func TestClientEndpoint_CreateNodeEvals(t *testing.T) {
 	}
 
 	// Lookup the evaluations
+	ws := memdb.NewWatchSet()
 	evalByType := make(map[string]*structs.Evaluation, 2)
 	for _, id := range ids {
-		eval, err := state.EvalByID(id)
+		eval, err := state.EvalByID(ws, id)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -1513,6 +1552,7 @@ func TestClientEndpoint_CreateNodeEvals(t *testing.T) {
 }
 
 func TestClientEndpoint_Evaluate(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1557,7 +1597,8 @@ func TestClientEndpoint_Evaluate(t *testing.T) {
 	}
 
 	// Lookup the evaluation
-	eval, err := state.EvalByID(ids[0])
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, ids[0])
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1592,6 +1633,7 @@ func TestClientEndpoint_Evaluate(t *testing.T) {
 }
 
 func TestClientEndpoint_ListNodes(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1652,6 +1694,7 @@ func TestClientEndpoint_ListNodes(t *testing.T) {
 }
 
 func TestClientEndpoint_ListNodes_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -1764,6 +1807,7 @@ func TestClientEndpoint_ListNodes_Blocking(t *testing.T) {
 }
 
 func TestBatchFuture(t *testing.T) {
+	t.Parallel()
 	bf := NewBatchFuture()
 
 	// Async respond to the future
@@ -1791,6 +1835,7 @@ func TestBatchFuture(t *testing.T) {
 }
 
 func TestClientEndpoint_DeriveVaultToken_Bad(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -1871,6 +1916,7 @@ func TestClientEndpoint_DeriveVaultToken_Bad(t *testing.T) {
 }
 
 func TestClientEndpoint_DeriveVaultToken(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -1934,7 +1980,8 @@ func TestClientEndpoint_DeriveVaultToken(t *testing.T) {
 	}
 
 	// Check the state store and ensure that we created a VaultAccessor
-	va, err := state.VaultAccessor(accessor)
+	ws := memdb.NewWatchSet()
+	va, err := state.VaultAccessor(ws, accessor)
 	if err != nil {
 		t.Fatalf("bad: %v", err)
 	}
@@ -1961,6 +2008,7 @@ func TestClientEndpoint_DeriveVaultToken(t *testing.T) {
 }
 
 func TestClientEndpoint_DeriveVaultToken_VaultError(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -2011,7 +2059,7 @@ func TestClientEndpoint_DeriveVaultToken_VaultError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bad: %v", err)
 	}
-	if resp.Error == nil || !resp.Error.Recoverable {
+	if resp.Error == nil || !resp.Error.IsRecoverable() {
 		t.Fatalf("bad: %+v", resp.Error)
 	}
 }

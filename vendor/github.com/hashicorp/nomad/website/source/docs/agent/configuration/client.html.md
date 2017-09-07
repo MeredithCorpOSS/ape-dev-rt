@@ -46,17 +46,25 @@ client {
   job is allowed to wait to exit. Individual jobs may customize their own kill
   timeout, but it may not exceed this value.
 
-- `meta` <code>([Meta][]: nil)</code> - Specifies a key-value map that annotates
+- `meta` `(map[string]string: nil)` - Specifies a key-value map that annotates
   with user-defined metadata.
 
 - `network_interface` `(string: "lo | lo0")` - Specifies the name of the
   interface to force network fingerprinting on. This defaults to the loopback
-  interface.
+  interface. All addresses on the interface are fingerprinted except the ones
+  which are scoped local for IPv6. When allocating ports for tasks, the
+  scheduler will choose from the IPs of the fingerprinted interface.
 
 - `network_speed` `(int: 0)` - Specifies an override for the network link speed.
   This value, if set, overrides any detected or defaulted link speed. Most
   clients can determine their speed automatically, and thus in most cases this
   should be left unset.
+
+- `cpu_total_compute` `(int: 0)` - Specifies an override for the total CPU
+  compute. This value should be set to `# Cores * Core MHz`. For example, a
+  quad-core running at 2 GHz would have a total compute of 8000 (4 * 2000). Most
+  clients can determine their total CPU compute automatically, and thus in most
+  cases this should be left unset.
 
 - `node_class` `(string: "")` - Specifies an arbitrary string used to logically
   group client nodes by user-defined class. This can be used during job
@@ -82,6 +90,29 @@ client {
  to store client state. By default, this is - the top-level
  [data_dir](/docs/agent/configuration/index.html#data_dir) suffixed with
  "client", like `"/opt/nomad/client"`. This must be an absolute path.
+
+- `gc_interval` `(string: "1m")` - Specifies the interval at which Nomad
+  attempts to garbage collect terminal allocation directories.
+
+- `gc_disk_usage_threshold` `(float: 80)` - Specifies the disk usage percent which
+  Nomad tries to maintain by garbage collecting terminal allocations.
+
+- `gc_inode_usage_threshold` `(float: 70)` - Specifies the inode usage percent
+  which Nomad tries to maintain by garbage collecting terminal allocations.
+
+- `gc_max_allocs` `(int: 50)` - Specifies the maximum number of allocations
+  which a client will track before triggering a garbage collection of terminal
+  allocations. This will *not* limit the number of allocations a node can run at
+  a time, however after `gc_max_allocs` every new allocation will cause terminal
+  allocations to be GC'd.
+
+- `gc_parallel_destroys` `(int: 2)` - Specifies the maximum number of
+  parallel destroys allowed by the garbage collector. This value should be
+  relatively low to avoid high resource usage during garbage collections.
+
+- `no_host_uuid` `(bool: true)` - By default a random node UUID will be
+  generated, but setting this to `false` will use the system's UUID. Before
+  Nomad 0.6 the default was to use the system UUID.
 
 ### `chroot_env` Parameters
 
@@ -165,7 +196,6 @@ see the [drivers documentation](/docs/drivers/index.html).
     ```text
     CONSUL_TOKEN
     VAULT_TOKEN
-    ATLAS_TOKEN
     AWS_ACCESS_KEY_ID
     AWS_SECRET_ACCESS_KEY
     AWS_SESSION_TOKEN
@@ -238,6 +268,19 @@ see the [drivers documentation](/docs/drivers/index.html).
     }
     ```
 
+- `"fingerprint.network.disallow_link_local"` `(string: "false")` - Specifies
+  whether the network fingerprinter should ignore link-local addresses in the
+  case that no globally routable address is found. The fingerprinter will always
+  prefer globally routable addresses.
+
+    ```hcl
+    client {
+      options = {
+        "fingerprint.network.disallow_link_local" = "true"
+      }
+    }
+    ```
+
 ### `reserved` Parameters
 
 - `cpu` `(int: 0)` - Specifies the amount of CPU to reserve, in MHz.
@@ -299,5 +342,3 @@ client {
   }
 }
 ```
-
-[meta]: /docs/job-specification/meta.html "Nomad meta Job Specification"

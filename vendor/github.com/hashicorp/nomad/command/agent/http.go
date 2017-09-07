@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -30,24 +29,17 @@ const (
 	scadaHTTPAddr = "SCADA"
 )
 
-var (
-	// jsonHandle and jsonHandlePretty are the codec handles to JSON encode
-	// structs. The pretty handle will add indents for easier human consumption.
-	jsonHandle       = &codec.JsonHandle{}
-	jsonHandlePretty = &codec.JsonHandle{Indent: 4}
-)
-
 // HTTPServer is used to wrap an Agent and expose it over an HTTP interface
 type HTTPServer struct {
 	agent    *Agent
 	mux      *http.ServeMux
 	listener net.Listener
 	logger   *log.Logger
-	addr     string
+	Addr     string
 }
 
 // NewHTTPServer starts new HTTP server over the agent
-func NewHTTPServer(agent *Agent, config *Config, logOutput io.Writer) (*HTTPServer, error) {
+func NewHTTPServer(agent *Agent, config *Config) (*HTTPServer, error) {
 	// Start the listener
 	lnAddr, err := net.ResolveTCPAddr("tcp", config.normalizedAddrs.HTTP)
 	if err != nil {
@@ -61,7 +53,7 @@ func NewHTTPServer(agent *Agent, config *Config, logOutput io.Writer) (*HTTPServ
 	// If TLS is enabled, wrap the listener with a TLS listener
 	if config.TLSConfig.EnableHTTP {
 		tlsConf := &tlsutil.Config{
-			VerifyIncoming:       false,
+			VerifyIncoming:       config.TLSConfig.VerifyHTTPSClient,
 			VerifyOutgoing:       true,
 			VerifyServerHostname: config.TLSConfig.VerifyServerHostname,
 			CAFile:               config.TLSConfig.CAFile,
@@ -84,7 +76,7 @@ func NewHTTPServer(agent *Agent, config *Config, logOutput io.Writer) (*HTTPServ
 		mux:      mux,
 		listener: ln,
 		logger:   agent.logger,
-		addr:     ln.Addr().String(),
+		Addr:     ln.Addr().String(),
 	}
 	srv.registerHandlers(config.EnableDebug)
 
@@ -105,7 +97,7 @@ func newScadaHttp(agent *Agent, list net.Listener) *HTTPServer {
 		mux:      mux,
 		listener: list,
 		logger:   agent.logger,
-		addr:     scadaHTTPAddr,
+		Addr:     scadaHTTPAddr,
 	}
 	srv.registerHandlers(false) // Never allow debug for SCADA
 
@@ -153,9 +145,21 @@ func (s *HTTPServer) registerHandlers(enableDebug bool) {
 	s.mux.HandleFunc("/v1/evaluations", s.wrap(s.EvalsRequest))
 	s.mux.HandleFunc("/v1/evaluation/", s.wrap(s.EvalSpecificRequest))
 
+	s.mux.HandleFunc("/v1/deployments", s.wrap(s.DeploymentsRequest))
+	s.mux.HandleFunc("/v1/deployment/", s.wrap(s.DeploymentSpecificRequest))
+
+	s.mux.HandleFunc("/v1/acl/policies", s.wrap(s.ACLPoliciesRequest))
+	s.mux.HandleFunc("/v1/acl/policy/", s.wrap(s.ACLPolicySpecificRequest))
+
+	s.mux.HandleFunc("/v1/acl/bootstrap", s.wrap(s.ACLTokenBootstrap))
+	s.mux.HandleFunc("/v1/acl/tokens", s.wrap(s.ACLTokensRequest))
+	s.mux.HandleFunc("/v1/acl/token", s.wrap(s.ACLTokenSpecificRequest))
+	s.mux.HandleFunc("/v1/acl/token/", s.wrap(s.ACLTokenSpecificRequest))
+
 	s.mux.HandleFunc("/v1/client/fs/", s.wrap(s.FsRequest))
 	s.mux.HandleFunc("/v1/client/stats", s.wrap(s.ClientStatsRequest))
 	s.mux.HandleFunc("/v1/client/allocation/", s.wrap(s.ClientAllocRequest))
+	s.mux.HandleFunc("/v1/client/gc", s.wrap(s.ClientGCRequest))
 
 	s.mux.HandleFunc("/v1/agent/self", s.wrap(s.AgentSelfRequest))
 	s.mux.HandleFunc("/v1/agent/join", s.wrap(s.AgentJoinRequest))
@@ -164,10 +168,16 @@ func (s *HTTPServer) registerHandlers(enableDebug bool) {
 	s.mux.HandleFunc("/v1/agent/servers", s.wrap(s.AgentServersRequest))
 	s.mux.HandleFunc("/v1/agent/keyring/", s.wrap(s.KeyringOperationRequest))
 
+	s.mux.HandleFunc("/v1/validate/job", s.wrap(s.ValidateJobRequest))
+
 	s.mux.HandleFunc("/v1/regions", s.wrap(s.RegionListRequest))
 
 	s.mux.HandleFunc("/v1/status/leader", s.wrap(s.StatusLeaderRequest))
 	s.mux.HandleFunc("/v1/status/peers", s.wrap(s.StatusPeersRequest))
+
+	s.mux.HandleFunc("/v1/search", s.wrap(s.SearchRequest))
+
+	s.mux.HandleFunc("/v1/operator/", s.wrap(s.OperatorRequest))
 
 	s.mux.HandleFunc("/v1/system/gc", s.wrap(s.GarbageCollectRequest))
 	s.mux.HandleFunc("/v1/system/reconcile/summaries", s.wrap(s.ReconcileJobSummaries))
@@ -177,6 +187,7 @@ func (s *HTTPServer) registerHandlers(enableDebug bool) {
 		s.mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 		s.mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		s.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		s.mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
 }
 
@@ -239,13 +250,13 @@ func (s *HTTPServer) wrap(handler func(resp http.ResponseWriter, req *http.Reque
 		if obj != nil {
 			var buf bytes.Buffer
 			if prettyPrint {
-				enc := codec.NewEncoder(&buf, jsonHandlePretty)
+				enc := codec.NewEncoder(&buf, structs.JsonHandlePretty)
 				err = enc.Encode(obj)
 				if err == nil {
 					buf.Write([]byte("\n"))
 				}
 			} else {
-				enc := codec.NewEncoder(&buf, jsonHandle)
+				enc := codec.NewEncoder(&buf, structs.JsonHandle)
 				err = enc.Encode(obj)
 			}
 			if err != nil {
@@ -348,9 +359,24 @@ func (s *HTTPServer) parseRegion(req *http.Request, r *string) {
 	}
 }
 
+// parseToken is used to parse the X-Nomad-Token param
+func (s *HTTPServer) parseToken(req *http.Request, token *string) {
+	if other := req.Header.Get("X-Nomad-Token"); other != "" {
+		*token = other
+		return
+	}
+}
+
+// parseWrite is a convenience method for endpoints that call write methods
+func (s *HTTPServer) parseWrite(req *http.Request, b *structs.WriteRequest) {
+	s.parseRegion(req, &b.Region)
+	s.parseToken(req, &b.SecretID)
+}
+
 // parse is a convenience method for endpoints that need to parse multiple flags
 func (s *HTTPServer) parse(resp http.ResponseWriter, req *http.Request, r *string, b *structs.QueryOptions) bool {
 	s.parseRegion(req, r)
+	s.parseToken(req, &b.SecretID)
 	parseConsistency(req, b)
 	parsePrefix(req, b)
 	return parseWait(resp, req, b)

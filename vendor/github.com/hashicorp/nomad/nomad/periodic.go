@@ -2,6 +2,7 @@ package nomad
 
 import (
 	"container/heap"
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
 
@@ -18,14 +20,12 @@ import (
 type PeriodicDispatch struct {
 	dispatcher JobEvalDispatcher
 	enabled    bool
-	running    bool
 
 	tracked map[string]*structs.Job
 	heap    *periodicHeap
 
 	updateCh chan struct{}
-	stopCh   chan struct{}
-	waitCh   chan struct{}
+	stopFn   context.CancelFunc
 	logger   *log.Logger
 	l        sync.RWMutex
 }
@@ -45,6 +45,7 @@ type JobEvalDispatcher interface {
 // evaluation and the job to the raft log. It returns the eval.
 func (s *Server) DispatchJob(job *structs.Job) (*structs.Evaluation, error) {
 	// Commit this update via Raft
+	job.SetSubmitTime()
 	req := structs.JobRegisterRequest{Job: job}
 	_, index, err := s.raftApply(structs.JobRegisterRequestType, req)
 	if err != nil {
@@ -86,8 +87,9 @@ func (s *Server) RunningChildren(job *structs.Job) (bool, error) {
 		return false, err
 	}
 
+	ws := memdb.NewWatchSet()
 	prefix := fmt.Sprintf("%s%s", job.ID, structs.PeriodicLaunchSuffix)
-	iter, err := state.JobsByIDPrefix(prefix)
+	iter, err := state.JobsByIDPrefix(ws, prefix)
 	if err != nil {
 		return false, err
 	}
@@ -102,7 +104,7 @@ func (s *Server) RunningChildren(job *structs.Job) (bool, error) {
 		}
 
 		// Get the childs evaluations.
-		evals, err := state.EvalsByJob(child.ID)
+		evals, err := state.EvalsByJob(ws, child.ID)
 		if err != nil {
 			return false, err
 		}
@@ -113,7 +115,7 @@ func (s *Server) RunningChildren(job *structs.Job) (bool, error) {
 				return true, nil
 			}
 
-			allocs, err := state.AllocsByEval(eval.ID)
+			allocs, err := state.AllocsByEval(ws, eval.ID)
 			if err != nil {
 				return false, err
 			}
@@ -138,8 +140,6 @@ func NewPeriodicDispatch(logger *log.Logger, dispatcher JobEvalDispatcher) *Peri
 		tracked:    make(map[string]*structs.Job),
 		heap:       NewPeriodicHeap(),
 		updateCh:   make(chan struct{}, 1),
-		stopCh:     make(chan struct{}),
-		waitCh:     make(chan struct{}),
 		logger:     logger,
 	}
 }
@@ -149,24 +149,21 @@ func NewPeriodicDispatch(logger *log.Logger, dispatcher JobEvalDispatcher) *Peri
 // will stop any launched go routine and flush the dispatcher.
 func (p *PeriodicDispatch) SetEnabled(enabled bool) {
 	p.l.Lock()
+	defer p.l.Unlock()
+	wasRunning := p.enabled
 	p.enabled = enabled
-	p.l.Unlock()
-	if !enabled {
-		if p.running {
-			close(p.stopCh)
-			<-p.waitCh
-			p.running = false
-		}
-		p.Flush()
-	}
-}
 
-// Start begins the goroutine that creates derived jobs and evals.
-func (p *PeriodicDispatch) Start() {
-	p.l.Lock()
-	p.running = true
-	p.l.Unlock()
-	go p.run()
+	// If we are transistioning from enabled to disabled, stop the daemon and
+	// flush.
+	if !enabled && wasRunning {
+		p.stopFn()
+		p.flush()
+	} else if enabled && !wasRunning {
+		// If we are transitioning from disabled to enabled, run the daemon.
+		ctx, cancel := context.WithCancel(context.Background())
+		p.stopFn = cancel
+		go p.run(ctx)
+	}
 }
 
 // Tracked returns the set of tracked job IDs.
@@ -205,9 +202,15 @@ func (p *PeriodicDispatch) Add(job *structs.Job) error {
 		return nil
 	}
 
+	// Check if the job is also a parameterized job. If it is, then we do not want to
+	// treat it as a periodic job but only its dispatched children.
+	if job.IsParameterized() {
+		return nil
+	}
+
 	// Add or update the job.
 	p.tracked[job.ID] = job
-	next := job.Periodic.Next(time.Now().UTC())
+	next := job.Periodic.Next(time.Now().In(job.Periodic.GetLocation()))
 	if tracked {
 		if err := p.heap.Update(job, next); err != nil {
 			return fmt.Errorf("failed to update job %v launch time: %v", job.ID, err)
@@ -221,11 +224,9 @@ func (p *PeriodicDispatch) Add(job *structs.Job) error {
 	}
 
 	// Signal an update.
-	if p.running {
-		select {
-		case p.updateCh <- struct{}{}:
-		default:
-		}
+	select {
+	case p.updateCh <- struct{}{}:
+	default:
 	}
 
 	return nil
@@ -258,11 +259,9 @@ func (p *PeriodicDispatch) removeLocked(jobID string) error {
 	}
 
 	// Signal an update.
-	if p.running {
-		select {
-		case p.updateCh <- struct{}{}:
-		default:
-		}
+	select {
+	case p.updateCh <- struct{}{}:
+	default:
 	}
 
 	p.logger.Printf("[DEBUG] nomad.periodic: deregistered periodic job %q", jobID)
@@ -287,33 +286,32 @@ func (p *PeriodicDispatch) ForceRun(jobID string) (*structs.Evaluation, error) {
 	}
 
 	p.l.Unlock()
-	return p.createEval(job, time.Now().UTC())
+	return p.createEval(job, time.Now().In(job.Periodic.GetLocation()))
 }
 
 // shouldRun returns whether the long lived run function should run.
 func (p *PeriodicDispatch) shouldRun() bool {
 	p.l.RLock()
 	defer p.l.RUnlock()
-	return p.enabled && p.running
+	return p.enabled
 }
 
 // run is a long-lived function that waits till a job's periodic spec is met and
 // then creates an evaluation to run the job.
-func (p *PeriodicDispatch) run() {
-	defer close(p.waitCh)
+func (p *PeriodicDispatch) run(ctx context.Context) {
 	var launchCh <-chan time.Time
 	for p.shouldRun() {
 		job, launch := p.nextLaunch()
 		if launch.IsZero() {
 			launchCh = nil
 		} else {
-			launchDur := launch.Sub(time.Now().UTC())
+			launchDur := launch.Sub(time.Now().In(job.Periodic.GetLocation()))
 			launchCh = time.After(launchDur)
 			p.logger.Printf("[DEBUG] nomad.periodic: launching job %q in %s", job.ID, launchDur)
 		}
 
 		select {
-		case <-p.stopCh:
+		case <-ctx.Done():
 			return
 		case <-p.updateCh:
 			continue
@@ -444,15 +442,12 @@ func (p *PeriodicDispatch) LaunchTime(jobID string) (time.Time, error) {
 	return time.Unix(int64(launch), 0), nil
 }
 
-// Flush clears the state of the PeriodicDispatcher
-func (p *PeriodicDispatch) Flush() {
-	p.l.Lock()
-	defer p.l.Unlock()
-	p.stopCh = make(chan struct{})
+// flush clears the state of the PeriodicDispatcher
+func (p *PeriodicDispatch) flush() {
 	p.updateCh = make(chan struct{}, 1)
-	p.waitCh = make(chan struct{})
 	p.tracked = make(map[string]*structs.Job)
 	p.heap = NewPeriodicHeap()
+	p.stopFn = nil
 }
 
 // periodicHeap wraps a heap and gives operations other than Push/Pop.

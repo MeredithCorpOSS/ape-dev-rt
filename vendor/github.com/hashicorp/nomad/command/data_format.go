@@ -2,10 +2,18 @@ package command
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"text/template"
+
+	"github.com/ugorji/go/codec"
+)
+
+var (
+	jsonHandlePretty = &codec.JsonHandle{
+		HTMLCharsAsIs: true,
+		Indent:        4,
+	}
 )
 
 //DataFormatter is a transformer of the data.
@@ -33,12 +41,14 @@ type JSONFormat struct {
 
 // TransformData returns JSON format string data.
 func (p *JSONFormat) TransformData(data interface{}) (string, error) {
-	out, err := json.MarshalIndent(&data, "", "    ")
+	var buf bytes.Buffer
+	enc := codec.NewEncoder(&buf, jsonHandlePretty)
+	err := enc.Encode(data)
 	if err != nil {
 		return "", err
 	}
 
-	return string(out), nil
+	return buf.String(), nil
 }
 
 type TemplateFormat struct {
@@ -62,4 +72,29 @@ func (p *TemplateFormat) TransformData(data interface{}) (string, error) {
 		return "", err
 	}
 	return fmt.Sprint(out), nil
+}
+
+func Format(json bool, template string, data interface{}) (string, error) {
+	var format string
+	if json && len(template) > 0 {
+		return "", fmt.Errorf("Both json and template formatting are not allowed")
+	} else if json {
+		format = "json"
+	} else if len(template) > 0 {
+		format = "template"
+	} else {
+		return "", fmt.Errorf("no formatting option given")
+	}
+
+	f, err := DataFormat(format, template)
+	if err != nil {
+		return "", err
+	}
+
+	out, err := f.TransformData(data)
+	if err != nil {
+		return "", fmt.Errorf("Error formatting the data: %s", err)
+	}
+
+	return out, nil
 }

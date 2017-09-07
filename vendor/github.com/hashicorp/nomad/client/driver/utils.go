@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,19 +12,42 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/go-plugin"
+	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/config"
+	"github.com/hashicorp/nomad/client/driver/env"
 	"github.com/hashicorp/nomad/client/driver/executor"
-	"github.com/hashicorp/nomad/client/driver/logging"
-	cstructs "github.com/hashicorp/nomad/client/driver/structs"
+	dstructs "github.com/hashicorp/nomad/client/driver/structs"
+	cstructs "github.com/hashicorp/nomad/client/structs"
+	"github.com/hashicorp/nomad/helper/discover"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
 
+// cgroupsMounted returns true if the cgroups are mounted on a system otherwise
+// returns false
+func cgroupsMounted(node *structs.Node) bool {
+	_, ok := node.Attributes["unique.cgroup.mountpoint"]
+	return ok
+}
+
 // createExecutor launches an executor plugin and returns an instance of the
 // Executor interface
-func createExecutor(config *plugin.ClientConfig, w io.Writer,
-	clientConfig *config.Config) (executor.Executor, *plugin.Client, error) {
+func createExecutor(w io.Writer, clientConfig *config.Config,
+	executorConfig *dstructs.ExecutorConfig) (executor.Executor, *plugin.Client, error) {
+
+	c, err := json.Marshal(executorConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create executor config: %v", err)
+	}
+	bin, err := discover.NomadExecutable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to find the nomad binary: %v", err)
+	}
+
+	config := &plugin.ClientConfig{
+		Cmd: exec.Command(bin, "executor", string(c)),
+	}
 	config.HandshakeConfig = HandshakeConfig
-	config.Plugins = GetPluginMap(w)
+	config.Plugins = GetPluginMap(w, clientConfig.LogLevel)
 	config.MaxPort = clientConfig.ClientMaxPort
 	config.MinPort = clientConfig.ClientMinPort
 
@@ -47,39 +71,33 @@ func createExecutor(config *plugin.ClientConfig, w io.Writer,
 	return executorPlugin, executorClient, nil
 }
 
-func createLogCollector(config *plugin.ClientConfig, w io.Writer,
-	clientConfig *config.Config) (logging.LogCollector, *plugin.Client, error) {
+func createExecutorWithConfig(config *plugin.ClientConfig, w io.Writer) (executor.Executor, *plugin.Client, error) {
 	config.HandshakeConfig = HandshakeConfig
-	config.Plugins = GetPluginMap(w)
-	config.MaxPort = clientConfig.ClientMaxPort
-	config.MinPort = clientConfig.ClientMinPort
-	if config.Cmd != nil {
-		isolateCommand(config.Cmd)
-	}
 
-	syslogClient := plugin.NewClient(config)
-	rpcCLient, err := syslogClient.Client()
+	// Setting this to DEBUG since the log level at the executor server process
+	// is already set, and this effects only the executor client.
+	config.Plugins = GetPluginMap(w, "DEBUG")
+
+	executorClient := plugin.NewClient(config)
+	rpcClient, err := executorClient.Client()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating rpc client for syslog plugin: %v", err)
+		return nil, nil, fmt.Errorf("error creating rpc client for executor plugin: %v", err)
 	}
 
-	raw, err := rpcCLient.Dispense("syslogcollector")
+	raw, err := rpcClient.Dispense("executor")
 	if err != nil {
-		return nil, nil, fmt.Errorf("unable to dispense the syslog plugin: %v", err)
+		return nil, nil, fmt.Errorf("unable to dispense the executor plugin: %v", err)
 	}
-	logCollector := raw.(logging.LogCollector)
-	return logCollector, syslogClient, nil
-}
-
-func consulContext(clientConfig *config.Config, containerID string) *executor.ConsulContext {
-	return &executor.ConsulContext{
-		ConsulConfig:   clientConfig.ConsulConfig,
-		ContainerID:    containerID,
-		DockerEndpoint: clientConfig.Read("docker.endpoint"),
-		TLSCa:          clientConfig.Read("docker.tls.ca"),
-		TLSCert:        clientConfig.Read("docker.tls.cert"),
-		TLSKey:         clientConfig.Read("docker.tls.key"),
+	executorPlugin, ok := raw.(*ExecutorRPC)
+	if !ok {
+		return nil, nil, fmt.Errorf("unexpected executor rpc type: %T", raw)
 	}
+	// 0.6 Upgrade path: Deregister services from the executor as the Nomad
+	// client agent now handles all Consul interactions. Ignore errors as
+	// this shouldn't cause the alloc to fail and there's nothing useful to
+	// do with them.
+	executorPlugin.DeregisterServices()
+	return executorPlugin, executorClient, nil
 }
 
 // killProcess kills a process with the given pid
@@ -156,10 +174,33 @@ func GetAbsolutePath(bin string) (string, error) {
 }
 
 // getExecutorUser returns the user of the task, defaulting to
-// cstructs.DefaultUnprivilegedUser if none was given.
+// dstructs.DefaultUnprivilegedUser if none was given.
 func getExecutorUser(task *structs.Task) string {
 	if task.User == "" {
-		return cstructs.DefaultUnpriviledgedUser
+		return dstructs.DefaultUnpriviledgedUser
 	}
 	return task.User
+}
+
+// SetEnvvars sets path and host env vars depending on the FS isolation used.
+func SetEnvvars(envBuilder *env.Builder, fsi cstructs.FSIsolation, taskDir *allocdir.TaskDir, conf *config.Config) {
+	// Set driver-specific environment variables
+	switch fsi {
+	case cstructs.FSIsolationNone:
+		// Use host paths
+		envBuilder.SetAllocDir(taskDir.SharedAllocDir)
+		envBuilder.SetTaskLocalDir(taskDir.LocalDir)
+		envBuilder.SetSecretsDir(taskDir.SecretsDir)
+	default:
+		// filesystem isolation; use container paths
+		envBuilder.SetAllocDir(allocdir.SharedAllocContainerPath)
+		envBuilder.SetTaskLocalDir(allocdir.TaskLocalContainerPath)
+		envBuilder.SetSecretsDir(allocdir.TaskSecretsContainerPath)
+	}
+
+	// Set the host environment variables for non-image based drivers
+	if fsi != cstructs.FSIsolationImage {
+		filter := strings.Split(conf.ReadDefault("env.blacklist", config.DefaultEnvBlacklist), ",")
+		envBuilder.SetHostEnvvars(filter)
+	}
 }

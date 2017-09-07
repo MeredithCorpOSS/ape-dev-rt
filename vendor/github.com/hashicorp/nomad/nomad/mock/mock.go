@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -146,6 +147,7 @@ func Job() *structs.Job {
 			"owner": "armon",
 		},
 		Status:         structs.JobStatusPending,
+		Version:        0,
 		CreateIndex:    42,
 		ModifyIndex:    99,
 		JobModifyIndex: 99,
@@ -211,6 +213,7 @@ func SystemJob() *structs.Job {
 		CreateIndex: 42,
 		ModifyIndex: 99,
 	}
+	job.Canonicalize()
 	return job
 }
 
@@ -222,6 +225,7 @@ func PeriodicJob() *structs.Job {
 		SpecType: structs.PeriodicSpecCron,
 		Spec:     "*/30 * * * *",
 	}
+	job.Status = structs.JobStatusRunning
 	return job
 }
 
@@ -305,6 +309,25 @@ func VaultAccessor() *structs.VaultAccessor {
 	}
 }
 
+func Deployment() *structs.Deployment {
+	return &structs.Deployment{
+		ID:             structs.GenerateUUID(),
+		JobID:          structs.GenerateUUID(),
+		JobVersion:     2,
+		JobModifyIndex: 20,
+		JobCreateIndex: 18,
+		TaskGroups: map[string]*structs.DeploymentState{
+			"web": &structs.DeploymentState{
+				DesiredTotal: 10,
+			},
+		},
+		Status:            structs.DeploymentStatusRunning,
+		StatusDescription: structs.DeploymentStatusDescriptionRunning,
+		ModifyIndex:       23,
+		CreateIndex:       21,
+	}
+}
+
 func Plan() *structs.Plan {
 	return &structs.Plan{
 		Priority: 50,
@@ -313,4 +336,55 @@ func Plan() *structs.Plan {
 
 func PlanResult() *structs.PlanResult {
 	return &structs.PlanResult{}
+}
+
+func ACLPolicy() *structs.ACLPolicy {
+	ap := &structs.ACLPolicy{
+		Name:        fmt.Sprintf("policy-%s", structs.GenerateUUID()),
+		Description: "Super cool policy!",
+		Rules: `
+		namespace "default" {
+			policy = "write"
+		}
+		node {
+			policy = "read"
+		}
+		agent {
+			policy = "read"
+		}
+		`,
+		CreateIndex: 10,
+		ModifyIndex: 20,
+	}
+	ap.SetHash()
+	return ap
+}
+
+func ACLToken() *structs.ACLToken {
+	tk := &structs.ACLToken{
+		AccessorID:  structs.GenerateUUID(),
+		SecretID:    structs.GenerateUUID(),
+		Name:        "my cool token " + structs.GenerateUUID(),
+		Type:        "client",
+		Policies:    []string{"foo", "bar"},
+		Global:      false,
+		CreateTime:  time.Now().UTC(),
+		CreateIndex: 10,
+		ModifyIndex: 20,
+	}
+	tk.SetHash()
+	return tk
+}
+
+func ACLManagementToken() *structs.ACLToken {
+	return &structs.ACLToken{
+		AccessorID:  structs.GenerateUUID(),
+		SecretID:    structs.GenerateUUID(),
+		Name:        "management " + structs.GenerateUUID(),
+		Type:        "management",
+		Global:      true,
+		CreateTime:  time.Now().UTC(),
+		CreateIndex: 10,
+		ModifyIndex: 20,
+	}
 }

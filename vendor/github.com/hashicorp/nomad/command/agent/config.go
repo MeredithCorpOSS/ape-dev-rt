@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,9 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-sockaddr/template"
+
 	client "github.com/hashicorp/nomad/client/config"
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/nomad"
 	"github.com/hashicorp/nomad/nomad/structs/config"
+	"github.com/hashicorp/nomad/version"
 )
 
 // Config is the configuration for the Nomad agent.
@@ -61,6 +66,9 @@ type Config struct {
 
 	// Server has our server related settings
 	Server *ServerConfig `mapstructure:"server"`
+
+	// ACL has our acl related settings
+	ACL *ACLConfig `mapstructure:"acl"`
 
 	// Telemetry is used to configure sending telemetry
 	Telemetry *Telemetry `mapstructure:"telemetry"`
@@ -110,9 +118,7 @@ type Config struct {
 	DevMode bool `mapstructure:"-"`
 
 	// Version information is set at compilation time
-	Revision          string
-	Version           string
-	VersionPrerelease string
+	Version *version.VersionInfo
 
 	// List of config files that have been loaded (in order)
 	Files []string `mapstructure:"-"`
@@ -181,6 +187,9 @@ type ClientConfig struct {
 	// speed.
 	NetworkSpeed int `mapstructure:"network_speed"`
 
+	// CpuCompute is used to override any detected or default total CPU compute.
+	CpuCompute int `mapstructure:"cpu_total_compute"`
+
 	// MaxKillTimeout allows capping the user-specifiable KillTimeout.
 	MaxKillTimeout string `mapstructure:"max_kill_timeout"`
 
@@ -196,12 +205,71 @@ type ClientConfig struct {
 	// be used to target a certain utilization or to prevent Nomad from using a
 	// particular set of ports.
 	Reserved *Resources `mapstructure:"reserved"`
+
+	// GCInterval is the time interval at which the client triggers garbage
+	// collection
+	GCInterval time.Duration `mapstructure:"gc_interval"`
+
+	// GCParallelDestroys is the number of parallel destroys the garbage
+	// collector will allow.
+	GCParallelDestroys int `mapstructure:"gc_parallel_destroys"`
+
+	// GCDiskUsageThreshold is the disk usage threshold given as a percent
+	// beyond which the Nomad client triggers GC of terminal allocations
+	GCDiskUsageThreshold float64 `mapstructure:"gc_disk_usage_threshold"`
+
+	// GCInodeUsageThreshold is the inode usage threshold beyond which the Nomad
+	// client triggers GC of the terminal allocations
+	GCInodeUsageThreshold float64 `mapstructure:"gc_inode_usage_threshold"`
+
+	// GCMaxAllocs is the maximum number of allocations a node can have
+	// before garbage collection is triggered.
+	GCMaxAllocs int `mapstructure:"gc_max_allocs"`
+
+	// NoHostUUID disables using the host's UUID and will force generation of a
+	// random UUID.
+	NoHostUUID *bool `mapstructure:"no_host_uuid"`
+
+	// DisableTaggedMetrics disables a new version of generating metrics which
+	// uses tags
+	DisableTaggedMetrics bool `mapstructure:"disable_tagged_metrics"`
+
+	// BackwardsCompatibleMetrics allows for generating metrics in a simple
+	// key/value structure as done in older versions of Nomad
+	BackwardsCompatibleMetrics bool `mapstructure:"backwards_compatible_metrics"`
+}
+
+// ACLConfig is configuration specific to the ACL system
+type ACLConfig struct {
+	// Enabled controls if we are enforce and manage ACLs
+	Enabled bool `mapstructure:"enabled"`
+
+	// TokenTTL controls how long we cache ACL tokens. This controls
+	// how stale they can be when we are enforcing policies. Defaults
+	// to "30s". Reducing this impacts performance by forcing more
+	// frequent resolution.
+	TokenTTL time.Duration `mapstructure:"token_ttl"`
+
+	// PolicyTTL controls how long we cache ACL policies. This controls
+	// how stale they can be when we are enforcing policies. Defaults
+	// to "30s". Reducing this impacts performance by forcing more
+	// frequent resolution.
+	PolicyTTL time.Duration `mapstructure:"policy_ttl"`
+
+	// ReplicationToken is used by servers to replicate tokens and policies
+	// from the authoritative region. This must be a valid management token
+	// within the authoritative region.
+	ReplicationToken string `mapstructure:"replication_token"`
 }
 
 // ServerConfig is configuration specific to the server mode
 type ServerConfig struct {
 	// Enabled controls if we are a server
 	Enabled bool `mapstructure:"enabled"`
+
+	// AuthoritativeRegion is used to control which region is treated as
+	// the source of truth for global tokens and ACL policies.
+	AuthoritativeRegion string `mapstructure:"authoritative_region"`
 
 	// BootstrapExpect tries to automatically bootstrap the Consul cluster,
 	// by withholding peers until enough servers join.
@@ -225,11 +293,37 @@ type ServerConfig struct {
 	EnabledSchedulers []string `mapstructure:"enabled_schedulers"`
 
 	// NodeGCThreshold controls how "old" a node must be to be collected by GC.
+	// Age is not the only requirement for a node to be GCed but the threshold
+	// can be used to filter by age.
 	NodeGCThreshold string `mapstructure:"node_gc_threshold"`
+
+	// JobGCThreshold controls how "old" a job must be to be collected by GC.
+	// Age is not the only requirement for a Job to be GCed but the threshold
+	// can be used to filter by age.
+	JobGCThreshold string `mapstructure:"job_gc_threshold"`
+
+	// EvalGCThreshold controls how "old" an eval must be to be collected by GC.
+	// Age is not the only requirement for a eval to be GCed but the threshold
+	// can be used to filter by age.
+	EvalGCThreshold string `mapstructure:"eval_gc_threshold"`
+
+	// DeploymentGCThreshold controls how "old" a deployment must be to be
+	// collected by GC.  Age is not the only requirement for a deployment to be
+	// GCed but the threshold can be used to filter by age.
+	DeploymentGCThreshold string `mapstructure:"deployment_gc_threshold"`
 
 	// HeartbeatGrace is the grace period beyond the TTL to account for network,
 	// processing delays and clock skew before marking a node as "down".
-	HeartbeatGrace string `mapstructure:"heartbeat_grace"`
+	HeartbeatGrace time.Duration `mapstructure:"heartbeat_grace"`
+
+	// MinHeartbeatTTL is the minimum time between heartbeats. This is used as
+	// a floor to prevent excessive updates.
+	MinHeartbeatTTL time.Duration `mapstructure:"min_heartbeat_ttl"`
+
+	// MaxHeartbeatsPerSecond is the maximum target rate of heartbeats
+	// being processed per second. This allows the TTL to be increased
+	// to meet the target rate.
+	MaxHeartbeatsPerSecond float64 `mapstructure:"max_heartbeats_per_second"`
 
 	// StartJoin is a list of addresses to attempt to join when the
 	// agent starts. If Serf is unable to communicate with any of these
@@ -271,6 +365,7 @@ type Telemetry struct {
 	StatsdAddr               string        `mapstructure:"statsd_address"`
 	DataDogAddr              string        `mapstructure:"datadog_address"`
 	DisableHostname          bool          `mapstructure:"disable_hostname"`
+	UseNodeName              bool          `mapstructure:"use_node_name"`
 	CollectionInterval       string        `mapstructure:"collection_interval"`
 	collectionInterval       time.Duration `mapstructure:"-"`
 	PublishAllocationMetrics bool          `mapstructure:"publish_allocation_metrics"`
@@ -316,7 +411,7 @@ type Telemetry struct {
 	// check, it will *NOT* be activated. This setting overrides that behavior.
 	// Default: "false"
 	CirconusCheckForceMetricActivation string `mapstructure:"circonus_check_force_metric_activation"`
-	// CirconusCheckInstanceID serves to uniquely identify the metrics comming from this "instance".
+	// CirconusCheckInstanceID serves to uniquely identify the metrics coming from this "instance".
 	// It can be used to maintain metric continuity with transient or ephemeral instances as
 	// they move around within an infrastructure.
 	// Default: hostname:app
@@ -383,7 +478,7 @@ type Resources struct {
 }
 
 // ParseReserved expands the ReservedPorts string into a slice of port numbers.
-// The supported syntax is comma seperated integers or ranges seperated by
+// The supported syntax is comma separated integers or ranges separated by
 // hyphens. For example, "80,120-150,160"
 func (r *Resources) ParseReserved() error {
 	parts := strings.Split(r.ReservedPorts, ",")
@@ -451,7 +546,7 @@ func DevConfig() *Config {
 	conf.DevMode = true
 	conf.EnableDebug = true
 	conf.DisableAnonymousSignature = true
-	conf.Consul.AutoAdvertise = true
+	conf.Consul.AutoAdvertise = helper.BoolToPtr(true)
 	if runtime.GOOS == "darwin" {
 		conf.Client.NetworkInterface = "lo0"
 	} else if runtime.GOOS == "linux" {
@@ -463,6 +558,10 @@ func DevConfig() *Config {
 	conf.Client.Options = map[string]string{
 		"driver.docker.volumes": "true",
 	}
+	conf.Client.GCInterval = 10 * time.Minute
+	conf.Client.GCDiskUsageThreshold = 99
+	conf.Client.GCInodeUsageThreshold = 99
+	conf.Client.GCMaxAllocs = 50
 
 	return conf
 }
@@ -485,11 +584,17 @@ func DefaultConfig() *Config {
 		Consul:         config.DefaultConsulConfig(),
 		Vault:          config.DefaultVaultConfig(),
 		Client: &ClientConfig{
-			Enabled:        false,
-			MaxKillTimeout: "30s",
-			ClientMinPort:  14000,
-			ClientMaxPort:  14512,
-			Reserved:       &Resources{},
+			Enabled:               false,
+			MaxKillTimeout:        "30s",
+			ClientMinPort:         14000,
+			ClientMaxPort:         14512,
+			Reserved:              &Resources{},
+			GCInterval:            1 * time.Minute,
+			GCParallelDestroys:    2,
+			GCDiskUsageThreshold:  80,
+			GCInodeUsageThreshold: 70,
+			GCMaxAllocs:           50,
+			NoHostUUID:            helper.BoolToPtr(true),
 		},
 		Server: &ServerConfig{
 			Enabled:          false,
@@ -498,12 +603,18 @@ func DefaultConfig() *Config {
 			RetryInterval:    "30s",
 			RetryMaxAttempts: 0,
 		},
+		ACL: &ACLConfig{
+			Enabled:   false,
+			TokenTTL:  30 * time.Second,
+			PolicyTTL: 30 * time.Second,
+		},
 		SyslogFacility: "LOCAL0",
 		Telemetry: &Telemetry{
 			CollectionInterval: "1s",
 			collectionInterval: 1 * time.Second,
 		},
 		TLSConfig: &config.TLSConfig{},
+		Version:   version.GetVersion(),
 	}
 }
 
@@ -529,7 +640,7 @@ func (c *Config) Listener(proto, addr string, port int) (net.Listener, error) {
 			Err: &net.AddrError{Err: "invalid port", Addr: fmt.Sprint(port)},
 		}
 	}
-	return net.Listen(proto, fmt.Sprintf("%s:%d", addr, port))
+	return net.Listen(proto, net.JoinHostPort(addr, strconv.Itoa(port)))
 }
 
 // Merge merges two configurations.
@@ -608,6 +719,14 @@ func (c *Config) Merge(b *Config) *Config {
 		result.Server = result.Server.Merge(b.Server)
 	}
 
+	// Apply the acl config
+	if result.ACL == nil && b.ACL != nil {
+		server := *b.ACL
+		result.ACL = &server
+	} else if b.ACL != nil {
+		result.ACL = result.ACL.Merge(b.ACL)
+	}
+
 	// Apply the ports config
 	if result.Ports == nil && b.Ports != nil {
 		ports := *b.Ports
@@ -642,8 +761,7 @@ func (c *Config) Merge(b *Config) *Config {
 
 	// Apply the Consul Configuration
 	if result.Consul == nil && b.Consul != nil {
-		consulConfig := *b.Consul
-		result.Consul = &consulConfig
+		result.Consul = b.Consul.Copy()
 	} else if b.Consul != nil {
 		result.Consul = result.Consul.Merge(b.Consul)
 	}
@@ -673,18 +791,41 @@ func (c *Config) Merge(b *Config) *Config {
 // normalizeAddrs normalizes Addresses and AdvertiseAddrs to always be
 // initialized and have sane defaults.
 func (c *Config) normalizeAddrs() error {
-	c.Addresses.HTTP = normalizeBind(c.Addresses.HTTP, c.BindAddr)
-	c.Addresses.RPC = normalizeBind(c.Addresses.RPC, c.BindAddr)
-	c.Addresses.Serf = normalizeBind(c.Addresses.Serf, c.BindAddr)
-	c.normalizedAddrs = &Addresses{
-		HTTP: fmt.Sprintf("%s:%d", c.Addresses.HTTP, c.Ports.HTTP),
-		RPC:  fmt.Sprintf("%s:%d", c.Addresses.RPC, c.Ports.RPC),
-		Serf: fmt.Sprintf("%s:%d", c.Addresses.Serf, c.Ports.Serf),
+	if c.BindAddr != "" {
+		ipStr, err := parseSingleIPTemplate(c.BindAddr)
+		if err != nil {
+			return fmt.Errorf("Bind address resolution failed: %v", err)
+		}
+		c.BindAddr = ipStr
 	}
 
-	addr, err := normalizeAdvertise(c.AdvertiseAddrs.HTTP, c.Addresses.HTTP, c.Ports.HTTP, c.DevMode)
+	addr, err := normalizeBind(c.Addresses.HTTP, c.BindAddr)
 	if err != nil {
-		return fmt.Errorf("Failed to parse HTTP advertise address: %v", err)
+		return fmt.Errorf("Failed to parse HTTP address: %v", err)
+	}
+	c.Addresses.HTTP = addr
+
+	addr, err = normalizeBind(c.Addresses.RPC, c.BindAddr)
+	if err != nil {
+		return fmt.Errorf("Failed to parse RPC address: %v", err)
+	}
+	c.Addresses.RPC = addr
+
+	addr, err = normalizeBind(c.Addresses.Serf, c.BindAddr)
+	if err != nil {
+		return fmt.Errorf("Failed to parse Serf address: %v", err)
+	}
+	c.Addresses.Serf = addr
+
+	c.normalizedAddrs = &Addresses{
+		HTTP: net.JoinHostPort(c.Addresses.HTTP, strconv.Itoa(c.Ports.HTTP)),
+		RPC:  net.JoinHostPort(c.Addresses.RPC, strconv.Itoa(c.Ports.RPC)),
+		Serf: net.JoinHostPort(c.Addresses.Serf, strconv.Itoa(c.Ports.Serf)),
+	}
+
+	addr, err = normalizeAdvertise(c.AdvertiseAddrs.HTTP, c.Addresses.HTTP, c.Ports.HTTP, c.DevMode)
+	if err != nil {
+		return fmt.Errorf("Failed to parse HTTP advertise address (%v, %v, %v, %v): %v", c.AdvertiseAddrs.HTTP, c.Addresses.HTTP, c.Ports.HTTP, c.DevMode, err)
 	}
 	c.AdvertiseAddrs.HTTP = addr
 
@@ -694,23 +835,45 @@ func (c *Config) normalizeAddrs() error {
 	}
 	c.AdvertiseAddrs.RPC = addr
 
-	addr, err = normalizeAdvertise(c.AdvertiseAddrs.Serf, c.Addresses.Serf, c.Ports.Serf, c.DevMode)
-	if err != nil {
-		return fmt.Errorf("Failed to parse Serf advertise address: %v", err)
+	// Skip serf if server is disabled
+	if c.Server != nil && c.Server.Enabled {
+		addr, err = normalizeAdvertise(c.AdvertiseAddrs.Serf, c.Addresses.Serf, c.Ports.Serf, c.DevMode)
+		if err != nil {
+			return fmt.Errorf("Failed to parse Serf advertise address: %v", err)
+		}
+		c.AdvertiseAddrs.Serf = addr
 	}
-	c.AdvertiseAddrs.Serf = addr
 
 	return nil
+}
+
+// parseSingleIPTemplate is used as a helper function to parse out a single IP
+// address from a config parameter.
+func parseSingleIPTemplate(ipTmpl string) (string, error) {
+	out, err := template.Parse(ipTmpl)
+	if err != nil {
+		return "", fmt.Errorf("Unable to parse address template %q: %v", ipTmpl, err)
+	}
+
+	ips := strings.Split(out, " ")
+	switch len(ips) {
+	case 0:
+		return "", errors.New("No addresses found, please configure one.")
+	case 1:
+		return ips[0], nil
+	default:
+		return "", fmt.Errorf("Multiple addresses found (%q), please configure one.", out)
+	}
 }
 
 // normalizeBind returns a normalized bind address.
 //
 // If addr is set it is used, if not the default bind address is used.
-func normalizeBind(addr, bind string) string {
+func normalizeBind(addr, bind string) (string, error) {
 	if addr == "" {
-		return bind
+		return bind, nil
 	}
-	return addr
+	return parseSingleIPTemplate(addr)
 }
 
 // normalizeAdvertise returns a normalized advertise address.
@@ -726,17 +889,23 @@ func normalizeBind(addr, bind string) string {
 //
 // Loopback is only considered a valid advertise address in dev mode.
 func normalizeAdvertise(addr string, bind string, defport int, dev bool) (string, error) {
+	addr, err := parseSingleIPTemplate(addr)
+	if err != nil {
+		return "", fmt.Errorf("Error parsing advertise address template: %v", err)
+	}
+
 	if addr != "" {
 		// Default to using manually configured address
-		_, _, err := net.SplitHostPort(addr)
+		_, _, err = net.SplitHostPort(addr)
 		if err != nil {
-			if !isMissingPort(err) {
+			if !isMissingPort(err) && !isTooManyColons(err) {
 				return "", fmt.Errorf("Error parsing advertise address %q: %v", addr, err)
 			}
 
 			// missing port, append the default
-			return fmt.Sprintf("%s:%d", addr, defport), nil
+			return net.JoinHostPort(addr, strconv.Itoa(defport)), nil
 		}
+
 		return addr, nil
 	}
 
@@ -746,40 +915,26 @@ func normalizeAdvertise(addr string, bind string, defport int, dev bool) (string
 		return "", fmt.Errorf("Error resolving bind address %q: %v", bind, err)
 	}
 
-	// Return the first unicast address
+	// Return the first non-localhost unicast address
 	for _, ip := range ips {
 		if ip.IsLinkLocalUnicast() || ip.IsGlobalUnicast() {
-			return fmt.Sprintf("%s:%d", ip, defport), nil
+			return net.JoinHostPort(ip.String(), strconv.Itoa(defport)), nil
 		}
-		if ip.IsLoopback() && dev {
-			// loopback is fine for dev mode
-			return fmt.Sprintf("%s:%d", ip, defport), nil
+		if ip.IsLoopback() {
+			if dev {
+				// loopback is fine for dev mode
+				return net.JoinHostPort(ip.String(), strconv.Itoa(defport)), nil
+			}
+			return "", fmt.Errorf("Defaulting advertise to localhost is unsafe, please set advertise manually")
 		}
 	}
 
-	// As a last resort resolve the hostname and use it if it's not
-	// localhost (as localhost is never a sensible default)
-	host, err := os.Hostname()
+	// Bind is not localhost but not a valid advertise IP, use first private IP
+	addr, err = parseSingleIPTemplate("{{ GetPrivateIP }}")
 	if err != nil {
-		return "", fmt.Errorf("Unable to get hostname to set advertise address: %v", err)
+		return "", fmt.Errorf("Unable to parse default advertise address: %v", err)
 	}
-
-	ips, err = net.LookupIP(host)
-	if err != nil {
-		return "", fmt.Errorf("Error resolving hostname %q for advertise address: %v", host, err)
-	}
-
-	// Return the first unicast address
-	for _, ip := range ips {
-		if ip.IsLinkLocalUnicast() || ip.IsGlobalUnicast() {
-			return fmt.Sprintf("%s:%d", ip, defport), nil
-		}
-		if ip.IsLoopback() && dev {
-			// loopback is fine for dev mode
-			return fmt.Sprintf("%s:%d", ip, defport), nil
-		}
-	}
-	return "", fmt.Errorf("No valid advertise addresses, please set `advertise` manually")
+	return net.JoinHostPort(addr, strconv.Itoa(defport)), nil
 }
 
 // isMissingPort returns true if an error is a "missing port" error from
@@ -787,7 +942,34 @@ func normalizeAdvertise(addr string, bind string, defport int, dev bool) (string
 func isMissingPort(err error) bool {
 	// matches error const in net/ipsock.go
 	const missingPort = "missing port in address"
-	return err != nil && strings.HasPrefix(err.Error(), missingPort)
+	return err != nil && strings.Contains(err.Error(), missingPort)
+}
+
+// isTooManyColons returns true if an error is a "too many colons" error from
+// net.SplitHostPort.
+func isTooManyColons(err error) bool {
+	// matches error const in net/ipsock.go
+	const tooManyColons = "too many colons in address"
+	return err != nil && strings.Contains(err.Error(), tooManyColons)
+}
+
+// Merge is used to merge two ACL configs together. The settings from the input always take precedence.
+func (a *ACLConfig) Merge(b *ACLConfig) *ACLConfig {
+	result := *a
+
+	if b.Enabled {
+		result.Enabled = true
+	}
+	if b.TokenTTL != 0 {
+		result.TokenTTL = b.TokenTTL
+	}
+	if b.PolicyTTL != 0 {
+		result.PolicyTTL = b.PolicyTTL
+	}
+	if b.ReplicationToken != "" {
+		result.ReplicationToken = b.ReplicationToken
+	}
+	return &result
 }
 
 // Merge is used to merge two server configs together
@@ -796,6 +978,9 @@ func (a *ServerConfig) Merge(b *ServerConfig) *ServerConfig {
 
 	if b.Enabled {
 		result.Enabled = true
+	}
+	if b.AuthoritativeRegion != "" {
+		result.AuthoritativeRegion = b.AuthoritativeRegion
 	}
 	if b.BootstrapExpect > 0 {
 		result.BootstrapExpect = b.BootstrapExpect
@@ -812,8 +997,23 @@ func (a *ServerConfig) Merge(b *ServerConfig) *ServerConfig {
 	if b.NodeGCThreshold != "" {
 		result.NodeGCThreshold = b.NodeGCThreshold
 	}
-	if b.HeartbeatGrace != "" {
+	if b.JobGCThreshold != "" {
+		result.JobGCThreshold = b.JobGCThreshold
+	}
+	if b.EvalGCThreshold != "" {
+		result.EvalGCThreshold = b.EvalGCThreshold
+	}
+	if b.DeploymentGCThreshold != "" {
+		result.DeploymentGCThreshold = b.DeploymentGCThreshold
+	}
+	if b.HeartbeatGrace != 0 {
 		result.HeartbeatGrace = b.HeartbeatGrace
+	}
+	if b.MinHeartbeatTTL != 0 {
+		result.MinHeartbeatTTL = b.MinHeartbeatTTL
+	}
+	if b.MaxHeartbeatsPerSecond != 0.0 {
+		result.MaxHeartbeatsPerSecond = b.MaxHeartbeatsPerSecond
 	}
 	if b.RetryMaxAttempts != 0 {
 		result.RetryMaxAttempts = b.RetryMaxAttempts
@@ -867,6 +1067,9 @@ func (a *ClientConfig) Merge(b *ClientConfig) *ClientConfig {
 	if b.NetworkSpeed != 0 {
 		result.NetworkSpeed = b.NetworkSpeed
 	}
+	if b.CpuCompute != 0 {
+		result.CpuCompute = b.CpuCompute
+	}
 	if b.MaxKillTimeout != "" {
 		result.MaxKillTimeout = b.MaxKillTimeout
 	}
@@ -876,8 +1079,38 @@ func (a *ClientConfig) Merge(b *ClientConfig) *ClientConfig {
 	if b.ClientMinPort != 0 {
 		result.ClientMinPort = b.ClientMinPort
 	}
-	if b.Reserved != nil {
+	if result.Reserved == nil && b.Reserved != nil {
+		reserved := *b.Reserved
+		result.Reserved = &reserved
+	} else if b.Reserved != nil {
 		result.Reserved = result.Reserved.Merge(b.Reserved)
+	}
+	if b.GCInterval != 0 {
+		result.GCInterval = b.GCInterval
+	}
+	if b.GCParallelDestroys != 0 {
+		result.GCParallelDestroys = b.GCParallelDestroys
+	}
+	if b.GCDiskUsageThreshold != 0 {
+		result.GCDiskUsageThreshold = b.GCDiskUsageThreshold
+	}
+	if b.GCInodeUsageThreshold != 0 {
+		result.GCInodeUsageThreshold = b.GCInodeUsageThreshold
+	}
+	if b.GCMaxAllocs != 0 {
+		result.GCMaxAllocs = b.GCMaxAllocs
+	}
+	// NoHostUUID defaults to true, merge if false
+	if b.NoHostUUID != nil {
+		result.NoHostUUID = b.NoHostUUID
+	}
+
+	if b.DisableTaggedMetrics {
+		result.DisableTaggedMetrics = b.DisableTaggedMetrics
+	}
+
+	if b.BackwardsCompatibleMetrics {
+		result.BackwardsCompatibleMetrics = b.BackwardsCompatibleMetrics
 	}
 
 	// Add the servers
@@ -925,6 +1158,10 @@ func (a *Telemetry) Merge(b *Telemetry) *Telemetry {
 	}
 	if b.DisableHostname {
 		result.DisableHostname = true
+	}
+
+	if b.UseNodeName {
+		result.UseNodeName = true
 	}
 	if b.CollectionInterval != "" {
 		result.CollectionInterval = b.CollectionInterval

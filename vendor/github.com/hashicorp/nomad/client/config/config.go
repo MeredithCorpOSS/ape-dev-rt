@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/helper/tlsutil"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/nomad/structs/config"
+	"github.com/hashicorp/nomad/version"
 )
 
 var (
@@ -39,6 +41,19 @@ var (
 		"qemu",
 		"java",
 	}, ",")
+
+	// A mapping of directories on the host OS to attempt to embed inside each
+	// task's chroot.
+	DefaultChrootEnv = map[string]string{
+		"/bin":            "/bin",
+		"/etc":            "/etc",
+		"/lib":            "/lib",
+		"/lib32":          "/lib32",
+		"/lib64":          "/lib64",
+		"/run/resolvconf": "/run/resolvconf",
+		"/sbin":           "/sbin",
+		"/usr":            "/usr",
+	}
 )
 
 // RPCHandler can be provided to the Client if there is a local server
@@ -72,6 +87,10 @@ type Config struct {
 	// Network speed is the default speed of network interfaces if they can not
 	// be determined dynamically.
 	NetworkSpeed int
+
+	// CpuCompute is the default total CPU compute if they can not be determined
+	// dynamically. It should be given as Cores * MHz (2 Cores * 2 Ghz = 4000)
+	CpuCompute int
 
 	// MaxKillTimeout allows capping the user-specifiable KillTimeout. If the
 	// task's KillTimeout is greater than the MaxKillTimeout, MaxKillTimeout is
@@ -111,10 +130,7 @@ type Config struct {
 	Options map[string]string
 
 	// Version is the version of the Nomad client
-	Version string
-
-	// Revision is the commit number of the Nomad client
-	Revision string
+	Version *version.VersionInfo
 
 	// ConsulConfig is this Agent's Consul configuration
 	ConsulConfig *config.ConsulConfig
@@ -136,15 +152,59 @@ type Config struct {
 
 	// TLSConfig holds various TLS related configurations
 	TLSConfig *config.TLSConfig
+
+	// GCInterval is the time interval at which the client triggers garbage
+	// collection
+	GCInterval time.Duration
+
+	// GCParallelDestroys is the number of parallel destroys the garbage
+	// collector will allow.
+	GCParallelDestroys int
+
+	// GCDiskUsageThreshold is the disk usage threshold given as a percent
+	// beyond which the Nomad client triggers GC of terminal allocations
+	GCDiskUsageThreshold float64
+
+	// GCInodeUsageThreshold is the inode usage threshold given as a percent
+	// beyond which the Nomad client triggers GC of the terminal allocations
+	GCInodeUsageThreshold float64
+
+	// GCMaxAllocs is the maximum number of allocations a node can have
+	// before garbage collection is triggered.
+	GCMaxAllocs int
+
+	// LogLevel is the level of the logs to putout
+	LogLevel string
+
+	// NoHostUUID disables using the host's UUID and will force generation of a
+	// random UUID.
+	NoHostUUID bool
+
+	// ACLEnabled controls if ACL enforcement and management is enabled.
+	ACLEnabled bool
+
+	// ACLTokenTTL is how long we cache token values for
+	ACLTokenTTL time.Duration
+
+	// ACLPolicyTTL is how long we cache policy values for
+	ACLPolicyTTL time.Duration
+
+	// DisableTaggedMetrics determines whether metrics will be displayed via a
+	// key/value/tag format, or simply a key/value format
+	DisableTaggedMetrics bool
+
+	// BackwardsCompatibleMetrics determines whether to show methods of
+	// displaying metrics for older verions, or to only show the new format
+	BackwardsCompatibleMetrics bool
 }
 
 func (c *Config) Copy() *Config {
 	nc := new(Config)
 	*nc = *c
 	nc.Node = nc.Node.Copy()
-	nc.Servers = structs.CopySliceString(nc.Servers)
-	nc.Options = structs.CopyMapStringString(nc.Options)
-	nc.GloballyReservedPorts = structs.CopySliceInt(c.GloballyReservedPorts)
+	nc.Servers = helper.CopySliceString(nc.Servers)
+	nc.Options = helper.CopyMapStringString(nc.Options)
+	nc.GloballyReservedPorts = helper.CopySliceInt(c.GloballyReservedPorts)
 	nc.ConsulConfig = c.ConsulConfig.Copy()
 	nc.VaultConfig = c.VaultConfig.Copy()
 	return nc
@@ -153,12 +213,22 @@ func (c *Config) Copy() *Config {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		VaultConfig:             config.DefaultVaultConfig(),
-		ConsulConfig:            config.DefaultConsulConfig(),
-		LogOutput:               os.Stderr,
-		Region:                  "global",
-		StatsCollectionInterval: 1 * time.Second,
-		TLSConfig:               &config.TLSConfig{},
+		Version:                    version.GetVersion(),
+		VaultConfig:                config.DefaultVaultConfig(),
+		ConsulConfig:               config.DefaultConsulConfig(),
+		LogOutput:                  os.Stderr,
+		Region:                     "global",
+		StatsCollectionInterval:    1 * time.Second,
+		TLSConfig:                  &config.TLSConfig{},
+		LogLevel:                   "DEBUG",
+		GCInterval:                 1 * time.Minute,
+		GCParallelDestroys:         2,
+		GCDiskUsageThreshold:       80,
+		GCInodeUsageThreshold:      70,
+		GCMaxAllocs:                50,
+		NoHostUUID:                 true,
+		DisableTaggedMetrics:       false,
+		BackwardsCompatibleMetrics: false,
 	}
 }
 
@@ -194,6 +264,52 @@ func (c *Config) ReadBool(id string) (bool, error) {
 // an error in parsing, the default option is returned.
 func (c *Config) ReadBoolDefault(id string, defaultValue bool) bool {
 	val, err := c.ReadBool(id)
+	if err != nil {
+		return defaultValue
+	}
+	return val
+}
+
+// ReadInt parses the specified option as a int.
+func (c *Config) ReadInt(id string) (int, error) {
+	val, ok := c.Options[id]
+	if !ok {
+		return 0, fmt.Errorf("Specified config is missing from options")
+	}
+	ival, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to parse %s as int: %s", val, err)
+	}
+	return ival, nil
+}
+
+// ReadIntDefault tries to parse the specified option as a int. If there is
+// an error in parsing, the default option is returned.
+func (c *Config) ReadIntDefault(id string, defaultValue int) int {
+	val, err := c.ReadInt(id)
+	if err != nil {
+		return defaultValue
+	}
+	return val
+}
+
+// ReadDuration parses the specified option as a duration.
+func (c *Config) ReadDuration(id string) (time.Duration, error) {
+	val, ok := c.Options[id]
+	if !ok {
+		return time.Duration(0), fmt.Errorf("Specified config is missing from options")
+	}
+	dval, err := time.ParseDuration(val)
+	if err != nil {
+		return time.Duration(0), fmt.Errorf("Failed to parse %s as time duration: %s", val, err)
+	}
+	return dval, nil
+}
+
+// ReadDurationDefault tries to parse the specified option as a duration. If there is
+// an error in parsing, the default option is returned.
+func (c *Config) ReadDurationDefault(id string, defaultValue time.Duration) time.Duration {
+	val, err := c.ReadDuration(id)
 	if err != nil {
 		return defaultValue
 	}

@@ -42,6 +42,10 @@ func (s RaftState) String() string {
 // and provides an interface to set/get the variables in a
 // thread safe manner.
 type raftState struct {
+	// currentTerm commitIndex, lastApplied,  must be kept at the top of
+	// the struct so they're 64 bit aligned which is a requirement for
+	// atomic ops on 32 bit platforms.
+
 	// The current term, cache of StableStore
 	currentTerm uint64
 
@@ -62,8 +66,8 @@ type raftState struct {
 	lastLogIndex uint64
 	lastLogTerm  uint64
 
-	// Tracks the number of live routines
-	runningRoutines int32
+	// Tracks running goroutines
+	routinesGroup sync.WaitGroup
 
 	// The current state
 	state RaftState
@@ -133,26 +137,18 @@ func (r *raftState) setLastApplied(index uint64) {
 	atomic.StoreUint64(&r.lastApplied, index)
 }
 
-func (r *raftState) incrRoutines() {
-	atomic.AddInt32(&r.runningRoutines, 1)
-}
-
-func (r *raftState) decrRoutines() {
-	atomic.AddInt32(&r.runningRoutines, -1)
-}
-
-func (r *raftState) getRoutines() int32 {
-	return atomic.LoadInt32(&r.runningRoutines)
-}
-
 // Start a goroutine and properly handle the race between a routine
 // starting and incrementing, and exiting and decrementing.
 func (r *raftState) goFunc(f func()) {
-	r.incrRoutines()
+	r.routinesGroup.Add(1)
 	go func() {
-		defer r.decrRoutines()
+		defer r.routinesGroup.Done()
 		f()
 	}()
+}
+
+func (r *raftState) waitShutdown() {
+	r.routinesGroup.Wait()
 }
 
 // getLastIndex returns the last index in stable storage.

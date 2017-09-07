@@ -11,10 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/nomad/api"
+	"github.com/hashicorp/nomad/helper"
+	"github.com/hashicorp/nomad/helper/flatmap"
+	"github.com/kr/pretty"
 	"github.com/mitchellh/cli"
 )
 
 func TestHelpers_FormatKV(t *testing.T) {
+	t.Parallel()
 	in := []string{"alpha|beta", "charlie|delta", "echo|"}
 	out := formatKV(in)
 
@@ -28,6 +33,7 @@ func TestHelpers_FormatKV(t *testing.T) {
 }
 
 func TestHelpers_FormatList(t *testing.T) {
+	t.Parallel()
 	in := []string{"alpha|beta||delta"}
 	out := formatList(in)
 
@@ -39,8 +45,9 @@ func TestHelpers_FormatList(t *testing.T) {
 }
 
 func TestHelpers_NodeID(t *testing.T) {
-	srv, _, _ := testServer(t, nil)
-	defer srv.Stop()
+	t.Parallel()
+	srv, _, _ := testServer(t, false, nil)
+	defer srv.Shutdown()
 
 	meta := Meta{Ui: new(cli.MockUi)}
 	client, err := meta.Client()
@@ -55,6 +62,7 @@ func TestHelpers_NodeID(t *testing.T) {
 }
 
 func TestHelpers_LineLimitReader_NoTimeLimit(t *testing.T) {
+	t.Parallel()
 	helloString := `hello
 world
 this
@@ -156,6 +164,7 @@ func (t *testReadCloser) Close() error {
 }
 
 func TestHelpers_LineLimitReader_TimeLimit(t *testing.T) {
+	t.Parallel()
 	// Create the test reader
 	in := &testReadCloser{data: make(chan []byte)}
 
@@ -202,13 +211,43 @@ const (
                 restart{
                         attempts = 10
                         mode = "delay"
+						interval = "15s"
                 }
         }
 }`
 )
 
-// Test StructJob with local jobfile
-func TestStructJobWithLocal(t *testing.T) {
+var (
+	expectedApiJob = &api.Job{
+		ID:          helper.StringToPtr("job1"),
+		Name:        helper.StringToPtr("job1"),
+		Type:        helper.StringToPtr("service"),
+		Datacenters: []string{"dc1"},
+		TaskGroups: []*api.TaskGroup{
+			{
+				Name:  helper.StringToPtr("group1"),
+				Count: helper.IntToPtr(1),
+				RestartPolicy: &api.RestartPolicy{
+					Attempts: helper.IntToPtr(10),
+					Interval: helper.TimeToPtr(15 * time.Second),
+					Mode:     helper.StringToPtr("delay"),
+				},
+
+				Tasks: []*api.Task{
+					{
+						Driver:    "exec",
+						Name:      "task1",
+						Resources: &api.Resources{},
+					},
+				},
+			},
+		},
+	}
+)
+
+// Test APIJob with local jobfile
+func TestJobGetter_LocalFile(t *testing.T) {
+	t.Parallel()
 	fh, err := ioutil.TempFile("", "nomad")
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -220,19 +259,21 @@ func TestStructJobWithLocal(t *testing.T) {
 	}
 
 	j := &JobGetter{}
-	sj, err := j.StructJob(fh.Name())
+	aj, err := j.ApiJob(fh.Name())
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
 
-	err = sj.Validate()
-	if err != nil {
-		t.Fatalf("err: %s", err)
+	if !reflect.DeepEqual(expectedApiJob, aj) {
+		eflat := flatmap.Flatten(expectedApiJob, nil, false)
+		aflat := flatmap.Flatten(aj, nil, false)
+		t.Fatalf("got:\n%v\nwant:\n%v", aflat, eflat)
 	}
 }
 
 // Test StructJob with jobfile from HTTP Server
-func TestStructJobWithHTTPServer(t *testing.T) {
+func TestJobGetter_HTTPServer(t *testing.T) {
+	t.Parallel()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, job)
 	})
@@ -242,13 +283,14 @@ func TestStructJobWithHTTPServer(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	j := &JobGetter{}
-	sj, err := j.StructJob("http://127.0.0.1:12345/")
+	aj, err := j.ApiJob("http://127.0.0.1:12345/")
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
-
-	err = sj.Validate()
-	if err != nil {
-		t.Fatalf("err: %s", err)
+	if !reflect.DeepEqual(expectedApiJob, aj) {
+		for _, d := range pretty.Diff(expectedApiJob, aj) {
+			t.Logf(d)
+		}
+		t.Fatalf("Unexpected file")
 	}
 }

@@ -22,31 +22,57 @@ func NewCPUFingerprint(logger *log.Logger) Fingerprint {
 }
 
 func (f *CPUFingerprint) Fingerprint(cfg *config.Config, node *structs.Node) (bool, error) {
-	if err := stats.Init(); err != nil {
-		return false, fmt.Errorf("Unable to obtain CPU information: %v", err)
+	setResources := func(totalCompute int) {
+		if node.Resources == nil {
+			node.Resources = &structs.Resources{}
+		}
+
+		node.Resources.CPU = totalCompute
 	}
 
-	modelName := stats.CPUModelName()
-	if modelName != "" {
+	if err := stats.Init(); err != nil {
+		f.logger.Printf("[WARN] fingerprint.cpu: %v", err)
+	}
+
+	if cfg.CpuCompute != 0 {
+		setResources(cfg.CpuCompute)
+		return true, nil
+	}
+
+	if modelName := stats.CPUModelName(); modelName != "" {
 		node.Attributes["cpu.modelname"] = modelName
 	}
 
-	mhz := stats.CPUMHzPerCore()
-	node.Attributes["cpu.frequency"] = fmt.Sprintf("%.0f", mhz)
-	f.logger.Printf("[DEBUG] fingerprint.cpu: frequency: %.0f MHz", mhz)
+	if mhz := stats.CPUMHzPerCore(); mhz > 0 {
+		node.Attributes["cpu.frequency"] = fmt.Sprintf("%.0f", mhz)
+		f.logger.Printf("[DEBUG] fingerprint.cpu: frequency: %.0f MHz", mhz)
+	}
 
-	numCores := stats.CPUNumCores()
-	node.Attributes["cpu.numcores"] = fmt.Sprintf("%d", numCores)
-	f.logger.Printf("[DEBUG] fingerprint.cpu: core count: %d", numCores)
+	if numCores := stats.CPUNumCores(); numCores > 0 {
+		node.Attributes["cpu.numcores"] = fmt.Sprintf("%d", numCores)
+		f.logger.Printf("[DEBUG] fingerprint.cpu: core count: %d", numCores)
+	}
 
-	tt := stats.TotalTicksAvailable()
-	node.Attributes["cpu.totalcompute"] = fmt.Sprintf("%.0f", tt)
+	tt := int(stats.TotalTicksAvailable())
+	if cfg.CpuCompute > 0 {
+		f.logger.Printf("[DEBUG] fingerprint.cpu: Using specified cpu compute %d", cfg.CpuCompute)
+		tt = cfg.CpuCompute
+	}
+
+	// Return an error if no cpu was detected or explicitly set as this
+	// node would be unable to receive any allocations.
+	if tt == 0 {
+		return false, fmt.Errorf("cannot detect cpu total compute. "+
+			"CPU compute must be set manually using the client config option %q",
+			"cpu_total_compute")
+	}
+
+	node.Attributes["cpu.totalcompute"] = fmt.Sprintf("%d", tt)
 
 	if node.Resources == nil {
 		node.Resources = &structs.Resources{}
 	}
 
-	node.Resources.CPU = int(tt)
-
+	node.Resources.CPU = tt
 	return true, nil
 }

@@ -20,10 +20,14 @@ func stateStoreSchema() *memdb.DBSchema {
 		nodeTableSchema,
 		jobTableSchema,
 		jobSummarySchema,
+		jobVersionSchema,
+		deploymentSchema,
 		periodicLaunchTableSchema,
 		evalTableSchema,
 		allocTableSchema,
 		vaultAccessorTableSchema,
+		aclPolicyTableSchema,
+		aclTokenTableSchema,
 	}
 
 	// Add each of the tables
@@ -141,6 +145,37 @@ func jobSummarySchema() *memdb.TableSchema {
 	}
 }
 
+// jobVersionSchema returns the memdb schema for the job version table which
+// keeps a historical view of job versions.
+func jobVersionSchema() *memdb.TableSchema {
+	return &memdb.TableSchema{
+		Name: "job_version",
+		Indexes: map[string]*memdb.IndexSchema{
+			"id": &memdb.IndexSchema{
+				Name:         "id",
+				AllowMissing: false,
+				Unique:       true,
+
+				// Use a compound index so the tuple of (JobID, Version) is
+				// uniquely identifying
+				Indexer: &memdb.CompoundIndex{
+					Indexes: []memdb.Indexer{
+						&memdb.StringFieldIndex{
+							Field:     "ID",
+							Lowercase: true,
+						},
+
+						// Will need to create a new indexer
+						&memdb.UintFieldIndex{
+							Field: "Version",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // jobIsGCable satisfies the ConditionalIndexFunc interface and creates an index
 // on whether a job is eligible for garbage collection.
 func jobIsGCable(obj interface{}) (bool, error) {
@@ -149,10 +184,31 @@ func jobIsGCable(obj interface{}) (bool, error) {
 		return false, fmt.Errorf("Unexpected type: %v", obj)
 	}
 
-	// The job is GCable if it is batch and it is not periodic
+	// If the job is periodic or parameterized it is only garbage collectable if
+	// it is stopped.
 	periodic := j.Periodic != nil && j.Periodic.Enabled
-	gcable := j.Type == structs.JobTypeBatch && !periodic
-	return gcable, nil
+	parameterized := j.IsParameterized()
+	if periodic || parameterized {
+		return j.Stop, nil
+	}
+
+	// If the job isn't dead it isn't eligible
+	if j.Status != structs.JobStatusDead {
+		return false, nil
+	}
+
+	// Any job that is stopped is eligible for garbage collection
+	if j.Stop {
+		return true, nil
+	}
+
+	// Otherwise, only batch jobs are eligible because they complete on their
+	// own without a user stopping them.
+	if j.Type != structs.JobTypeBatch {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // jobIsPeriodic satisfies the ConditionalIndexFunc interface and creates an index
@@ -168,6 +224,34 @@ func jobIsPeriodic(obj interface{}) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// deploymentSchema returns the MemDB schema tracking a job's deployments
+func deploymentSchema() *memdb.TableSchema {
+	return &memdb.TableSchema{
+		Name: "deployment",
+		Indexes: map[string]*memdb.IndexSchema{
+			"id": &memdb.IndexSchema{
+				Name:         "id",
+				AllowMissing: false,
+				Unique:       true,
+				Indexer: &memdb.UUIDFieldIndex{
+					Field: "ID",
+				},
+			},
+
+			// Job index is used to lookup deployments by job
+			"job": &memdb.IndexSchema{
+				Name:         "job",
+				AllowMissing: false,
+				Unique:       false,
+				Indexer: &memdb.StringFieldIndex{
+					Field:     "JobID",
+					Lowercase: true,
+				},
+			},
+		},
+	}
 }
 
 // periodicLaunchTableSchema returns the MemDB schema tracking the most recent
@@ -214,9 +298,17 @@ func evalTableSchema() *memdb.TableSchema {
 				Name:         "job",
 				AllowMissing: false,
 				Unique:       false,
-				Indexer: &memdb.StringFieldIndex{
-					Field:     "JobID",
-					Lowercase: true,
+				Indexer: &memdb.CompoundIndex{
+					Indexes: []memdb.Indexer{
+						&memdb.StringFieldIndex{
+							Field:     "JobID",
+							Lowercase: true,
+						},
+						&memdb.StringFieldIndex{
+							Field:     "Status",
+							Lowercase: true,
+						},
+					},
 				},
 			},
 		},
@@ -289,6 +381,16 @@ func allocTableSchema() *memdb.TableSchema {
 					Field: "EvalID",
 				},
 			},
+
+			// Deployment index is used to lookup allocations by deployment
+			"deployment": &memdb.IndexSchema{
+				Name:         "deployment",
+				AllowMissing: true,
+				Unique:       false,
+				Indexer: &memdb.UUIDFieldIndex{
+					Field: "DeploymentID",
+				},
+			},
 		},
 	}
 }
@@ -325,6 +427,58 @@ func vaultAccessorTableSchema() *memdb.TableSchema {
 				Unique:       false,
 				Indexer: &memdb.StringFieldIndex{
 					Field: "NodeID",
+				},
+			},
+		},
+	}
+}
+
+// aclPolicyTableSchema returns the MemDB schema for the policy table.
+// This table is used to store the policies which are refrenced by tokens
+func aclPolicyTableSchema() *memdb.TableSchema {
+	return &memdb.TableSchema{
+		Name: "acl_policy",
+		Indexes: map[string]*memdb.IndexSchema{
+			"id": &memdb.IndexSchema{
+				Name:         "id",
+				AllowMissing: false,
+				Unique:       true,
+				Indexer: &memdb.StringFieldIndex{
+					Field: "Name",
+				},
+			},
+		},
+	}
+}
+
+// aclTokenTableSchema returns the MemDB schema for the tokens table.
+// This table is used to store the bearer tokens which are used to authenticate
+func aclTokenTableSchema() *memdb.TableSchema {
+	return &memdb.TableSchema{
+		Name: "acl_token",
+		Indexes: map[string]*memdb.IndexSchema{
+			"id": &memdb.IndexSchema{
+				Name:         "id",
+				AllowMissing: false,
+				Unique:       true,
+				Indexer: &memdb.UUIDFieldIndex{
+					Field: "AccessorID",
+				},
+			},
+			"secret": &memdb.IndexSchema{
+				Name:         "secret",
+				AllowMissing: false,
+				Unique:       true,
+				Indexer: &memdb.UUIDFieldIndex{
+					Field: "SecretID",
+				},
+			},
+			"global": &memdb.IndexSchema{
+				Name:         "global",
+				AllowMissing: false,
+				Unique:       false,
+				Indexer: &memdb.FieldSetIndex{
+					Field: "Global",
 				},
 			},
 		},

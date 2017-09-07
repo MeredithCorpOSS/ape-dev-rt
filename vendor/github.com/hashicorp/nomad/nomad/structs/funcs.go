@@ -2,9 +2,51 @@ package structs
 
 import (
 	crand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
+
+	"golang.org/x/crypto/blake2b"
+
+	multierror "github.com/hashicorp/go-multierror"
+	lru "github.com/hashicorp/golang-lru"
+	"github.com/hashicorp/nomad/acl"
 )
+
+// MergeMultierrorWarnings takes job warnings and canonicalize warnings and
+// merges them into a returnable string. Both the errors may be nil.
+func MergeMultierrorWarnings(warnings, canonicalizeWarnings error) string {
+	if warnings == nil && canonicalizeWarnings == nil {
+		return ""
+	}
+
+	var warningMsg multierror.Error
+	if canonicalizeWarnings != nil {
+		multierror.Append(&warningMsg, canonicalizeWarnings)
+	}
+
+	if warnings != nil {
+		multierror.Append(&warningMsg, warnings)
+	}
+
+	// Set the formatter
+	warningMsg.ErrorFormat = warningsFormatter
+	return warningMsg.Error()
+}
+
+// warningsFormatter is used to format job warnings
+func warningsFormatter(es []error) string {
+	points := make([]string, len(es))
+	for i, err := range es {
+		points[i] = fmt.Sprintf("* %s", err)
+	}
+
+	return fmt.Sprintf(
+		"%d warning(s):\n\n%s",
+		len(es), strings.Join(points, "\n"))
+}
 
 // RemoveAllocs is used to remove any allocs with the given IDs
 // from the list of allocations
@@ -169,72 +211,6 @@ func GenerateUUID() string {
 		buf[10:16])
 }
 
-// Helpers for copying generic structures.
-func CopyMapStringString(m map[string]string) map[string]string {
-	l := len(m)
-	if l == 0 {
-		return nil
-	}
-
-	c := make(map[string]string, l)
-	for k, v := range m {
-		c[k] = v
-	}
-	return c
-}
-
-func CopyMapStringInt(m map[string]int) map[string]int {
-	l := len(m)
-	if l == 0 {
-		return nil
-	}
-
-	c := make(map[string]int, l)
-	for k, v := range m {
-		c[k] = v
-	}
-	return c
-}
-
-func CopyMapStringFloat64(m map[string]float64) map[string]float64 {
-	l := len(m)
-	if l == 0 {
-		return nil
-	}
-
-	c := make(map[string]float64, l)
-	for k, v := range m {
-		c[k] = v
-	}
-	return c
-}
-
-func CopySliceString(s []string) []string {
-	l := len(s)
-	if l == 0 {
-		return nil
-	}
-
-	c := make([]string, l)
-	for i, v := range s {
-		c[i] = v
-	}
-	return c
-}
-
-func CopySliceInt(s []int) []int {
-	l := len(s)
-	if l == 0 {
-		return nil
-	}
-
-	c := make([]int, l)
-	for i, v := range s {
-		c[i] = v
-	}
-	return c
-}
-
 func CopySliceConstraints(s []*Constraint) []*Constraint {
 	l := len(s)
 	if l == 0 {
@@ -246,27 +222,6 @@ func CopySliceConstraints(s []*Constraint) []*Constraint {
 		c[i] = v.Copy()
 	}
 	return c
-}
-
-// SliceStringIsSubset returns whether the smaller set of strings is a subset of
-// the larger. If the smaller slice is not a subset, the offending elements are
-// returned.
-func SliceStringIsSubset(larger, smaller []string) (bool, []string) {
-	largerSet := make(map[string]struct{}, len(larger))
-	for _, l := range larger {
-		largerSet[l] = struct{}{}
-	}
-
-	subset := true
-	var offending []string
-	for _, s := range smaller {
-		if _, ok := largerSet[s]; !ok {
-			subset = false
-			offending = append(offending, s)
-		}
-	}
-
-	return subset, offending
 }
 
 // VaultPoliciesSet takes the structure returned by VaultPolicies and returns
@@ -289,18 +244,69 @@ func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
 	return flattened
 }
 
-// MapStringStringSliceValueSet returns the set of values in a map[string][]string
-func MapStringStringSliceValueSet(m map[string][]string) []string {
-	set := make(map[string]struct{})
-	for _, slice := range m {
-		for _, v := range slice {
-			set[v] = struct{}{}
+// DenormalizeAllocationJobs is used to attach a job to all allocations that are
+// non-terminal and do not have a job already. This is useful in cases where the
+// job is normalized.
+func DenormalizeAllocationJobs(job *Job, allocs []*Allocation) {
+	if job != nil {
+		for _, alloc := range allocs {
+			if alloc.Job == nil && !alloc.TerminalStatus() {
+				alloc.Job = job
+			}
 		}
 	}
+}
 
-	flat := make([]string, 0, len(set))
-	for k := range set {
-		flat = append(flat, k)
+// AllocName returns the name of the allocation given the input.
+func AllocName(job, group string, idx uint) string {
+	return fmt.Sprintf("%s.%s[%d]", job, group, idx)
+}
+
+// ACLPolicyListHash returns a consistent hash for a set of policies.
+func ACLPolicyListHash(policies []*ACLPolicy) string {
+	cacheKeyHash, err := blake2b.New256(nil)
+	if err != nil {
+		panic(err)
 	}
-	return flat
+	for _, policy := range policies {
+		cacheKeyHash.Write([]byte(policy.Name))
+		binary.Write(cacheKeyHash, binary.BigEndian, policy.ModifyIndex)
+	}
+	cacheKey := string(cacheKeyHash.Sum(nil))
+	return cacheKey
+}
+
+// CompileACLObject compiles a set of ACL policies into an ACL object with a cache
+func CompileACLObject(cache *lru.TwoQueueCache, policies []*ACLPolicy) (*acl.ACL, error) {
+	// Sort the policies to ensure consistent ordering
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].Name < policies[j].Name
+	})
+
+	// Determine the cache key
+	cacheKey := ACLPolicyListHash(policies)
+	aclRaw, ok := cache.Get(cacheKey)
+	if ok {
+		return aclRaw.(*acl.ACL), nil
+	}
+
+	// Parse the policies
+	parsed := make([]*acl.Policy, 0, len(policies))
+	for _, policy := range policies {
+		p, err := acl.Parse(policy.Rules)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %q: %v", policy.Name, err)
+		}
+		parsed = append(parsed, p)
+	}
+
+	// Create the ACL object
+	aclObj, err := acl.NewACL(false, parsed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct ACL: %v", err)
+	}
+
+	// Update the cache
+	cache.Add(cacheKey, aclObj)
+	return aclObj, nil
 }

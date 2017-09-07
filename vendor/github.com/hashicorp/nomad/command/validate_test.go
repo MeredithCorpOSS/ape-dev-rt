@@ -1,21 +1,30 @@
 package command
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/nomad/testutil"
 	"github.com/mitchellh/cli"
 )
 
 func TestValidateCommand_Implements(t *testing.T) {
+	t.Parallel()
 	var _ cli.Command = &ValidateCommand{}
 }
 
 func TestValidateCommand(t *testing.T) {
+	t.Parallel()
 	ui := new(cli.MockUi)
 	cmd := &ValidateCommand{Meta: Meta{Ui: ui}}
+
+	// Create a server
+	s := testutil.NewTestServer(t, nil)
+	defer s.Stop()
+	os.Setenv("NOMAD_ADDR", fmt.Sprintf("http://%s", s.HTTPAddr))
 
 	fh, err := ioutil.TempFile("", "nomad")
 	if err != nil {
@@ -30,6 +39,9 @@ job "job1" {
 		count = 1
 		task "task1" {
 			driver = "exec"
+			config {
+				command = "/bin/sleep"
+			}
 			resources = {
 				cpu = 1000
 				memory = 512
@@ -46,6 +58,7 @@ job "job1" {
 }
 
 func TestValidateCommand_Fails(t *testing.T) {
+	t.Parallel()
 	ui := new(cli.MockUi)
 	cmd := &ValidateCommand{Meta: Meta{Ui: ui}}
 
@@ -96,13 +109,14 @@ func TestValidateCommand_Fails(t *testing.T) {
 	if code := cmd.Run([]string{fh2.Name()}); code != 1 {
 		t.Fatalf("expect exit 1, got: %d", code)
 	}
-	if out := ui.ErrorWriter.String(); !strings.Contains(out, "Error validating") {
+	if out := ui.ErrorWriter.String(); !strings.Contains(out, "Job validation errors") {
 		t.Fatalf("expect validation error, got: %s", out)
 	}
 	ui.ErrorWriter.Reset()
 }
 
 func TestValidateCommand_From_STDIN(t *testing.T) {
+	t.Parallel()
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -113,6 +127,10 @@ func TestValidateCommand_From_STDIN(t *testing.T) {
 		Meta:      Meta{Ui: ui},
 		JobGetter: JobGetter{testStdin: stdinR},
 	}
+	// Create a server
+	s := testutil.NewTestServer(t, nil)
+	defer s.Stop()
+	os.Setenv("NOMAD_ADDR", fmt.Sprintf("http://%s", s.HTTPAddr))
 
 	go func() {
 		stdinW.WriteString(`
@@ -123,6 +141,9 @@ job "job1" {
                 count = 1
                 task "task1" {
                         driver = "exec"
+						config {
+							command = "/bin/echo"
+						}
                         resources = {
                                 cpu = 1000
                                 memory = 512
@@ -141,6 +162,7 @@ job "job1" {
 }
 
 func TestValidateCommand_From_URL(t *testing.T) {
+	t.Parallel()
 	ui := new(cli.MockUi)
 	cmd := &RunCommand{
 		Meta: Meta{Ui: ui},

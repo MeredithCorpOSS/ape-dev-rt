@@ -3,6 +3,7 @@ package nomad
 import (
 	"testing"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestPeriodicEndpoint_Force(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -42,7 +44,8 @@ func TestPeriodicEndpoint_Force(t *testing.T) {
 	}
 
 	// Lookup the evaluation
-	eval, err := state.EvalByID(resp.EvalID)
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, resp.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -55,6 +58,7 @@ func TestPeriodicEndpoint_Force(t *testing.T) {
 }
 
 func TestPeriodicEndpoint_Force_NonPeriodic(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})

@@ -7,13 +7,18 @@ import (
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/testutil"
+	"github.com/kr/pretty"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestJobEndpoint_Register(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -39,7 +44,8 @@ func TestJobEndpoint_Register(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -56,7 +62,7 @@ func TestJobEndpoint_Register(t *testing.T) {
 	}
 
 	// Lookup the evaluation
-	eval, err := state.EvalByID(resp.EvalID)
+	eval, err := state.EvalByID(ws, resp.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -87,7 +93,51 @@ func TestJobEndpoint_Register(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Register_ACL(t *testing.T) {
+	t.Parallel()
+	s1, root := testACLServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	job := mock.Job()
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Try without a token, expect failure
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err == nil {
+		t.Fatalf("expected error")
+	}
+
+	// Try with a token
+	req.SecretID = root.SecretID
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Check for the node in the FSM
+	state := s1.fsm.State()
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected job")
+	}
+}
+
 func TestJobEndpoint_Register_InvalidDriverConfig(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -116,7 +166,38 @@ func TestJobEndpoint_Register_InvalidDriverConfig(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Register_Payload(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request with a job containing an invalid driver
+	// config
+	job := mock.Job()
+	job.Payload = []byte{0x1}
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp)
+	if err == nil {
+		t.Fatalf("expected a validation error")
+	}
+
+	if !strings.Contains(err.Error(), "payload") {
+		t.Fatalf("expected a payload error but got: %v", err)
+	}
+}
+
 func TestJobEndpoint_Register_Existing(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -156,7 +237,8 @@ func TestJobEndpoint_Register_Existing(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -169,9 +251,12 @@ func TestJobEndpoint_Register_Existing(t *testing.T) {
 	if out.Priority != 100 {
 		t.Fatalf("expected update")
 	}
+	if out.Version != 1 {
+		t.Fatalf("expected update")
+	}
 
 	// Lookup the evaluation
-	eval, err := state.EvalByID(resp.EvalID)
+	eval, err := state.EvalByID(ws, resp.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -200,9 +285,32 @@ func TestJobEndpoint_Register_Existing(t *testing.T) {
 	if eval.Status != structs.EvalStatusPending {
 		t.Fatalf("bad: %#v", eval)
 	}
+
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Check to ensure the job version didn't get bumped because we submitted
+	// the same job
+	state = s1.fsm.State()
+	ws = memdb.NewWatchSet()
+	out, err = state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected job")
+	}
+	if out.Version != 1 {
+		t.Fatalf("expected no update; got %v; diff %v", out.Version, pretty.Diff(job2, out))
+	}
 }
 
 func TestJobEndpoint_Register_Periodic(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -228,7 +336,8 @@ func TestJobEndpoint_Register_Periodic(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -249,7 +358,53 @@ func TestJobEndpoint_Register_Periodic(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Register_ParameterizedJob(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request for a parameterized job.
+	job := mock.Job()
+	job.Type = structs.JobTypeBatch
+	job.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.JobModifyIndex == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Check for the job in the FSM
+	state := s1.fsm.State()
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected job")
+	}
+	if out.CreateIndex != resp.JobModifyIndex {
+		t.Fatalf("index mis-match")
+	}
+	if resp.EvalID != "" {
+		t.Fatalf("Register created an eval for a parameterized job")
+	}
+}
+
 func TestJobEndpoint_Register_EnforceIndex(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -293,7 +448,8 @@ func TestJobEndpoint_Register_EnforceIndex(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -349,7 +505,7 @@ func TestJobEndpoint_Register_EnforceIndex(t *testing.T) {
 		t.Fatalf("bad index: %d", resp.Index)
 	}
 
-	out, err = state.JobByID(job.ID)
+	out, err = state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -362,6 +518,7 @@ func TestJobEndpoint_Register_EnforceIndex(t *testing.T) {
 }
 
 func TestJobEndpoint_Register_Vault_Disabled(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 		f := false
@@ -391,6 +548,7 @@ func TestJobEndpoint_Register_Vault_Disabled(t *testing.T) {
 }
 
 func TestJobEndpoint_Register_Vault_AllowUnauthenticated(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -426,7 +584,8 @@ func TestJobEndpoint_Register_Vault_AllowUnauthenticated(t *testing.T) {
 
 	// Check for the job in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -439,6 +598,7 @@ func TestJobEndpoint_Register_Vault_AllowUnauthenticated(t *testing.T) {
 }
 
 func TestJobEndpoint_Register_Vault_NoToken(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -475,6 +635,7 @@ func TestJobEndpoint_Register_Vault_NoToken(t *testing.T) {
 }
 
 func TestJobEndpoint_Register_Vault_Policies(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -549,7 +710,8 @@ func TestJobEndpoint_Register_Vault_Policies(t *testing.T) {
 
 	// Check for the job in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -592,7 +754,7 @@ func TestJobEndpoint_Register_Vault_Policies(t *testing.T) {
 	}
 
 	// Check for the job in the FSM
-	out, err = state.JobByID(job2.ID)
+	out, err = state.JobByID(ws, job2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -607,7 +769,216 @@ func TestJobEndpoint_Register_Vault_Policies(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Revert(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the initial register request
+	job := mock.Job()
+	job.Priority = 100
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Reregister again to get another version
+	job2 := job.Copy()
+	job2.Priority = 1
+	req = &structs.JobRegisterRequest{
+		Job:          job2,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Create revert request and enforcing it be at an incorrect version
+	revertReq := &structs.JobRevertRequest{
+		JobID:               job.ID,
+		JobVersion:          0,
+		EnforcePriorVersion: helper.Uint64ToPtr(10),
+		WriteRequest:        structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	err := msgpackrpc.CallWithCodec(codec, "Job.Revert", revertReq, &resp)
+	if err == nil || !strings.Contains(err.Error(), "enforcing version 10") {
+		t.Fatalf("expected enforcement error")
+	}
+
+	// Create revert request and enforcing it be at the current version
+	revertReq = &structs.JobRevertRequest{
+		JobID:        job.ID,
+		JobVersion:   1,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	err = msgpackrpc.CallWithCodec(codec, "Job.Revert", revertReq, &resp)
+	if err == nil || !strings.Contains(err.Error(), "current version") {
+		t.Fatalf("expected current version err: %v", err)
+	}
+
+	// Create revert request and enforcing it be at version 1
+	revertReq = &structs.JobRevertRequest{
+		JobID:               job.ID,
+		JobVersion:          0,
+		EnforcePriorVersion: helper.Uint64ToPtr(1),
+		WriteRequest:        structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Revert", revertReq, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+	if resp.EvalID == "" || resp.EvalCreateIndex == 0 {
+		t.Fatalf("bad created eval: %+v", resp)
+	}
+	if resp.JobModifyIndex == 0 {
+		t.Fatalf("bad job modify index: %d", resp.JobModifyIndex)
+	}
+
+	// Create revert request and don't enforce. We are at version 2 but it is
+	// the same as version 0
+	revertReq = &structs.JobRevertRequest{
+		JobID:        job.ID,
+		JobVersion:   0,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Revert", revertReq, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+	if resp.EvalID == "" || resp.EvalCreateIndex == 0 {
+		t.Fatalf("bad created eval: %+v", resp)
+	}
+	if resp.JobModifyIndex == 0 {
+		t.Fatalf("bad job modify index: %d", resp.JobModifyIndex)
+	}
+
+	// Check that the job is at the correct version and that the eval was
+	// created
+	state := s1.fsm.State()
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected job")
+	}
+	if out.Priority != job.Priority {
+		t.Fatalf("priority mis-match")
+	}
+	if out.Version != 2 {
+		t.Fatalf("got version %d; want %d", out.Version, 2)
+	}
+
+	eout, err := state.EvalByID(ws, resp.EvalID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if eout == nil {
+		t.Fatalf("expected eval")
+	}
+	if eout.JobID != job.ID {
+		t.Fatalf("job id mis-match")
+	}
+
+	versions, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(versions) != 3 {
+		t.Fatalf("got %d versions; want %d", len(versions), 3)
+	}
+}
+
+func TestJobEndpoint_Stable(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the initial register request
+	job := mock.Job()
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Create stability request
+	stableReq := &structs.JobStabilityRequest{
+		JobID:        job.ID,
+		JobVersion:   0,
+		Stable:       true,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var stableResp structs.JobStabilityResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Stable", stableReq, &stableResp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if stableResp.Index == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Check that the job is marked stable
+	state := s1.fsm.State()
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected job")
+	}
+	if !out.Stable {
+		t.Fatalf("Job is not marked stable")
+	}
+}
+
 func TestJobEndpoint_Evaluate(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -647,7 +1018,8 @@ func TestJobEndpoint_Evaluate(t *testing.T) {
 
 	// Lookup the evaluation
 	state := s1.fsm.State()
-	eval, err := state.EvalByID(resp.EvalID)
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, resp.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -679,6 +1051,7 @@ func TestJobEndpoint_Evaluate(t *testing.T) {
 }
 
 func TestJobEndpoint_Evaluate_Periodic(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -714,7 +1087,47 @@ func TestJobEndpoint_Evaluate_Periodic(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Evaluate_ParameterizedJob(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	job := mock.Job()
+	job.Type = structs.JobTypeBatch
+	job.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	req := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp.JobModifyIndex == 0 {
+		t.Fatalf("bad index: %d", resp.Index)
+	}
+
+	// Force a re-evaluation
+	reEval := &structs.JobEvaluateRequest{
+		JobID:        job.ID,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Evaluate", reEval, &resp); err == nil {
+		t.Fatal("expect an err")
+	}
+}
+
 func TestJobEndpoint_Deregister(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -735,9 +1148,10 @@ func TestJobEndpoint_Deregister(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	// Deregister
+	// Deregister but don't purge
 	dereg := &structs.JobDeregisterRequest{
 		JobID:        job.ID,
+		Purge:        false,
 		WriteRequest: structs.WriteRequest{Region: "global"},
 	}
 	var resp2 structs.JobDeregisterResponse
@@ -748,18 +1162,22 @@ func TestJobEndpoint_Deregister(t *testing.T) {
 		t.Fatalf("bad index: %d", resp2.Index)
 	}
 
-	// Check for the node in the FSM
+	// Check for the job in the FSM
+	ws := memdb.NewWatchSet()
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if out != nil {
-		t.Fatalf("unexpected job")
+	if out == nil {
+		t.Fatalf("job purged")
+	}
+	if !out.Stop {
+		t.Fatalf("job not stopped")
 	}
 
 	// Lookup the evaluation
-	eval, err := state.EvalByID(resp2.EvalID)
+	eval, err := state.EvalByID(ws, resp2.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -788,9 +1206,64 @@ func TestJobEndpoint_Deregister(t *testing.T) {
 	if eval.Status != structs.EvalStatusPending {
 		t.Fatalf("bad: %#v", eval)
 	}
+
+	// Deregister and purge
+	dereg2 := &structs.JobDeregisterRequest{
+		JobID:        job.ID,
+		Purge:        true,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+	var resp3 structs.JobDeregisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Deregister", dereg2, &resp3); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp3.Index == 0 {
+		t.Fatalf("bad index: %d", resp3.Index)
+	}
+
+	// Check for the job in the FSM
+	out, err = state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != nil {
+		t.Fatalf("unexpected job")
+	}
+
+	// Lookup the evaluation
+	eval, err = state.EvalByID(ws, resp3.EvalID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if eval == nil {
+		t.Fatalf("expected eval")
+	}
+	if eval.CreateIndex != resp3.EvalCreateIndex {
+		t.Fatalf("index mis-match")
+	}
+
+	if eval.Priority != structs.JobDefaultPriority {
+		t.Fatalf("bad: %#v", eval)
+	}
+	if eval.Type != structs.JobTypeService {
+		t.Fatalf("bad: %#v", eval)
+	}
+	if eval.TriggeredBy != structs.EvalTriggerJobDeregister {
+		t.Fatalf("bad: %#v", eval)
+	}
+	if eval.JobID != job.ID {
+		t.Fatalf("bad: %#v", eval)
+	}
+	if eval.JobModifyIndex != resp3.JobModifyIndex {
+		t.Fatalf("bad: %#v", eval)
+	}
+	if eval.Status != structs.EvalStatusPending {
+		t.Fatalf("bad: %#v", eval)
+	}
 }
 
 func TestJobEndpoint_Deregister_NonExistent(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -814,7 +1287,8 @@ func TestJobEndpoint_Deregister_NonExistent(t *testing.T) {
 
 	// Lookup the evaluation
 	state := s1.fsm.State()
-	eval, err := state.EvalByID(resp2.EvalID)
+	ws := memdb.NewWatchSet()
+	eval, err := state.EvalByID(ws, resp2.EvalID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -846,6 +1320,7 @@ func TestJobEndpoint_Deregister_NonExistent(t *testing.T) {
 }
 
 func TestJobEndpoint_Deregister_Periodic(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -869,6 +1344,7 @@ func TestJobEndpoint_Deregister_Periodic(t *testing.T) {
 	// Deregister
 	dereg := &structs.JobDeregisterRequest{
 		JobID:        job.ID,
+		Purge:        true,
 		WriteRequest: structs.WriteRequest{Region: "global"},
 	}
 	var resp2 structs.JobDeregisterResponse
@@ -881,7 +1357,8 @@ func TestJobEndpoint_Deregister_Periodic(t *testing.T) {
 
 	// Check for the node in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -894,7 +1371,62 @@ func TestJobEndpoint_Deregister_Periodic(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Deregister_ParameterizedJob(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, func(c *Config) {
+		c.NumSchedulers = 0 // Prevent automatic dequeue
+	})
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	job := mock.Job()
+	job.Type = structs.JobTypeBatch
+	job.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	reg := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Deregister
+	dereg := &structs.JobDeregisterRequest{
+		JobID:        job.ID,
+		Purge:        true,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+	var resp2 structs.JobDeregisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Deregister", dereg, &resp2); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if resp2.JobModifyIndex == 0 {
+		t.Fatalf("bad index: %d", resp2.Index)
+	}
+
+	// Check for the node in the FSM
+	state := s1.fsm.State()
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != nil {
+		t.Fatalf("unexpected job")
+	}
+
+	if resp.EvalID != "" {
+		t.Fatalf("Deregister created an eval for a parameterized job")
+	}
+}
+
 func TestJobEndpoint_GetJob(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -943,6 +1475,10 @@ func TestJobEndpoint_GetJob(t *testing.T) {
 		}
 	}
 
+	// Clear the submit times
+	j.SubmitTime = 0
+	resp2.Job.SubmitTime = 0
+
 	if !reflect.DeepEqual(j, resp2.Job) {
 		t.Fatalf("bad: %#v %#v", job, resp2.Job)
 	}
@@ -960,7 +1496,322 @@ func TestJobEndpoint_GetJob(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_GetJob_Blocking(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	state := s1.fsm.State()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the jobs
+	job1 := mock.Job()
+	job2 := mock.Job()
+
+	// Upsert a job we are not interested in first.
+	time.AfterFunc(100*time.Millisecond, func() {
+		if err := state.UpsertJob(100, job1); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	// Upsert another job later which should trigger the watch.
+	time.AfterFunc(200*time.Millisecond, func() {
+		if err := state.UpsertJob(200, job2); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	req := &structs.JobSpecificRequest{
+		JobID: job2.ID,
+		QueryOptions: structs.QueryOptions{
+			Region:        "global",
+			MinQueryIndex: 150,
+		},
+	}
+	start := time.Now()
+	var resp structs.SingleJobResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJob", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
+	}
+	if resp.Index != 200 {
+		t.Fatalf("Bad index: %d %d", resp.Index, 200)
+	}
+	if resp.Job == nil || resp.Job.ID != job2.ID {
+		t.Fatalf("bad: %#v", resp.Job)
+	}
+
+	// Job delete fires watches
+	time.AfterFunc(100*time.Millisecond, func() {
+		if err := state.DeleteJob(300, job2.ID); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	req.QueryOptions.MinQueryIndex = 250
+	start = time.Now()
+
+	var resp2 structs.SingleJobResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJob", req, &resp2); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp2)
+	}
+	if resp2.Index != 300 {
+		t.Fatalf("Bad index: %d %d", resp2.Index, 300)
+	}
+	if resp2.Job != nil {
+		t.Fatalf("bad: %#v", resp2.Job)
+	}
+}
+
+func TestJobEndpoint_GetJobVersions(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	job := mock.Job()
+	job.Priority = 88
+	reg := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Register the job again to create another version
+	job.Priority = 100
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Lookup the job
+	get := &structs.JobVersionsRequest{
+		JobID:        job.ID,
+		QueryOptions: structs.QueryOptions{Region: "global"},
+	}
+	var versionsResp structs.JobVersionsResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJobVersions", get, &versionsResp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if versionsResp.Index != resp.JobModifyIndex {
+		t.Fatalf("Bad index: %d %d", versionsResp.Index, resp.Index)
+	}
+
+	// Make sure there are two job versions
+	versions := versionsResp.Versions
+	if l := len(versions); l != 2 {
+		t.Fatalf("Got %d versions; want 2", l)
+	}
+
+	if v := versions[0]; v.Priority != 100 || v.ID != job.ID || v.Version != 1 {
+		t.Fatalf("bad: %+v", v)
+	}
+	if v := versions[1]; v.Priority != 88 || v.ID != job.ID || v.Version != 0 {
+		t.Fatalf("bad: %+v", v)
+	}
+
+	// Lookup non-existing job
+	get.JobID = "foobarbaz"
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJobVersions", get, &versionsResp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if versionsResp.Index != resp.JobModifyIndex {
+		t.Fatalf("Bad index: %d %d", versionsResp.Index, resp.Index)
+	}
+	if l := len(versionsResp.Versions); l != 0 {
+		t.Fatalf("unexpected versions: %d", l)
+	}
+}
+
+func TestJobEndpoint_GetJobVersions_Diff(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	job := mock.Job()
+	job.Priority = 88
+	reg := &structs.JobRegisterRequest{
+		Job:          job,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.JobRegisterResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Register the job again to create another version
+	job.Priority = 90
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Register the job again to create another version
+	job.Priority = 100
+	if err := msgpackrpc.CallWithCodec(codec, "Job.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Lookup the job
+	get := &structs.JobVersionsRequest{
+		JobID:        job.ID,
+		Diffs:        true,
+		QueryOptions: structs.QueryOptions{Region: "global"},
+	}
+	var versionsResp structs.JobVersionsResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJobVersions", get, &versionsResp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if versionsResp.Index != resp.JobModifyIndex {
+		t.Fatalf("Bad index: %d %d", versionsResp.Index, resp.Index)
+	}
+
+	// Make sure there are two job versions
+	versions := versionsResp.Versions
+	if l := len(versions); l != 3 {
+		t.Fatalf("Got %d versions; want 3", l)
+	}
+
+	if v := versions[0]; v.Priority != 100 || v.ID != job.ID || v.Version != 2 {
+		t.Fatalf("bad: %+v", v)
+	}
+	if v := versions[1]; v.Priority != 90 || v.ID != job.ID || v.Version != 1 {
+		t.Fatalf("bad: %+v", v)
+	}
+	if v := versions[2]; v.Priority != 88 || v.ID != job.ID || v.Version != 0 {
+		t.Fatalf("bad: %+v", v)
+	}
+
+	// Ensure we got diffs
+	diffs := versionsResp.Diffs
+	if l := len(diffs); l != 2 {
+		t.Fatalf("Got %d diffs; want 2", l)
+	}
+	d1 := diffs[0]
+	if len(d1.Fields) != 1 {
+		t.Fatalf("Got too many diffs: %#v", d1)
+	}
+	if d1.Fields[0].Name != "Priority" {
+		t.Fatalf("Got wrong field: %#v", d1)
+	}
+	if d1.Fields[0].Old != "90" && d1.Fields[0].New != "100" {
+		t.Fatalf("Got wrong field values: %#v", d1)
+	}
+	d2 := diffs[1]
+	if len(d2.Fields) != 1 {
+		t.Fatalf("Got too many diffs: %#v", d2)
+	}
+	if d2.Fields[0].Name != "Priority" {
+		t.Fatalf("Got wrong field: %#v", d2)
+	}
+	if d2.Fields[0].Old != "88" && d1.Fields[0].New != "90" {
+		t.Fatalf("Got wrong field values: %#v", d2)
+	}
+}
+
+func TestJobEndpoint_GetJobVersions_Blocking(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	state := s1.fsm.State()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the jobs
+	job1 := mock.Job()
+	job2 := mock.Job()
+	job3 := mock.Job()
+	job3.ID = job2.ID
+	job3.Priority = 1
+
+	// Upsert a job we are not interested in first.
+	time.AfterFunc(100*time.Millisecond, func() {
+		if err := state.UpsertJob(100, job1); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	// Upsert another job later which should trigger the watch.
+	time.AfterFunc(200*time.Millisecond, func() {
+		if err := state.UpsertJob(200, job2); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	req := &structs.JobVersionsRequest{
+		JobID: job2.ID,
+		QueryOptions: structs.QueryOptions{
+			Region:        "global",
+			MinQueryIndex: 150,
+		},
+	}
+	start := time.Now()
+	var resp structs.JobVersionsResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJobVersions", req, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
+	}
+	if resp.Index != 200 {
+		t.Fatalf("Bad index: %d %d", resp.Index, 200)
+	}
+	if len(resp.Versions) != 1 || resp.Versions[0].ID != job2.ID {
+		t.Fatalf("bad: %#v", resp.Versions)
+	}
+
+	// Upsert the job again which should trigger the watch.
+	time.AfterFunc(100*time.Millisecond, func() {
+		if err := state.UpsertJob(300, job3); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
+	req2 := &structs.JobVersionsRequest{
+		JobID: job3.ID,
+		QueryOptions: structs.QueryOptions{
+			Region:        "global",
+			MinQueryIndex: 250,
+		},
+	}
+	var resp2 structs.JobVersionsResponse
+	start = time.Now()
+	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJobVersions", req2, &resp2); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
+	}
+	if resp2.Index != 300 {
+		t.Fatalf("Bad index: %d %d", resp.Index, 300)
+	}
+	if len(resp2.Versions) != 2 {
+		t.Fatalf("bad: %#v", resp2.Versions)
+	}
+}
+
 func TestJobEndpoint_GetJobSummary(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1003,6 +1854,7 @@ func TestJobEndpoint_GetJobSummary(t *testing.T) {
 		Summary: map[string]structs.TaskGroupSummary{
 			"web": structs.TaskGroupSummary{},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: job.CreateIndex,
 		ModifyIndex: job.CreateIndex,
 	}
@@ -1013,6 +1865,7 @@ func TestJobEndpoint_GetJobSummary(t *testing.T) {
 }
 
 func TestJobEndpoint_GetJobSummary_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -1103,81 +1956,8 @@ func TestJobEndpoint_GetJobSummary_Blocking(t *testing.T) {
 	}
 }
 
-func TestJobEndpoint_GetJob_Blocking(t *testing.T) {
-	s1 := testServer(t, nil)
-	defer s1.Shutdown()
-	state := s1.fsm.State()
-	codec := rpcClient(t, s1)
-	testutil.WaitForLeader(t, s1.RPC)
-
-	// Create the jobs
-	job1 := mock.Job()
-	job2 := mock.Job()
-
-	// Upsert a job we are not interested in first.
-	time.AfterFunc(100*time.Millisecond, func() {
-		if err := state.UpsertJob(100, job1); err != nil {
-			t.Fatalf("err: %v", err)
-		}
-	})
-
-	// Upsert another job later which should trigger the watch.
-	time.AfterFunc(200*time.Millisecond, func() {
-		if err := state.UpsertJob(200, job2); err != nil {
-			t.Fatalf("err: %v", err)
-		}
-	})
-
-	req := &structs.JobSpecificRequest{
-		JobID: job2.ID,
-		QueryOptions: structs.QueryOptions{
-			Region:        "global",
-			MinQueryIndex: 50,
-		},
-	}
-	start := time.Now()
-	var resp structs.SingleJobResponse
-	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJob", req, &resp); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-
-	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
-		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
-	}
-	if resp.Index != 200 {
-		t.Fatalf("Bad index: %d %d", resp.Index, 200)
-	}
-	if resp.Job == nil || resp.Job.ID != job2.ID {
-		t.Fatalf("bad: %#v", resp.Job)
-	}
-
-	// Job delete fires watches
-	time.AfterFunc(100*time.Millisecond, func() {
-		if err := state.DeleteJob(300, job2.ID); err != nil {
-			t.Fatalf("err: %v", err)
-		}
-	})
-
-	req.QueryOptions.MinQueryIndex = 250
-	start = time.Now()
-
-	var resp2 structs.SingleJobResponse
-	if err := msgpackrpc.CallWithCodec(codec, "Job.GetJob", req, &resp2); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-
-	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
-		t.Fatalf("should block (returned in %s) %#v", elapsed, resp2)
-	}
-	if resp2.Index != 300 {
-		t.Fatalf("Bad index: %d %d", resp2.Index, 300)
-	}
-	if resp2.Job != nil {
-		t.Fatalf("bad: %#v", resp2.Job)
-	}
-}
-
 func TestJobEndpoint_ListJobs(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1231,6 +2011,7 @@ func TestJobEndpoint_ListJobs(t *testing.T) {
 }
 
 func TestJobEndpoint_ListJobs_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -1266,7 +2047,7 @@ func TestJobEndpoint_ListJobs_Blocking(t *testing.T) {
 		t.Fatalf("Bad index: %d %d", resp.Index, 100)
 	}
 	if len(resp.Jobs) != 1 || resp.Jobs[0].ID != job.ID {
-		t.Fatalf("bad: %#v", resp.Jobs)
+		t.Fatalf("bad: %#v", resp)
 	}
 
 	// Job deletion triggers watches
@@ -1290,11 +2071,12 @@ func TestJobEndpoint_ListJobs_Blocking(t *testing.T) {
 		t.Fatalf("Bad index: %d %d", resp2.Index, 200)
 	}
 	if len(resp2.Jobs) != 0 {
-		t.Fatalf("bad: %#v", resp2.Jobs)
+		t.Fatalf("bad: %#v", resp2)
 	}
 }
 
 func TestJobEndpoint_Allocations(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1332,6 +2114,7 @@ func TestJobEndpoint_Allocations(t *testing.T) {
 }
 
 func TestJobEndpoint_Allocations_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1366,7 +2149,7 @@ func TestJobEndpoint_Allocations_Blocking(t *testing.T) {
 		JobID: "job1",
 		QueryOptions: structs.QueryOptions{
 			Region:        "global",
-			MinQueryIndex: 50,
+			MinQueryIndex: 150,
 		},
 	}
 	var resp structs.JobAllocationsResponse
@@ -1387,6 +2170,7 @@ func TestJobEndpoint_Allocations_Blocking(t *testing.T) {
 }
 
 func TestJobEndpoint_Evaluations(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1422,6 +2206,7 @@ func TestJobEndpoint_Evaluations(t *testing.T) {
 }
 
 func TestJobEndpoint_Evaluations_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -1454,7 +2239,7 @@ func TestJobEndpoint_Evaluations_Blocking(t *testing.T) {
 		JobID: "job1",
 		QueryOptions: structs.QueryOptions{
 			Region:        "global",
-			MinQueryIndex: 50,
+			MinQueryIndex: 150,
 		},
 	}
 	var resp structs.JobEvaluationsResponse
@@ -1474,7 +2259,161 @@ func TestJobEndpoint_Evaluations_Blocking(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Deployments(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+	state := s1.fsm.State()
+	assert := assert.New(t)
+
+	// Create the register request
+	j := mock.Job()
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+	d1.JobID = j.ID
+	d2.JobID = j.ID
+	assert.Nil(state.UpsertJob(1000, j), "UpsertJob")
+	assert.Nil(state.UpsertDeployment(1001, d1), "UpsertDeployment")
+	assert.Nil(state.UpsertDeployment(1002, d2), "UpsertDeployment")
+
+	// Lookup the jobs
+	get := &structs.JobSpecificRequest{
+		JobID:        j.ID,
+		QueryOptions: structs.QueryOptions{Region: "global"},
+	}
+	var resp structs.DeploymentListResponse
+	assert.Nil(msgpackrpc.CallWithCodec(codec, "Job.Deployments", get, &resp), "RPC")
+	assert.EqualValues(1002, resp.Index, "response index")
+	assert.Len(resp.Deployments, 2, "deployments for job")
+}
+
+func TestJobEndpoint_Deployments_Blocking(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+	state := s1.fsm.State()
+	assert := assert.New(t)
+
+	// Create the register request
+	j := mock.Job()
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+	d2.JobID = j.ID
+	assert.Nil(state.UpsertJob(50, j), "UpsertJob")
+
+	// First upsert an unrelated eval
+	time.AfterFunc(100*time.Millisecond, func() {
+		assert.Nil(state.UpsertDeployment(100, d1), "UpsertDeployment")
+	})
+
+	// Upsert an eval for the job we are interested in later
+	time.AfterFunc(200*time.Millisecond, func() {
+		assert.Nil(state.UpsertDeployment(200, d2), "UpsertDeployment")
+	})
+
+	// Lookup the jobs
+	get := &structs.JobSpecificRequest{
+		JobID: d2.JobID,
+		QueryOptions: structs.QueryOptions{
+			Region:        "global",
+			MinQueryIndex: 150,
+		},
+	}
+	var resp structs.DeploymentListResponse
+	start := time.Now()
+	assert.Nil(msgpackrpc.CallWithCodec(codec, "Job.Deployments", get, &resp), "RPC")
+	assert.EqualValues(200, resp.Index, "response index")
+	assert.Len(resp.Deployments, 1, "deployments for job")
+	assert.Equal(d2.ID, resp.Deployments[0].ID, "returned deployment")
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
+	}
+}
+
+func TestJobEndpoint_LatestDeployment(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+	state := s1.fsm.State()
+	assert := assert.New(t)
+
+	// Create the register request
+	j := mock.Job()
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+	d1.JobID = j.ID
+	d2.JobID = j.ID
+	d2.CreateIndex = d1.CreateIndex + 100
+	d2.ModifyIndex = d2.CreateIndex + 100
+	assert.Nil(state.UpsertJob(1000, j), "UpsertJob")
+	assert.Nil(state.UpsertDeployment(1001, d1), "UpsertDeployment")
+	assert.Nil(state.UpsertDeployment(1002, d2), "UpsertDeployment")
+
+	// Lookup the jobs
+	get := &structs.JobSpecificRequest{
+		JobID:        j.ID,
+		QueryOptions: structs.QueryOptions{Region: "global"},
+	}
+	var resp structs.SingleDeploymentResponse
+	assert.Nil(msgpackrpc.CallWithCodec(codec, "Job.LatestDeployment", get, &resp), "RPC")
+	assert.EqualValues(1002, resp.Index, "response index")
+	assert.NotNil(resp.Deployment, "want a deployment")
+	assert.Equal(d2.ID, resp.Deployment.ID, "latest deployment for job")
+}
+
+func TestJobEndpoint_LatestDeployment_Blocking(t *testing.T) {
+	t.Parallel()
+	s1 := testServer(t, nil)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+	state := s1.fsm.State()
+	assert := assert.New(t)
+
+	// Create the register request
+	j := mock.Job()
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+	d2.JobID = j.ID
+	assert.Nil(state.UpsertJob(50, j), "UpsertJob")
+
+	// First upsert an unrelated eval
+	time.AfterFunc(100*time.Millisecond, func() {
+		assert.Nil(state.UpsertDeployment(100, d1), "UpsertDeployment")
+	})
+
+	// Upsert an eval for the job we are interested in later
+	time.AfterFunc(200*time.Millisecond, func() {
+		assert.Nil(state.UpsertDeployment(200, d2), "UpsertDeployment")
+	})
+
+	// Lookup the jobs
+	get := &structs.JobSpecificRequest{
+		JobID: d2.JobID,
+		QueryOptions: structs.QueryOptions{
+			Region:        "global",
+			MinQueryIndex: 150,
+		},
+	}
+	var resp structs.SingleDeploymentResponse
+	start := time.Now()
+	assert.Nil(msgpackrpc.CallWithCodec(codec, "Job.LatestDeployment", get, &resp), "RPC")
+	assert.EqualValues(200, resp.Index, "response index")
+	assert.NotNil(resp.Deployment, "deployment for job")
+	assert.Equal(d2.ID, resp.Deployment.ID, "returned deployment")
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
+		t.Fatalf("should block (returned in %s) %#v", elapsed, resp)
+	}
+}
+
 func TestJobEndpoint_Plan_WithDiff(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1527,6 +2466,7 @@ func TestJobEndpoint_Plan_WithDiff(t *testing.T) {
 }
 
 func TestJobEndpoint_Plan_NoDiff(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1579,6 +2519,7 @@ func TestJobEndpoint_Plan_NoDiff(t *testing.T) {
 }
 
 func TestJobEndpoint_ImplicitConstraints_Vault(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1620,7 +2561,8 @@ func TestJobEndpoint_ImplicitConstraints_Vault(t *testing.T) {
 
 	// Check for the job in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1643,6 +2585,7 @@ func TestJobEndpoint_ImplicitConstraints_Vault(t *testing.T) {
 }
 
 func TestJobEndpoint_ImplicitConstraints_Signals(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -1675,7 +2618,8 @@ func TestJobEndpoint_ImplicitConstraints_Signals(t *testing.T) {
 
 	// Check for the job in the FSM
 	state := s1.fsm.State()
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1700,18 +2644,25 @@ func TestJobEndpoint_ImplicitConstraints_Signals(t *testing.T) {
 }
 
 func TestJobEndpoint_ValidateJob_InvalidDriverConf(t *testing.T) {
+	t.Parallel()
 	// Create a mock job with an invalid config
 	job := mock.Job()
 	job.TaskGroups[0].Tasks[0].Config = map[string]interface{}{
 		"foo": "bar",
 	}
 
-	if err := validateJob(job); err == nil || !strings.Contains(err.Error(), "-> config") {
+	err, warnings := validateJob(job)
+	if err == nil || !strings.Contains(err.Error(), "-> config") {
 		t.Fatalf("Expected config error; got %v", err)
+	}
+
+	if warnings != nil {
+		t.Fatalf("got unexpected warnings: %v", warnings)
 	}
 }
 
 func TestJobEndpoint_ValidateJob_InvalidSignals(t *testing.T) {
+	t.Parallel()
 	// Create a mock job that wants to send a signal to a driver that can't
 	job := mock.Job()
 	job.TaskGroups[0].Tasks[0].Driver = "qemu"
@@ -1721,7 +2672,312 @@ func TestJobEndpoint_ValidateJob_InvalidSignals(t *testing.T) {
 		ChangeSignal: "SIGUSR1",
 	}
 
-	if err := validateJob(job); err == nil || !strings.Contains(err.Error(), "support sending signals") {
+	err, warnings := validateJob(job)
+	if err == nil || !strings.Contains(err.Error(), "support sending signals") {
 		t.Fatalf("Expected signal feasibility error; got %v", err)
+	}
+
+	if warnings != nil {
+		t.Fatalf("got unexpected warnings: %v", warnings)
+	}
+}
+
+func TestJobEndpoint_ValidateJobUpdate(t *testing.T) {
+	t.Parallel()
+	old := mock.Job()
+	new := mock.Job()
+
+	if err := validateJobUpdate(old, new); err != nil {
+		t.Errorf("expected update to be valid but got: %v", err)
+	}
+
+	new.Type = "batch"
+	if err := validateJobUpdate(old, new); err == nil {
+		t.Errorf("expected err when setting new job to a different type")
+	} else {
+		t.Log(err)
+	}
+
+	new = mock.Job()
+	new.Periodic = &structs.PeriodicConfig{Enabled: true}
+	if err := validateJobUpdate(old, new); err == nil {
+		t.Errorf("expected err when setting new job to periodic")
+	} else {
+		t.Log(err)
+	}
+
+	new = mock.Job()
+	new.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	if err := validateJobUpdate(old, new); err == nil {
+		t.Errorf("expected err when setting new job to parameterized")
+	} else {
+		t.Log(err)
+	}
+}
+
+func TestJobEndpoint_Dispatch(t *testing.T) {
+	t.Parallel()
+
+	// No requirements
+	d1 := mock.Job()
+	d1.Type = structs.JobTypeBatch
+	d1.ParameterizedJob = &structs.ParameterizedJobConfig{}
+
+	// Require input data
+	d2 := mock.Job()
+	d2.Type = structs.JobTypeBatch
+	d2.ParameterizedJob = &structs.ParameterizedJobConfig{
+		Payload: structs.DispatchPayloadRequired,
+	}
+
+	// Disallow input data
+	d3 := mock.Job()
+	d3.Type = structs.JobTypeBatch
+	d3.ParameterizedJob = &structs.ParameterizedJobConfig{
+		Payload: structs.DispatchPayloadForbidden,
+	}
+
+	// Require meta
+	d4 := mock.Job()
+	d4.Type = structs.JobTypeBatch
+	d4.ParameterizedJob = &structs.ParameterizedJobConfig{
+		MetaRequired: []string{"foo", "bar"},
+	}
+
+	// Optional meta
+	d5 := mock.Job()
+	d5.Type = structs.JobTypeBatch
+	d5.ParameterizedJob = &structs.ParameterizedJobConfig{
+		MetaOptional: []string{"foo", "bar"},
+	}
+
+	// Periodic dispatch job
+	d6 := mock.PeriodicJob()
+	d6.ParameterizedJob = &structs.ParameterizedJobConfig{}
+
+	d7 := mock.Job()
+	d7.Type = structs.JobTypeBatch
+	d7.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	d7.Stop = true
+
+	reqNoInputNoMeta := &structs.JobDispatchRequest{}
+	reqInputDataNoMeta := &structs.JobDispatchRequest{
+		Payload: []byte("hello world"),
+	}
+	reqNoInputDataMeta := &structs.JobDispatchRequest{
+		Meta: map[string]string{
+			"foo": "f1",
+			"bar": "f2",
+		},
+	}
+	reqInputDataMeta := &structs.JobDispatchRequest{
+		Payload: []byte("hello world"),
+		Meta: map[string]string{
+			"foo": "f1",
+			"bar": "f2",
+		},
+	}
+	reqBadMeta := &structs.JobDispatchRequest{
+		Payload: []byte("hello world"),
+		Meta: map[string]string{
+			"foo": "f1",
+			"bar": "f2",
+			"baz": "f3",
+		},
+	}
+	reqInputDataTooLarge := &structs.JobDispatchRequest{
+		Payload: make([]byte, DispatchPayloadSizeLimit+100),
+	}
+
+	type testCase struct {
+		name             string
+		parameterizedJob *structs.Job
+		dispatchReq      *structs.JobDispatchRequest
+		noEval           bool
+		err              bool
+		errStr           string
+	}
+	cases := []testCase{
+		{
+			name:             "optional input data w/ data",
+			parameterizedJob: d1,
+			dispatchReq:      reqInputDataNoMeta,
+			err:              false,
+		},
+		{
+			name:             "optional input data w/o data",
+			parameterizedJob: d1,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              false,
+		},
+		{
+			name:             "require input data w/ data",
+			parameterizedJob: d2,
+			dispatchReq:      reqInputDataNoMeta,
+			err:              false,
+		},
+		{
+			name:             "require input data w/o data",
+			parameterizedJob: d2,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              true,
+			errStr:           "not provided but required",
+		},
+		{
+			name:             "disallow input data w/o data",
+			parameterizedJob: d3,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              false,
+		},
+		{
+			name:             "disallow input data w/ data",
+			parameterizedJob: d3,
+			dispatchReq:      reqInputDataNoMeta,
+			err:              true,
+			errStr:           "provided but forbidden",
+		},
+		{
+			name:             "require meta w/ meta",
+			parameterizedJob: d4,
+			dispatchReq:      reqInputDataMeta,
+			err:              false,
+		},
+		{
+			name:             "require meta w/o meta",
+			parameterizedJob: d4,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              true,
+			errStr:           "did not provide required meta keys",
+		},
+		{
+			name:             "optional meta w/ meta",
+			parameterizedJob: d5,
+			dispatchReq:      reqNoInputDataMeta,
+			err:              false,
+		},
+		{
+			name:             "optional meta w/o meta",
+			parameterizedJob: d5,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              false,
+		},
+		{
+			name:             "optional meta w/ bad meta",
+			parameterizedJob: d5,
+			dispatchReq:      reqBadMeta,
+			err:              true,
+			errStr:           "unpermitted metadata keys",
+		},
+		{
+			name:             "optional input w/ too big of input",
+			parameterizedJob: d1,
+			dispatchReq:      reqInputDataTooLarge,
+			err:              true,
+			errStr:           "Payload exceeds maximum size",
+		},
+		{
+			name:             "periodic job dispatched, ensure no eval",
+			parameterizedJob: d6,
+			dispatchReq:      reqNoInputNoMeta,
+			noEval:           true,
+		},
+		{
+			name:             "periodic job stopped, ensure error",
+			parameterizedJob: d7,
+			dispatchReq:      reqNoInputNoMeta,
+			err:              true,
+			errStr:           "stopped",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s1 := testServer(t, func(c *Config) {
+				c.NumSchedulers = 0 // Prevent automatic dequeue
+			})
+			defer s1.Shutdown()
+			codec := rpcClient(t, s1)
+			testutil.WaitForLeader(t, s1.RPC)
+
+			// Create the register request
+			regReq := &structs.JobRegisterRequest{
+				Job:          tc.parameterizedJob,
+				WriteRequest: structs.WriteRequest{Region: "global"},
+			}
+
+			// Fetch the response
+			var regResp structs.JobRegisterResponse
+			if err := msgpackrpc.CallWithCodec(codec, "Job.Register", regReq, &regResp); err != nil {
+				t.Fatalf("err: %v", err)
+			}
+
+			// Now try to dispatch
+			tc.dispatchReq.JobID = tc.parameterizedJob.ID
+			tc.dispatchReq.WriteRequest = structs.WriteRequest{Region: "global"}
+
+			var dispatchResp structs.JobDispatchResponse
+			dispatchErr := msgpackrpc.CallWithCodec(codec, "Job.Dispatch", tc.dispatchReq, &dispatchResp)
+
+			if dispatchErr == nil {
+				if tc.err {
+					t.Fatalf("Expected error: %v", dispatchErr)
+				}
+
+				// Check that we got an eval and job id back
+				switch dispatchResp.EvalID {
+				case "":
+					if !tc.noEval {
+						t.Fatalf("Bad response")
+					}
+				default:
+					if tc.noEval {
+						t.Fatalf("Got eval %q", dispatchResp.EvalID)
+					}
+				}
+
+				if dispatchResp.DispatchedJobID == "" {
+					t.Fatalf("Bad response")
+				}
+
+				state := s1.fsm.State()
+				ws := memdb.NewWatchSet()
+				out, err := state.JobByID(ws, dispatchResp.DispatchedJobID)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				if out == nil {
+					t.Fatalf("expected job")
+				}
+				if out.CreateIndex != dispatchResp.JobCreateIndex {
+					t.Fatalf("index mis-match")
+				}
+				if out.ParentID != tc.parameterizedJob.ID {
+					t.Fatalf("bad parent ID")
+				}
+
+				if tc.noEval {
+					return
+				}
+
+				// Lookup the evaluation
+				eval, err := state.EvalByID(ws, dispatchResp.EvalID)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+
+				if eval == nil {
+					t.Fatalf("expected eval")
+				}
+				if eval.CreateIndex != dispatchResp.EvalCreateIndex {
+					t.Fatalf("index mis-match")
+				}
+			} else {
+				if !tc.err {
+					t.Fatalf("Got unexpected error: %v", dispatchErr)
+				} else if !strings.Contains(dispatchErr.Error(), tc.errStr) {
+					t.Fatalf("Expected err to include %q; got %v", tc.errStr, dispatchErr)
+				}
+			}
+		})
 	}
 }

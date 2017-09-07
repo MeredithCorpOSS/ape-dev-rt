@@ -48,23 +48,25 @@ func (a *Allocations) Info(allocID string, q *QueryOptions) (*Allocation, *Query
 }
 
 func (a *Allocations) Stats(alloc *Allocation, q *QueryOptions) (*AllocResourceUsage, error) {
-	node, _, err := a.client.Nodes().Info(alloc.NodeID, q)
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
 	if err != nil {
 		return nil, err
 	}
-	if node.Status == "down" {
-		return nil, NodeDownErr
-	}
-	if node.HTTPAddr == "" {
-		return nil, fmt.Errorf("http addr of the node where alloc %q is running is not advertised", alloc.ID)
-	}
-	client, err := NewClient(a.client.config.CopyConfig(node.HTTPAddr, node.TLSEnabled))
-	if err != nil {
-		return nil, err
-	}
+
 	var resp AllocResourceUsage
-	_, err = client.query("/v1/client/allocation/"+alloc.ID+"/stats", &resp, nil)
+	_, err = nodeClient.query("/v1/client/allocation/"+alloc.ID+"/stats", &resp, nil)
 	return &resp, err
+}
+
+func (a *Allocations) GC(alloc *Allocation, q *QueryOptions) error {
+	nodeClient, err := a.client.GetNodeClient(alloc.NodeID, q)
+	if err != nil {
+		return err
+	}
+
+	var resp struct{}
+	_, err = nodeClient.query("/v1/client/allocation/"+alloc.ID+"/gc", &resp, nil)
+	return err
 }
 
 // Allocation is used for serialization of allocations.
@@ -85,9 +87,12 @@ type Allocation struct {
 	ClientStatus       string
 	ClientDescription  string
 	TaskStates         map[string]*TaskState
+	DeploymentID       string
+	DeploymentStatus   *AllocDeploymentStatus
 	PreviousAllocation string
 	CreateIndex        uint64
 	ModifyIndex        uint64
+	AllocModifyIndex   uint64
 	CreateTime         int64
 }
 
@@ -114,15 +119,25 @@ type AllocationListStub struct {
 	Name               string
 	NodeID             string
 	JobID              string
+	JobVersion         uint64
 	TaskGroup          string
 	DesiredStatus      string
 	DesiredDescription string
 	ClientStatus       string
 	ClientDescription  string
 	TaskStates         map[string]*TaskState
+	DeploymentStatus   *AllocDeploymentStatus
 	CreateIndex        uint64
 	ModifyIndex        uint64
 	CreateTime         int64
+}
+
+// AllocDeploymentStatus captures the status of the allocation as part of the
+// deployment. This can include things like if the allocation has been marked as
+// heatlhy.
+type AllocDeploymentStatus struct {
+	Healthy     *bool
+	ModifyIndex uint64
 }
 
 // AllocIndexSort reverse sorts allocs by CreateIndex.

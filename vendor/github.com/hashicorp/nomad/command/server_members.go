@@ -2,10 +2,12 @@ package command
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
 	"github.com/hashicorp/nomad/api"
+	"github.com/posener/complete"
 	"github.com/ryanuber/columnize"
 )
 
@@ -32,6 +34,17 @@ Server Members Options:
     default output format.
 `
 	return strings.TrimSpace(helpText)
+}
+
+func (c *ServerMembersCommand) AutocompleteFlags() complete.Flags {
+	return mergeAutocompleteFlags(c.Meta.AutocompleteFlags(FlagSetClient),
+		complete.Flags{
+			"-detailed": complete.PredictNothing,
+		})
+}
+
+func (c *ServerMembersCommand) AutocompleteArgs() complete.Predictor {
+	return complete.PredictNothing
 }
 
 func (c *ServerMembersCommand) Synopsis() string {
@@ -107,7 +120,7 @@ func standardOutput(mem []*api.AgentMember, leaders map[string]string) []string 
 		regLeader, ok := leaders[reg]
 		isLeader := false
 		if ok {
-			if regLeader == fmt.Sprintf("%s:%s", member.Addr, member.Tags["port"]) {
+			if regLeader == net.JoinHostPort(member.Addr, member.Tags["port"]) {
 
 				isLeader = true
 			}

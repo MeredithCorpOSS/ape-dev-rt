@@ -1,16 +1,20 @@
 package state
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/hashicorp/go-memdb"
+	memdb "github.com/hashicorp/go-memdb"
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
-	"github.com/hashicorp/nomad/nomad/watch"
+	"github.com/stretchr/testify/assert"
 )
 
 func testStateStore(t *testing.T) *StateStore {
@@ -24,21 +28,546 @@ func testStateStore(t *testing.T) *StateStore {
 	return state
 }
 
-func TestStateStore_UpsertNode_Node(t *testing.T) {
+func TestStateStore_Blocking_Error(t *testing.T) {
+	expected := fmt.Errorf("test error")
+	errFn := func(memdb.WatchSet, *StateStore) (interface{}, uint64, error) {
+		return nil, 0, expected
+	}
+
 	state := testStateStore(t)
-	node := mock.Node()
+	_, idx, err := state.BlockingQuery(errFn, 10, context.Background())
+	assert.EqualError(t, err, expected.Error())
+	assert.Zero(t, idx)
+}
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "nodes"},
-		watch.Item{Node: node.ID})
+func TestStateStore_Blocking_Timeout(t *testing.T) {
+	noopFn := func(memdb.WatchSet, *StateStore) (interface{}, uint64, error) {
+		return nil, 5, nil
+	}
 
-	err := state.UpsertNode(1000, node)
+	state := testStateStore(t)
+	timeout := time.Now().Add(10 * time.Millisecond)
+	deadlineCtx, cancel := context.WithDeadline(context.Background(), timeout)
+	defer cancel()
+
+	_, idx, err := state.BlockingQuery(noopFn, 10, deadlineCtx)
+	assert.EqualError(t, err, context.DeadlineExceeded.Error())
+	assert.EqualValues(t, 5, idx)
+	assert.WithinDuration(t, timeout, time.Now(), 5*time.Millisecond)
+}
+
+func TestStateStore_Blocking_MinQuery(t *testing.T) {
+	job := mock.Job()
+	count := 0
+	queryFn := func(ws memdb.WatchSet, s *StateStore) (interface{}, uint64, error) {
+		_, err := s.JobByID(ws, job.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		count++
+		if count == 1 {
+			return false, 5, nil
+		} else if count > 2 {
+			return false, 20, fmt.Errorf("called too many times")
+		}
+
+		return true, 11, nil
+	}
+
+	state := testStateStore(t)
+	timeout := time.Now().Add(10 * time.Millisecond)
+	deadlineCtx, cancel := context.WithDeadline(context.Background(), timeout)
+	defer cancel()
+
+	time.AfterFunc(5*time.Millisecond, func() {
+		state.UpsertJob(11, job)
+	})
+
+	resp, idx, err := state.BlockingQuery(queryFn, 10, deadlineCtx)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, count)
+	assert.EqualValues(t, 11, idx)
+	assert.True(t, resp.(bool))
+}
+
+// This test checks that:
+// 1) The job is denormalized
+// 2) Allocations are created
+func TestStateStore_UpsertPlanResults_AllocationsCreated_Denormalized(t *testing.T) {
+	state := testStateStore(t)
+	alloc := mock.Alloc()
+	job := alloc.Job
+	alloc.Job = nil
+
+	if err := state.UpsertJob(999, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a plan result
+	res := structs.ApplyPlanResultsRequest{
+		AllocUpdateRequest: structs.AllocUpdateRequest{
+			Alloc: []*structs.Allocation{alloc},
+			Job:   job,
+		},
+	}
+
+	err := state.UpsertPlanResults(1000, &res)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(alloc, out) {
+		t.Fatalf("bad: %#v %#v", alloc, out)
+	}
+
+	index, err := state.Index("allocs")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+// This test checks that the deployment is created and allocations count towards
+// the deployment
+func TestStateStore_UpsertPlanResults_Deployment(t *testing.T) {
+	state := testStateStore(t)
+	alloc := mock.Alloc()
+	alloc2 := mock.Alloc()
+	job := alloc.Job
+	alloc.Job = nil
+	alloc2.Job = nil
+
+	d := mock.Deployment()
+	alloc.DeploymentID = d.ID
+	alloc2.DeploymentID = d.ID
+
+	if err := state.UpsertJob(999, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a plan result
+	res := structs.ApplyPlanResultsRequest{
+		AllocUpdateRequest: structs.AllocUpdateRequest{
+			Alloc: []*structs.Allocation{alloc, alloc2},
+			Job:   job,
+		},
+		Deployment: d,
+	}
+
+	err := state.UpsertPlanResults(1000, &res)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(alloc, out) {
+		t.Fatalf("bad: %#v %#v", alloc, out)
+	}
+
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if dout == nil {
+		t.Fatalf("bad: nil deployment")
+	}
+
+	tg, ok := dout.TaskGroups[alloc.TaskGroup]
+	if !ok {
+		t.Fatalf("bad: nil deployment state")
+	}
+	if tg == nil || tg.PlacedAllocs != 2 {
+		t.Fatalf("bad: %v", dout)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	// Update the allocs to be part of a new deployment
+	d2 := d.Copy()
+	d2.ID = structs.GenerateUUID()
+
+	allocNew := alloc.Copy()
+	allocNew.DeploymentID = d2.ID
+	allocNew2 := alloc2.Copy()
+	allocNew2.DeploymentID = d2.ID
+
+	// Create another plan
+	res = structs.ApplyPlanResultsRequest{
+		AllocUpdateRequest: structs.AllocUpdateRequest{
+			Alloc: []*structs.Allocation{allocNew, allocNew2},
+			Job:   job,
+		},
+		Deployment: d2,
+	}
+
+	err = state.UpsertPlanResults(1001, &res)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	dout, err = state.DeploymentByID(ws, d2.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if dout == nil {
+		t.Fatalf("bad: nil deployment")
+	}
+
+	tg, ok = dout.TaskGroups[alloc.TaskGroup]
+	if !ok {
+		t.Fatalf("bad: nil deployment state")
+	}
+	if tg == nil || tg.PlacedAllocs != 2 {
+		t.Fatalf("bad: %v", dout)
+	}
+}
+
+// This test checks that deployment updates are applied correctly
+func TestStateStore_UpsertPlanResults_DeploymentUpdates(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job that applies to all
+	job := mock.Job()
+	if err := state.UpsertJob(998, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a deployment that we will update its status
+	doutstanding := mock.Deployment()
+	doutstanding.JobID = job.ID
+
+	if err := state.UpsertDeployment(1000, doutstanding); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	alloc := mock.Alloc()
+	alloc.Job = nil
+
+	dnew := mock.Deployment()
+	dnew.JobID = job.ID
+	alloc.DeploymentID = dnew.ID
+
+	// Update the old deployment
+	update := &structs.DeploymentStatusUpdate{
+		DeploymentID:      doutstanding.ID,
+		Status:            "foo",
+		StatusDescription: "bar",
+	}
+
+	// Create a plan result
+	res := structs.ApplyPlanResultsRequest{
+		AllocUpdateRequest: structs.AllocUpdateRequest{
+			Alloc: []*structs.Allocation{alloc},
+			Job:   job,
+		},
+		Deployment:        dnew,
+		DeploymentUpdates: []*structs.DeploymentStatusUpdate{update},
+	}
+
+	err := state.UpsertPlanResults(1000, &res)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	ws := memdb.NewWatchSet()
+
+	// Check the deployments are correctly updated.
+	dout, err := state.DeploymentByID(ws, dnew.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if dout == nil {
+		t.Fatalf("bad: nil deployment")
+	}
+
+	tg, ok := dout.TaskGroups[alloc.TaskGroup]
+	if !ok {
+		t.Fatalf("bad: nil deployment state")
+	}
+	if tg == nil || tg.PlacedAllocs != 1 {
+		t.Fatalf("bad: %v", dout)
+	}
+
+	doutstandingout, err := state.DeploymentByID(ws, doutstanding.ID)
+	if err != nil || doutstandingout == nil {
+		t.Fatalf("bad: %v %v", err, doutstandingout)
+	}
+	if doutstandingout.Status != update.Status || doutstandingout.StatusDescription != update.StatusDescription || doutstandingout.ModifyIndex != 1000 {
+		t.Fatalf("bad: %v", doutstandingout)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpsertDeployment(t *testing.T) {
+	state := testStateStore(t)
+	deployment := mock.Deployment()
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.DeploymentsByJobID(ws, deployment.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err = state.UpsertDeployment(1000, deployment)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.DeploymentByID(ws, deployment.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(deployment, out) {
+		t.Fatalf("bad: %#v %#v", deployment, out)
+	}
+
+	index, err := state.Index("deployment")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeleteDeployment(t *testing.T) {
+	state := testStateStore(t)
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+
+	err := state.UpsertDeployment(1000, d1)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if err := state.UpsertDeployment(1001, d2); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.DeploymentByID(ws, d1.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err = state.DeleteDeployment(1002, []string{d1.ID, d2.ID})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.DeploymentByID(ws, d1.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if out != nil {
+		t.Fatalf("bad: %#v %#v", d1, out)
+	}
+
+	index, err := state.Index("deployment")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1002 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_Deployments(t *testing.T) {
+	state := testStateStore(t)
+	var deployments []*structs.Deployment
+
+	for i := 0; i < 10; i++ {
+		deployment := mock.Deployment()
+		deployments = append(deployments, deployment)
+
+		err := state.UpsertDeployment(1000+uint64(i), deployment)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+
+	ws := memdb.NewWatchSet()
+	iter, err := state.Deployments(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	var out []*structs.Deployment
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		out = append(out, raw.(*structs.Deployment))
+	}
+
+	lessThan := func(i, j int) bool {
+		return deployments[i].ID < deployments[j].ID
+	}
+	sort.Slice(deployments, lessThan)
+	sort.Slice(out, lessThan)
+
+	if !reflect.DeepEqual(deployments, out) {
+		t.Fatalf("bad: %#v %#v", deployments, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeploymentsByIDPrefix(t *testing.T) {
+	state := testStateStore(t)
+	deploy := mock.Deployment()
+
+	deploy.ID = "11111111-662e-d0ab-d1c9-3e434af7bdb4"
+	err := state.UpsertDeployment(1000, deploy)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that getters don't cause it to fire
+	ws := memdb.NewWatchSet()
+	iter, err := state.DeploymentsByIDPrefix(ws, deploy.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	gatherDeploys := func(iter memdb.ResultIterator) []*structs.Deployment {
+		var deploys []*structs.Deployment
+		for {
+			raw := iter.Next()
+			if raw == nil {
+				break
+			}
+			deploy := raw.(*structs.Deployment)
+			deploys = append(deploys, deploy)
+		}
+		return deploys
+	}
+
+	deploys := gatherDeploys(iter)
+	if len(deploys) != 1 {
+		t.Fatalf("err: %v", err)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	iter, err = state.DeploymentsByIDPrefix(ws, "11")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	deploys = gatherDeploys(iter)
+	if len(deploys) != 1 {
+		t.Fatalf("err: %v", err)
+	}
+
+	deploy = mock.Deployment()
+	deploy.ID = "11222222-662e-d0ab-d1c9-3e434af7bdb4"
+	err = state.UpsertDeployment(1001, deploy)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	iter, err = state.DeploymentsByIDPrefix(ws, "11")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	deploys = gatherDeploys(iter)
+	if len(deploys) != 2 {
+		t.Fatalf("err: %v", err)
+	}
+
+	iter, err = state.DeploymentsByIDPrefix(ws, "1111")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	deploys = gatherDeploys(iter)
+	if len(deploys) != 1 {
+		t.Fatalf("err: %v", err)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpsertNode_Node(t *testing.T) {
+	state := testStateStore(t)
+	node := mock.Node()
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.NodeByID(ws, node.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err = state.UpsertNode(1000, node)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -55,21 +584,24 @@ func TestStateStore_UpsertNode_Node(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_DeleteNode_Node(t *testing.T) {
 	state := testStateStore(t)
 	node := mock.Node()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "nodes"},
-		watch.Item{Node: node.ID})
-
 	err := state.UpsertNode(1000, node)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.NodeByID(ws, node.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	err = state.DeleteNode(1001, node.ID)
@@ -77,7 +609,12 @@ func TestStateStore_DeleteNode_Node(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.NodeByID(node.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -94,21 +631,24 @@ func TestStateStore_DeleteNode_Node(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_UpdateNodeStatus_Node(t *testing.T) {
 	state := testStateStore(t)
 	node := mock.Node()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "nodes"},
-		watch.Item{Node: node.ID})
-
 	err := state.UpsertNode(800, node)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that update node status fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.NodeByID(ws, node.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	err = state.UpdateNodeStatus(801, node.ID, structs.NodeStatusReady)
@@ -116,7 +656,12 @@ func TestStateStore_UpdateNodeStatus_Node(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.NodeByID(node.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -136,21 +681,24 @@ func TestStateStore_UpdateNodeStatus_Node(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_UpdateNodeDrain_Node(t *testing.T) {
 	state := testStateStore(t)
 	node := mock.Node()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "nodes"},
-		watch.Item{Node: node.ID})
-
 	err := state.UpsertNode(1000, node)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that update node drain fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.NodeByID(ws, node.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	err = state.UpdateNodeDrain(1001, node.ID, true)
@@ -158,7 +706,12 @@ func TestStateStore_UpdateNodeDrain_Node(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.NodeByID(node.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -178,7 +731,9 @@ func TestStateStore_UpdateNodeDrain_Node(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_Nodes(t *testing.T) {
@@ -195,9 +750,11 @@ func TestStateStore_Nodes(t *testing.T) {
 		}
 	}
 
-	iter, err := state.Nodes()
+	// Create a watchset so we can test that getters don't cause it to fire
+	ws := memdb.NewWatchSet()
+	iter, err := state.Nodes(ws)
 	if err != nil {
-		t.Fatalf("err: %v", err)
+		t.Fatalf("bad: %v", err)
 	}
 
 	var out []*structs.Node
@@ -215,6 +772,10 @@ func TestStateStore_Nodes(t *testing.T) {
 	if !reflect.DeepEqual(nodes, out) {
 		t.Fatalf("bad: %#v %#v", nodes, out)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_NodesByIDPrefix(t *testing.T) {
@@ -227,7 +788,9 @@ func TestStateStore_NodesByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err := state.NodesByIDPrefix(node.ID)
+	// Create a watchset so we can test that getters don't cause it to fire
+	ws := memdb.NewWatchSet()
+	iter, err := state.NodesByIDPrefix(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -250,7 +813,11 @@ func TestStateStore_NodesByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.NodesByIDPrefix("11")
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	iter, err = state.NodesByIDPrefix(ws, "11")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -267,7 +834,12 @@ func TestStateStore_NodesByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.NodesByIDPrefix("11")
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	iter, err = state.NodesByIDPrefix(ws, "11")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -277,7 +849,7 @@ func TestStateStore_NodesByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.NodesByIDPrefix("1111")
+	iter, err = state.NodesByIDPrefix(ws, "1111")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -286,16 +858,15 @@ func TestStateStore_NodesByIDPrefix(t *testing.T) {
 	if len(nodes) != 1 {
 		t.Fatalf("err: %v", err)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreNode(t *testing.T) {
 	state := testStateStore(t)
 	node := mock.Node()
-
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "nodes"},
-		watch.Item{Node: node.ID})
 
 	restore, err := state.Restore()
 	if err != nil {
@@ -308,7 +879,8 @@ func TestStateStore_RestoreNode(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -316,25 +888,28 @@ func TestStateStore_RestoreNode(t *testing.T) {
 	if !reflect.DeepEqual(out, node) {
 		t.Fatalf("Bad: %#v %#v", out, node)
 	}
-
-	notify.verify(t)
 }
 
 func TestStateStore_UpsertJob_Job(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "jobs"},
-		watch.Item{Job: job.ID})
-
-	err := state.UpsertJob(1000, job)
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.JobByID(ws, job.ID)
 	if err != nil {
-		t.Fatalf("err: %v", err)
+		t.Fatalf("bad: %v", err)
 	}
 
-	out, err := state.JobByID(job.ID)
+	if err := state.UpsertJob(1000, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -351,7 +926,7 @@ func TestStateStore_UpsertJob_Job(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	summary, err := state.JobSummaryByID(job.ID)
+	summary, err := state.JobSummaryByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -365,31 +940,63 @@ func TestStateStore_UpsertJob_Job(t *testing.T) {
 	if !ok {
 		t.Fatalf("nil summary for task group")
 	}
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	// Check the job versions
+	allVersions, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(allVersions) != 1 {
+		t.Fatalf("got %d; want 1", len(allVersions))
+	}
+
+	if a := allVersions[0]; a.ID != job.ID || a.Version != 0 {
+		t.Fatalf("bad: %v", a)
+	}
+
+	// Test the looking up the job by version returns the same results
+	vout, err := state.JobByIDAndVersion(ws, job.ID, 0)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(out, vout) {
+		t.Fatalf("bad: %#v %#v", out, vout)
+	}
 }
 
 func TestStateStore_UpdateUpsertJob_Job(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "jobs"},
-		watch.Item{Job: job.ID})
-
-	err := state.UpsertJob(1000, job)
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.JobByID(ws, job.ID)
 	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(1000, job); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
 	job2 := mock.Job()
 	job2.ID = job.ID
+	job2.AllAtOnce = true
 	err = state.UpsertJob(1001, job2)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.JobByID(job.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -404,6 +1011,9 @@ func TestStateStore_UpdateUpsertJob_Job(t *testing.T) {
 	if out.ModifyIndex != 1001 {
 		t.Fatalf("bad: %#v", out)
 	}
+	if out.Version != 1 {
+		t.Fatalf("bad: %#v", out)
+	}
 
 	index, err := state.Index("jobs")
 	if err != nil {
@@ -413,9 +1023,19 @@ func TestStateStore_UpdateUpsertJob_Job(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
+	// Test the looking up the job by version returns the same results
+	vout, err := state.JobByIDAndVersion(ws, job.ID, 1)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(out, vout) {
+		t.Fatalf("bad: %#v %#v", out, vout)
+	}
+
 	// Test that the job summary remains the same if the job is updated but
 	// count remains same
-	summary, err := state.JobSummaryByID(job.ID)
+	summary, err := state.JobSummaryByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -430,7 +1050,79 @@ func TestStateStore_UpdateUpsertJob_Job(t *testing.T) {
 		t.Fatalf("nil summary for task group")
 	}
 
-	notify.verify(t)
+	// Check the job versions
+	allVersions, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(allVersions) != 2 {
+		t.Fatalf("got %d; want 1", len(allVersions))
+	}
+
+	if a := allVersions[0]; a.ID != job.ID || a.Version != 1 || !a.AllAtOnce {
+		t.Fatalf("bad: %+v", a)
+	}
+	if a := allVersions[1]; a.ID != job.ID || a.Version != 0 || a.AllAtOnce {
+		t.Fatalf("bad: %+v", a)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpdateUpsertJob_PeriodicJob(t *testing.T) {
+	state := testStateStore(t)
+	job := mock.PeriodicJob()
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(1000, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a child and an evaluation
+	job2 := job.Copy()
+	job2.Periodic = nil
+	job2.ID = fmt.Sprintf("%v/%s-1490635020", job.ID, structs.PeriodicLaunchSuffix)
+	err = state.UpsertJob(1001, job2)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	eval := mock.Eval()
+	eval.JobID = job2.ID
+	err = state.UpsertEvals(1002, []*structs.Evaluation{eval})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	job3 := job.Copy()
+	job3.TaskGroups[0].Tasks[0].Name = "new name"
+	err = state.UpsertJob(1003, job3)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if s, e := out.Status, structs.JobStatusRunning; s != e {
+		t.Fatalf("got status %v; want %v", s, e)
+	}
+
 }
 
 // This test ensures that UpsertJob creates the EphemeralDisk is a job doesn't have
@@ -449,7 +1141,8 @@ func TestStateStore_UpsertJob_NoEphemeralDisk(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -467,18 +1160,152 @@ func TestStateStore_UpsertJob_NoEphemeralDisk(t *testing.T) {
 	}
 }
 
+// Upsert a job that is the child of a parent job and ensures its summary gets
+// updated.
+func TestStateStore_UpsertJob_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a watchset so we can test that upsert fires the watch
+	parent := mock.Job()
+	ws := memdb.NewWatchSet()
+	_, err := state.JobByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(1000, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+	if err := state.UpsertJob(1001, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 1 || summary.Children.Running != 0 || summary.Children.Dead != 0 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpdateUpsertJob_JobVersion(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job and mark it as stable
+	job := mock.Job()
+	job.Stable = true
+	job.Priority = 0
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(1000, job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	var finalJob *structs.Job
+	for i := 1; i < 20; i++ {
+		finalJob = mock.Job()
+		finalJob.ID = job.ID
+		finalJob.Priority = i
+		err = state.UpsertJob(uint64(1000+i), finalJob)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(finalJob, out) {
+		t.Fatalf("bad: %#v %#v", finalJob, out)
+	}
+
+	if out.CreateIndex != 1000 {
+		t.Fatalf("bad: %#v", out)
+	}
+	if out.ModifyIndex != 1019 {
+		t.Fatalf("bad: %#v", out)
+	}
+	if out.Version != 19 {
+		t.Fatalf("bad: %#v", out)
+	}
+
+	index, err := state.Index("job_version")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1019 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	// Check the job versions
+	allVersions, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(allVersions) != structs.JobTrackedVersions {
+		t.Fatalf("got %d; want 1", len(allVersions))
+	}
+
+	if a := allVersions[0]; a.ID != job.ID || a.Version != 19 || a.Priority != 19 {
+		t.Fatalf("bad: %+v", a)
+	}
+	if a := allVersions[1]; a.ID != job.ID || a.Version != 18 || a.Priority != 18 {
+		t.Fatalf("bad: %+v", a)
+	}
+
+	// Ensure we didn't delete the stable job
+	if a := allVersions[structs.JobTrackedVersions-1]; a.ID != job.ID ||
+		a.Version != 0 || a.Priority != 0 || !a.Stable {
+		t.Fatalf("bad: %+v", a)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
 func TestStateStore_DeleteJob_Job(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "jobs"},
-		watch.Item{Job: job.ID})
-
 	err := state.UpsertJob(1000, job)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.JobByID(ws, job.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	err = state.DeleteJob(1001, job.ID)
@@ -486,7 +1313,12 @@ func TestStateStore_DeleteJob_Job(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.JobByID(job.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -503,7 +1335,7 @@ func TestStateStore_DeleteJob_Job(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	summary, err := state.JobSummaryByID(job.ID)
+	summary, err := state.JobSummaryByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -511,7 +1343,139 @@ func TestStateStore_DeleteJob_Job(t *testing.T) {
 		t.Fatalf("expected summary to be nil, but got: %v", summary)
 	}
 
-	notify.verify(t)
+	index, err = state.Index("job_summary")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1001 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	versions, err := state.JobVersionsByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("expected no job versions")
+	}
+
+	index, err = state.Index("job_summary")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1001 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeleteJob_MultipleVersions(t *testing.T) {
+	state := testStateStore(t)
+	assert := assert.New(t)
+
+	// Create a job and mark it as stable
+	job := mock.Job()
+	job.Stable = true
+	job.Priority = 0
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	_, err := state.JobVersionsByID(ws, job.ID)
+	assert.Nil(err)
+	assert.Nil(state.UpsertJob(1000, job))
+	assert.True(watchFired(ws))
+
+	var finalJob *structs.Job
+	for i := 1; i < 20; i++ {
+		finalJob = mock.Job()
+		finalJob.ID = job.ID
+		finalJob.Priority = i
+		assert.Nil(state.UpsertJob(uint64(1000+i), finalJob))
+	}
+
+	assert.Nil(state.DeleteJob(1001, job.ID))
+	assert.True(watchFired(ws))
+
+	ws = memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
+	assert.Nil(err)
+	assert.Nil(out)
+
+	index, err := state.Index("jobs")
+	assert.Nil(err)
+	assert.EqualValues(1001, index)
+
+	summary, err := state.JobSummaryByID(ws, job.ID)
+	assert.Nil(err)
+	assert.Nil(summary)
+
+	index, err = state.Index("job_summary")
+	assert.Nil(err)
+	assert.EqualValues(1001, index)
+
+	versions, err := state.JobVersionsByID(ws, job.ID)
+	assert.Nil(err)
+	assert.Len(versions, 0)
+
+	index, err = state.Index("job_summary")
+	assert.Nil(err)
+	assert.EqualValues(1001, index)
+
+	assert.False(watchFired(ws))
+}
+
+func TestStateStore_DeleteJob_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+
+	parent := mock.Job()
+	if err := state.UpsertJob(998, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+
+	if err := state.UpsertJob(999, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, parent.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err := state.DeleteJob(1001, child.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 0 || summary.Children.Dead != 1 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_Jobs(t *testing.T) {
@@ -528,7 +1492,8 @@ func TestStateStore_Jobs(t *testing.T) {
 		}
 	}
 
-	iter, err := state.Jobs()
+	ws := memdb.NewWatchSet()
+	iter, err := state.Jobs(ws)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -548,6 +1513,49 @@ func TestStateStore_Jobs(t *testing.T) {
 	if !reflect.DeepEqual(jobs, out) {
 		t.Fatalf("bad: %#v %#v", jobs, out)
 	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_JobVersions(t *testing.T) {
+	state := testStateStore(t)
+	var jobs []*structs.Job
+
+	for i := 0; i < 10; i++ {
+		job := mock.Job()
+		jobs = append(jobs, job)
+
+		err := state.UpsertJob(1000+uint64(i), job)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+
+	ws := memdb.NewWatchSet()
+	iter, err := state.JobVersions(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	var out []*structs.Job
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		out = append(out, raw.(*structs.Job))
+	}
+
+	sort.Sort(JobIDSort(jobs))
+	sort.Sort(JobIDSort(out))
+
+	if !reflect.DeepEqual(jobs, out) {
+		t.Fatalf("bad: %#v %#v", jobs, out)
+	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_JobsByIDPrefix(t *testing.T) {
@@ -560,7 +1568,8 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err := state.JobsByIDPrefix(job.ID)
+	ws := memdb.NewWatchSet()
+	iter, err := state.JobsByIDPrefix(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -582,7 +1591,7 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.JobsByIDPrefix("re")
+	iter, err = state.JobsByIDPrefix(ws, "re")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -590,6 +1599,9 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 	jobs = gatherJobs(iter)
 	if len(jobs) != 1 {
 		t.Fatalf("err: %v", err)
+	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 
 	job = mock.Job()
@@ -599,7 +1611,12 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.JobsByIDPrefix("r")
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	iter, err = state.JobsByIDPrefix(ws, "r")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -609,7 +1626,7 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err = state.JobsByIDPrefix("ri")
+	iter, err = state.JobsByIDPrefix(ws, "ri")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -617,6 +1634,9 @@ func TestStateStore_JobsByIDPrefix(t *testing.T) {
 	jobs = gatherJobs(iter)
 	if len(jobs) != 1 {
 		t.Fatalf("err: %v", err)
+	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -644,7 +1664,8 @@ func TestStateStore_JobsByPeriodic(t *testing.T) {
 		}
 	}
 
-	iter, err := state.JobsByPeriodic(true)
+	ws := memdb.NewWatchSet()
+	iter, err := state.JobsByPeriodic(ws, true)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -658,7 +1679,7 @@ func TestStateStore_JobsByPeriodic(t *testing.T) {
 		outPeriodic = append(outPeriodic, raw.(*structs.Job))
 	}
 
-	iter, err = state.JobsByPeriodic(false)
+	iter, err = state.JobsByPeriodic(ws, false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -684,6 +1705,9 @@ func TestStateStore_JobsByPeriodic(t *testing.T) {
 	if !reflect.DeepEqual(nonPeriodic, outNonPeriodic) {
 		t.Fatalf("bad: %#v %#v", nonPeriodic, outNonPeriodic)
 	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_JobsByScheduler(t *testing.T) {
@@ -703,6 +1727,7 @@ func TestStateStore_JobsByScheduler(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		job := mock.SystemJob()
+		job.Status = structs.JobStatusRunning
 		sysJobs = append(sysJobs, job)
 
 		err := state.UpsertJob(2000+uint64(i), job)
@@ -711,7 +1736,8 @@ func TestStateStore_JobsByScheduler(t *testing.T) {
 		}
 	}
 
-	iter, err := state.JobsByScheduler("service")
+	ws := memdb.NewWatchSet()
+	iter, err := state.JobsByScheduler(ws, "service")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -725,7 +1751,7 @@ func TestStateStore_JobsByScheduler(t *testing.T) {
 		outService = append(outService, raw.(*structs.Job))
 	}
 
-	iter, err = state.JobsByScheduler("system")
+	iter, err = state.JobsByScheduler(ws, "system")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -751,11 +1777,14 @@ func TestStateStore_JobsByScheduler(t *testing.T) {
 	if !reflect.DeepEqual(sysJobs, outSystem) {
 		t.Fatalf("bad: %#v %#v", sysJobs, outSystem)
 	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_JobsByGC(t *testing.T) {
 	state := testStateStore(t)
-	var gc, nonGc []*structs.Job
+	gc, nonGc := make(map[string]struct{}), make(map[string]struct{})
 
 	for i := 0; i < 20; i++ {
 		var job *structs.Job
@@ -764,47 +1793,54 @@ func TestStateStore_JobsByGC(t *testing.T) {
 		} else {
 			job = mock.PeriodicJob()
 		}
-		nonGc = append(nonGc, job)
+		nonGc[job.ID] = struct{}{}
 
 		if err := state.UpsertJob(1000+uint64(i), job); err != nil {
 			t.Fatalf("err: %v", err)
 		}
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i += 2 {
 		job := mock.Job()
 		job.Type = structs.JobTypeBatch
-		gc = append(gc, job)
+		gc[job.ID] = struct{}{}
 
 		if err := state.UpsertJob(2000+uint64(i), job); err != nil {
 			t.Fatalf("err: %v", err)
 		}
+
+		// Create an eval for it
+		eval := mock.Eval()
+		eval.JobID = job.ID
+		eval.Status = structs.EvalStatusComplete
+		if err := state.UpsertEvals(2000+uint64(i+1), []*structs.Evaluation{eval}); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
 	}
 
-	iter, err := state.JobsByGC(true)
+	ws := memdb.NewWatchSet()
+	iter, err := state.JobsByGC(ws, true)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	var outGc []*structs.Job
+	outGc := make(map[string]struct{})
 	for i := iter.Next(); i != nil; i = iter.Next() {
-		outGc = append(outGc, i.(*structs.Job))
+		j := i.(*structs.Job)
+		outGc[j.ID] = struct{}{}
 	}
 
-	iter, err = state.JobsByGC(false)
+	iter, err = state.JobsByGC(ws, false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	var outNonGc []*structs.Job
+	outNonGc := make(map[string]struct{})
 	for i := iter.Next(); i != nil; i = iter.Next() {
-		outNonGc = append(outNonGc, i.(*structs.Job))
+		j := i.(*structs.Job)
+		outNonGc[j.ID] = struct{}{}
 	}
-
-	sort.Sort(JobIDSort(gc))
-	sort.Sort(JobIDSort(nonGc))
-	sort.Sort(JobIDSort(outGc))
-	sort.Sort(JobIDSort(outNonGc))
 
 	if !reflect.DeepEqual(gc, outGc) {
 		t.Fatalf("bad: %#v %#v", gc, outGc)
@@ -813,16 +1849,14 @@ func TestStateStore_JobsByGC(t *testing.T) {
 	if !reflect.DeepEqual(nonGc, outNonGc) {
 		t.Fatalf("bad: %#v %#v", nonGc, outNonGc)
 	}
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreJob(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
-
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "jobs"},
-		watch.Item{Job: job.ID})
 
 	restore, err := state.Restore()
 	if err != nil {
@@ -835,7 +1869,8 @@ func TestStateStore_RestoreJob(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -843,8 +1878,6 @@ func TestStateStore_RestoreJob(t *testing.T) {
 	if !reflect.DeepEqual(out, job) {
 		t.Fatalf("Bad: %#v %#v", out, job)
 	}
-
-	notify.verify(t)
 }
 
 // This test ensures that the state restore creates the EphemeralDisk for a job if
@@ -858,11 +1891,6 @@ func TestStateStore_Jobs_NoEphemeralDisk(t *testing.T) {
 	job.TaskGroups[0].EphemeralDisk = nil
 	job.TaskGroups[0].Tasks[0].Resources.DiskMB = 150
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "jobs"},
-		watch.Item{Job: job.ID})
-
 	restore, err := state.Restore()
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -874,7 +1902,8 @@ func TestStateStore_Jobs_NoEphemeralDisk(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -888,8 +1917,6 @@ func TestStateStore_Jobs_NoEphemeralDisk(t *testing.T) {
 	if !reflect.DeepEqual(out, expected) {
 		t.Fatalf("Bad: %#v %#v", out, job)
 	}
-
-	notify.verify(t)
 }
 
 func TestStateStore_UpsertPeriodicLaunch(t *testing.T) {
@@ -897,17 +1924,23 @@ func TestStateStore_UpsertPeriodicLaunch(t *testing.T) {
 	job := mock.Job()
 	launch := &structs.PeriodicLaunch{ID: job.ID, Launch: time.Now()}
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "periodic_launch"},
-		watch.Item{Job: job.ID})
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.PeriodicLaunchByID(ws, launch.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
 
 	err := state.UpsertPeriodicLaunch(1000, launch)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.PeriodicLaunchByID(job.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.PeriodicLaunchByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -930,7 +1963,9 @@ func TestStateStore_UpsertPeriodicLaunch(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_UpdateUpsertPeriodicLaunch(t *testing.T) {
@@ -938,14 +1973,15 @@ func TestStateStore_UpdateUpsertPeriodicLaunch(t *testing.T) {
 	job := mock.Job()
 	launch := &structs.PeriodicLaunch{ID: job.ID, Launch: time.Now()}
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "periodic_launch"},
-		watch.Item{Job: job.ID})
-
 	err := state.UpsertPeriodicLaunch(1000, launch)
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.PeriodicLaunchByID(ws, launch.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	launch2 := &structs.PeriodicLaunch{
@@ -957,7 +1993,12 @@ func TestStateStore_UpdateUpsertPeriodicLaunch(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.PeriodicLaunchByID(job.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.PeriodicLaunchByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -980,7 +2021,9 @@ func TestStateStore_UpdateUpsertPeriodicLaunch(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_DeletePeriodicLaunch(t *testing.T) {
@@ -988,22 +2031,28 @@ func TestStateStore_DeletePeriodicLaunch(t *testing.T) {
 	job := mock.Job()
 	launch := &structs.PeriodicLaunch{ID: job.ID, Launch: time.Now()}
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "periodic_launch"},
-		watch.Item{Job: job.ID})
-
 	err := state.UpsertPeriodicLaunch(1000, launch)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	err = state.DeletePeriodicLaunch(1001, job.ID)
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.PeriodicLaunchByID(ws, launch.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err = state.DeletePeriodicLaunch(1001, launch.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.PeriodicLaunchByID(job.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.PeriodicLaunchByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1020,7 +2069,9 @@ func TestStateStore_DeletePeriodicLaunch(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_PeriodicLaunches(t *testing.T) {
@@ -1038,7 +2089,8 @@ func TestStateStore_PeriodicLaunches(t *testing.T) {
 		}
 	}
 
-	iter, err := state.PeriodicLaunches()
+	ws := memdb.NewWatchSet()
+	iter, err := state.PeriodicLaunches(ws)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1073,17 +2125,16 @@ func TestStateStore_PeriodicLaunches(t *testing.T) {
 	if len(out) != 0 {
 		t.Fatalf("leftover: %#v", out)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestorePeriodicLaunch(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
 	launch := &structs.PeriodicLaunch{ID: job.ID, Launch: time.Now()}
-
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "periodic_launch"},
-		watch.Item{Job: job.ID})
 
 	restore, err := state.Restore()
 	if err != nil {
@@ -1096,7 +2147,8 @@ func TestStateStore_RestorePeriodicLaunch(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.PeriodicLaunchByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.PeriodicLaunchByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1105,7 +2157,69 @@ func TestStateStore_RestorePeriodicLaunch(t *testing.T) {
 		t.Fatalf("Bad: %#v %#v", out, job)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_RestoreJobVersion(t *testing.T) {
+	state := testStateStore(t)
+	job := mock.Job()
+
+	restore, err := state.Restore()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = restore.JobVersionRestore(job)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	restore.Commit()
+
+	ws := memdb.NewWatchSet()
+	out, err := state.JobByIDAndVersion(ws, job.ID, job.Version)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(out, job) {
+		t.Fatalf("Bad: %#v %#v", out, job)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_RestoreDeployment(t *testing.T) {
+	state := testStateStore(t)
+	d := mock.Deployment()
+
+	restore, err := state.Restore()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = restore.DeploymentRestore(d)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	restore.Commit()
+
+	ws := memdb.NewWatchSet()
+	out, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(out, d) {
+		t.Fatalf("Bad: %#v %#v", out, d)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreJobSummary(t *testing.T) {
@@ -1130,7 +2244,8 @@ func TestStateStore_RestoreJobSummary(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.JobSummaryByID(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.JobSummaryByID(ws, job.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1224,18 +2339,23 @@ func TestStateStore_UpsertEvals_Eval(t *testing.T) {
 	state := testStateStore(t)
 	eval := mock.Eval()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "evals"},
-		watch.Item{Eval: eval.ID},
-		watch.Item{EvalJob: eval.JobID})
+	// Create a watchset so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.EvalByID(ws, eval.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
 
 	err := state.UpsertEvals(1000, []*structs.Evaluation{eval})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.EvalByID(eval.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1252,7 +2372,86 @@ func TestStateStore_UpsertEvals_Eval(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpsertEvals_CancelBlocked(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create two blocked evals for the same job
+	j := "test-job"
+	b1, b2 := mock.Eval(), mock.Eval()
+	b1.JobID = j
+	b1.Status = structs.EvalStatusBlocked
+	b2.JobID = j
+	b2.Status = structs.EvalStatusBlocked
+
+	err := state.UpsertEvals(999, []*structs.Evaluation{b1, b2})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create one complete and successful eval for the job
+	eval := mock.Eval()
+	eval.JobID = j
+	eval.Status = structs.EvalStatusComplete
+
+	// Create a watchset so we can test that the upsert of the complete eval
+	// fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.EvalByID(ws, b1.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalByID(ws, b2.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertEvals(1000, []*structs.Evaluation{eval}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(eval, out) {
+		t.Fatalf("bad: %#v %#v", eval, out)
+	}
+
+	index, err := state.Index("evals")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	// Get b1/b2 and check they are cancelled
+	out1, err := state.EvalByID(ws, b1.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	out2, err := state.EvalByID(ws, b2.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if out1.Status != structs.EvalStatusCancelled || out2.Status != structs.EvalStatusCancelled {
+		t.Fatalf("bad: %#v %#v", out1, out2)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_Update_UpsertEvals_Eval(t *testing.T) {
@@ -1264,11 +2463,16 @@ func TestStateStore_Update_UpsertEvals_Eval(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "evals"},
-		watch.Item{Eval: eval.ID},
-		watch.Item{EvalJob: eval.JobID})
+	// Create a watchset so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	ws2 := memdb.NewWatchSet()
+	if _, err := state.EvalByID(ws, eval.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if _, err := state.EvalsByJob(ws2, eval.JobID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
 
 	eval2 := mock.Eval()
 	eval2.ID = eval.ID
@@ -1278,7 +2482,15 @@ func TestStateStore_Update_UpsertEvals_Eval(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.EvalByID(eval.ID)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+	if !watchFired(ws2) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1302,7 +2514,97 @@ func TestStateStore_Update_UpsertEvals_Eval(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpsertEvals_Eval_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+
+	parent := mock.Job()
+	if err := state.UpsertJob(998, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+
+	if err := state.UpsertJob(999, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	eval := mock.Eval()
+	eval.Status = structs.EvalStatusComplete
+	eval.JobID = child.ID
+
+	// Create watchsets so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	ws2 := memdb.NewWatchSet()
+	ws3 := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, parent.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalByID(ws2, eval.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalsByJob(ws3, eval.JobID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err := state.UpsertEvals(1000, []*structs.Evaluation{eval})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+	if !watchFired(ws2) {
+		t.Fatalf("bad")
+	}
+	if !watchFired(ws3) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !reflect.DeepEqual(eval, out) {
+		t.Fatalf("bad: %#v %#v", eval, out)
+	}
+
+	index, err := state.Index("evals")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 0 || summary.Children.Dead != 1 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_DeleteEval_Eval(t *testing.T) {
@@ -1312,22 +2614,47 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 	alloc1 := mock.Alloc()
 	alloc2 := mock.Alloc()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "evals"},
-		watch.Item{Table: "allocs"},
-		watch.Item{Eval: eval1.ID},
-		watch.Item{Eval: eval2.ID},
-		watch.Item{EvalJob: eval1.JobID},
-		watch.Item{EvalJob: eval2.JobID},
-		watch.Item{Alloc: alloc1.ID},
-		watch.Item{Alloc: alloc2.ID},
-		watch.Item{AllocEval: alloc1.EvalID},
-		watch.Item{AllocEval: alloc2.EvalID},
-		watch.Item{AllocJob: alloc1.JobID},
-		watch.Item{AllocJob: alloc2.JobID},
-		watch.Item{AllocNode: alloc1.NodeID},
-		watch.Item{AllocNode: alloc2.NodeID})
+	// Create watchsets so we can test that upsert fires the watch
+	watches := make([]memdb.WatchSet, 12)
+	for i := 0; i < 12; i++ {
+		watches[i] = memdb.NewWatchSet()
+	}
+	if _, err := state.EvalByID(watches[0], eval1.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalByID(watches[1], eval2.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalsByJob(watches[2], eval1.JobID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.EvalsByJob(watches[3], eval2.JobID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocByID(watches[4], alloc1.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocByID(watches[5], alloc2.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[6], alloc1.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[7], alloc2.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[8], alloc1.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[9], alloc2.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[10], alloc1.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[11], alloc2.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
 
 	state.UpsertJobSummary(900, mock.JobSummary(eval1.JobID))
 	state.UpsertJobSummary(901, mock.JobSummary(eval2.JobID))
@@ -1348,7 +2675,14 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.EvalByID(eval1.ID)
+	for i, ws := range watches {
+		if !watchFired(ws) {
+			t.Fatalf("bad %d", i)
+		}
+	}
+
+	ws := memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval1.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1357,7 +2691,7 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 		t.Fatalf("bad: %#v %#v", eval1, out)
 	}
 
-	out, err = state.EvalByID(eval2.ID)
+	out, err = state.EvalByID(ws, eval2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1366,7 +2700,7 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 		t.Fatalf("bad: %#v %#v", eval1, out)
 	}
 
-	outA, err := state.AllocByID(alloc1.ID)
+	outA, err := state.AllocByID(ws, alloc1.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1375,7 +2709,7 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 		t.Fatalf("bad: %#v %#v", alloc1, outA)
 	}
 
-	outA, err = state.AllocByID(alloc2.ID)
+	outA, err = state.AllocByID(ws, alloc2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1400,7 +2734,77 @@ func TestStateStore_DeleteEval_Eval(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeleteEval_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+
+	parent := mock.Job()
+	if err := state.UpsertJob(998, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+
+	if err := state.UpsertJob(999, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	eval1 := mock.Eval()
+	eval1.JobID = child.ID
+	alloc1 := mock.Alloc()
+	alloc1.JobID = child.ID
+
+	err := state.UpsertEvals(1000, []*structs.Evaluation{eval1})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = state.UpsertAllocs(1001, []*structs.Allocation{alloc1})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create watchsets so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, parent.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err = state.DeleteEval(1002, []string{eval1.ID}, []string{alloc1.ID})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 0 || summary.Children.Dead != 1 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_EvalsByJob(t *testing.T) {
@@ -1421,7 +2825,8 @@ func TestStateStore_EvalsByJob(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.EvalsByJob(eval1.JobID)
+	ws := memdb.NewWatchSet()
+	out, err := state.EvalsByJob(ws, eval1.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1431,6 +2836,10 @@ func TestStateStore_EvalsByJob(t *testing.T) {
 
 	if !reflect.DeepEqual(evals, out) {
 		t.Fatalf("bad: %#v %#v", evals, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -1448,7 +2857,8 @@ func TestStateStore_Evals(t *testing.T) {
 		}
 	}
 
-	iter, err := state.Evals()
+	ws := memdb.NewWatchSet()
+	iter, err := state.Evals(ws)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1467,6 +2877,10 @@ func TestStateStore_Evals(t *testing.T) {
 
 	if !reflect.DeepEqual(evals, out) {
 		t.Fatalf("bad: %#v %#v", evals, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -1496,7 +2910,8 @@ func TestStateStore_EvalsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err := state.EvalsByIDPrefix("aaaa")
+	ws := memdb.NewWatchSet()
+	iter, err := state.EvalsByIDPrefix(ws, "aaaa")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1526,7 +2941,7 @@ func TestStateStore_EvalsByIDPrefix(t *testing.T) {
 		}
 	}
 
-	iter, err = state.EvalsByIDPrefix("b-a7bfb")
+	iter, err = state.EvalsByIDPrefix(ws, "b-a7bfb")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1536,16 +2951,14 @@ func TestStateStore_EvalsByIDPrefix(t *testing.T) {
 		t.Fatalf("bad: unexpected zero evaluations, got: %#v", out)
 	}
 
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreEval(t *testing.T) {
 	state := testStateStore(t)
 	eval := mock.Eval()
-
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "evals"},
-		watch.Item{Eval: eval.ID})
 
 	restore, err := state.Restore()
 	if err != nil {
@@ -1558,7 +2971,8 @@ func TestStateStore_RestoreEval(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.EvalByID(eval.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.EvalByID(ws, eval.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1566,47 +2980,150 @@ func TestStateStore_RestoreEval(t *testing.T) {
 	if !reflect.DeepEqual(out, eval) {
 		t.Fatalf("Bad: %#v %#v", out, eval)
 	}
-
-	notify.verify(t)
 }
 
 func TestStateStore_UpdateAllocsFromClient(t *testing.T) {
 	state := testStateStore(t)
+	parent := mock.Job()
+	if err := state.UpsertJob(998, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+	if err := state.UpsertJob(999, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
 	alloc := mock.Alloc()
+	alloc.JobID = child.ID
+	alloc.Job = child
+
+	err := state.UpsertAllocs(1000, []*structs.Allocation{alloc})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	ws := memdb.NewWatchSet()
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 1 || summary.Children.Dead != 0 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+
+	// Create watchsets so we can test that update fires the watch
+	ws = memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, parent.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create the delta updates
+	ts := map[string]*structs.TaskState{"web": &structs.TaskState{State: structs.TaskStateRunning}}
+	update := &structs.Allocation{
+		ID:           alloc.ID,
+		ClientStatus: structs.AllocClientStatusComplete,
+		TaskStates:   ts,
+		JobID:        alloc.JobID,
+		TaskGroup:    alloc.TaskGroup,
+	}
+	err = state.UpdateAllocsFromClient(1001, []*structs.Allocation{update})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	summary, err = state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 0 || summary.Children.Dead != 1 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpdateAllocsFromClient_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+	alloc1 := mock.Alloc()
 	alloc2 := mock.Alloc()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "allocs"},
-		watch.Item{Alloc: alloc.ID},
-		watch.Item{AllocEval: alloc.EvalID},
-		watch.Item{AllocJob: alloc.JobID},
-		watch.Item{AllocNode: alloc.NodeID},
-		watch.Item{Alloc: alloc2.ID},
-		watch.Item{AllocEval: alloc2.EvalID},
-		watch.Item{AllocJob: alloc2.JobID},
-		watch.Item{AllocNode: alloc2.NodeID})
-
-	if err := state.UpsertJob(999, alloc.Job); err != nil {
+	if err := state.UpsertJob(999, alloc1.Job); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if err := state.UpsertJob(999, alloc2.Job); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	err := state.UpsertAllocs(1000, []*structs.Allocation{alloc, alloc2})
+	err := state.UpsertAllocs(1000, []*structs.Allocation{alloc1, alloc2})
 	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create watchsets so we can test that update fires the watch
+	watches := make([]memdb.WatchSet, 8)
+	for i := 0; i < 8; i++ {
+		watches[i] = memdb.NewWatchSet()
+	}
+	if _, err := state.AllocByID(watches[0], alloc1.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocByID(watches[1], alloc2.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[2], alloc1.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[3], alloc2.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[4], alloc1.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[5], alloc2.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[6], alloc1.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[7], alloc2.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	// Create the delta updates
 	ts := map[string]*structs.TaskState{"web": &structs.TaskState{State: structs.TaskStatePending}}
 	update := &structs.Allocation{
-		ID:           alloc.ID,
+		ID:           alloc1.ID,
 		ClientStatus: structs.AllocClientStatusFailed,
 		TaskStates:   ts,
-		JobID:        alloc.JobID,
-		TaskGroup:    alloc.TaskGroup,
+		JobID:        alloc1.JobID,
+		TaskGroup:    alloc1.TaskGroup,
 	}
 	update2 := &structs.Allocation{
 		ID:           alloc2.ID,
@@ -1621,20 +3138,27 @@ func TestStateStore_UpdateAllocsFromClient(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	for i, ws := range watches {
+		if !watchFired(ws) {
+			t.Fatalf("bad %d", i)
+		}
+	}
+
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc1.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	alloc.CreateIndex = 1000
-	alloc.ModifyIndex = 1001
-	alloc.TaskStates = ts
-	alloc.ClientStatus = structs.AllocClientStatusFailed
-	if !reflect.DeepEqual(alloc, out) {
-		t.Fatalf("bad: %#v %#v", alloc, out)
+	alloc1.CreateIndex = 1000
+	alloc1.ModifyIndex = 1001
+	alloc1.TaskStates = ts
+	alloc1.ClientStatus = structs.AllocClientStatusFailed
+	if !reflect.DeepEqual(alloc1, out) {
+		t.Fatalf("bad: %#v %#v", alloc1, out)
 	}
 
-	out, err = state.AllocByID(alloc2.ID)
+	out, err = state.AllocByID(ws, alloc2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1656,7 +3180,7 @@ func TestStateStore_UpdateAllocsFromClient(t *testing.T) {
 	}
 
 	// Ensure summaries have been updated
-	summary, err := state.JobSummaryByID(alloc.JobID)
+	summary, err := state.JobSummaryByID(ws, alloc1.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1665,7 +3189,7 @@ func TestStateStore_UpdateAllocsFromClient(t *testing.T) {
 		t.Fatalf("expected failed: %v, actual: %v, summary: %#v", 1, tgSummary.Failed, tgSummary)
 	}
 
-	summary2, err := state.JobSummaryByID(alloc2.JobID)
+	summary2, err := state.JobSummaryByID(ws, alloc2.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1674,7 +3198,9 @@ func TestStateStore_UpdateAllocsFromClient(t *testing.T) {
 		t.Fatalf("expected running: %v, actual: %v", 1, tgSummary2.Running)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_UpdateMultipleAllocsFromClient(t *testing.T) {
@@ -1711,7 +3237,8 @@ func TestStateStore_UpdateMultipleAllocsFromClient(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1724,7 +3251,7 @@ func TestStateStore_UpdateMultipleAllocsFromClient(t *testing.T) {
 		t.Fatalf("bad: %#v , actual:%#v", alloc, out)
 	}
 
-	summary, err := state.JobSummaryByID(alloc.JobID)
+	summary, err := state.JobSummaryByID(ws, alloc.JobID)
 	expectedSummary := &structs.JobSummary{
 		JobID: alloc.JobID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -1732,6 +3259,7 @@ func TestStateStore_UpdateMultipleAllocsFromClient(t *testing.T) {
 				Starting: 1,
 			},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: 999,
 		ModifyIndex: 1001,
 	}
@@ -1747,16 +3275,26 @@ func TestStateStore_UpsertAlloc_Alloc(t *testing.T) {
 	state := testStateStore(t)
 	alloc := mock.Alloc()
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "allocs"},
-		watch.Item{Alloc: alloc.ID},
-		watch.Item{AllocEval: alloc.EvalID},
-		watch.Item{AllocJob: alloc.JobID},
-		watch.Item{AllocNode: alloc.NodeID})
-
 	if err := state.UpsertJob(999, alloc.Job); err != nil {
 		t.Fatalf("err: %v", err)
+	}
+
+	// Create watchsets so we can test that update fires the watch
+	watches := make([]memdb.WatchSet, 4)
+	for i := 0; i < 4; i++ {
+		watches[i] = memdb.NewWatchSet()
+	}
+	if _, err := state.AllocByID(watches[0], alloc.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[1], alloc.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[2], alloc.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[3], alloc.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	err := state.UpsertAllocs(1000, []*structs.Allocation{alloc})
@@ -1764,7 +3302,14 @@ func TestStateStore_UpsertAlloc_Alloc(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	for i, ws := range watches {
+		if !watchFired(ws) {
+			t.Fatalf("bad %d", i)
+		}
+	}
+
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1781,7 +3326,7 @@ func TestStateStore_UpsertAlloc_Alloc(t *testing.T) {
 		t.Fatalf("bad: %d", index)
 	}
 
-	summary, err := state.JobSummaryByID(alloc.JobID)
+	summary, err := state.JobSummaryByID(ws, alloc.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1794,7 +3339,77 @@ func TestStateStore_UpsertAlloc_Alloc(t *testing.T) {
 		t.Fatalf("expected queued: %v, actual: %v", 1, tgSummary.Starting)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_UpsertAlloc_Deployment(t *testing.T) {
+	state := testStateStore(t)
+	deployment := mock.Deployment()
+	alloc := mock.Alloc()
+	alloc.DeploymentID = deployment.ID
+
+	if err := state.UpsertJob(999, alloc.Job); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if err := state.UpsertDeployment(1000, deployment); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watch set so we can test that update fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.AllocsByDeployment(ws, alloc.DeploymentID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err := state.UpsertAllocs(1001, []*structs.Allocation{alloc})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("watch not fired")
+	}
+
+	ws = memdb.NewWatchSet()
+	allocs, err := state.AllocsByDeployment(ws, alloc.DeploymentID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if len(allocs) != 1 {
+		t.Fatalf("bad: %#v", allocs)
+	}
+
+	if !reflect.DeepEqual(alloc, allocs[0]) {
+		t.Fatalf("bad: %#v %#v", alloc, allocs[0])
+	}
+
+	index, err := state.Index("allocs")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1001 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+// Testing to ensure we keep issue
+// https://github.com/hashicorp/nomad/issues/2583 fixed
+func TestStateStore_UpsertAlloc_No_Job(t *testing.T) {
+	state := testStateStore(t)
+	alloc := mock.Alloc()
+	alloc.Job = nil
+
+	err := state.UpsertAllocs(999, []*structs.Allocation{alloc})
+	if err == nil || !strings.Contains(err.Error(), "without a job") {
+		t.Fatalf("expect err: %v", err)
+	}
 }
 
 func TestStateStore_UpsertAlloc_NoEphemeralDisk(t *testing.T) {
@@ -1812,7 +3427,8 @@ func TestStateStore_UpsertAlloc_NoEphemeralDisk(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1821,6 +3437,63 @@ func TestStateStore_UpsertAlloc_NoEphemeralDisk(t *testing.T) {
 	expected.Job.TaskGroups[0].EphemeralDisk = &structs.EphemeralDisk{SizeMB: 120}
 	if !reflect.DeepEqual(expected, out) {
 		t.Fatalf("bad: %#v %#v", expected, out)
+	}
+}
+
+func TestStateStore_UpsertAlloc_ChildJob(t *testing.T) {
+	state := testStateStore(t)
+
+	parent := mock.Job()
+	if err := state.UpsertJob(998, parent); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	child := mock.Job()
+	child.ParentID = parent.ID
+
+	if err := state.UpsertJob(999, child); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	alloc := mock.Alloc()
+	alloc.JobID = child.ID
+	alloc.Job = child
+
+	// Create watchsets so we can test that delete fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, parent.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	err := state.UpsertAllocs(1000, []*structs.Allocation{alloc})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	summary, err := state.JobSummaryByID(ws, parent.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("nil summary")
+	}
+	if summary.JobID != parent.ID {
+		t.Fatalf("bad summary id: %v", parent.ID)
+	}
+	if summary.Children == nil {
+		t.Fatalf("nil children summary")
+	}
+	if summary.Children.Pending != 0 || summary.Children.Running != 1 || summary.Children.Dead != 0 {
+		t.Fatalf("bad children summary: %v", summary.Children)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -1837,7 +3510,8 @@ func TestStateStore_UpdateAlloc_Alloc(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	summary, err := state.JobSummaryByID(alloc.JobID)
+	ws := memdb.NewWatchSet()
+	summary, err := state.JobSummaryByID(ws, alloc.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1851,20 +3525,37 @@ func TestStateStore_UpdateAlloc_Alloc(t *testing.T) {
 	alloc2.NodeID = alloc.NodeID + ".new"
 	state.UpsertJobSummary(1001, mock.JobSummary(alloc2.JobID))
 
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "allocs"},
-		watch.Item{Alloc: alloc2.ID},
-		watch.Item{AllocEval: alloc2.EvalID},
-		watch.Item{AllocJob: alloc2.JobID},
-		watch.Item{AllocNode: alloc2.NodeID})
+	// Create watchsets so we can test that update fires the watch
+	watches := make([]memdb.WatchSet, 4)
+	for i := 0; i < 4; i++ {
+		watches[i] = memdb.NewWatchSet()
+	}
+	if _, err := state.AllocByID(watches[0], alloc2.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByEval(watches[1], alloc2.EvalID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByJob(watches[2], alloc2.JobID, false); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if _, err := state.AllocsByNode(watches[3], alloc2.NodeID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
 
 	err = state.UpsertAllocs(1002, []*structs.Allocation{alloc2})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	for i, ws := range watches {
+		if !watchFired(ws) {
+			t.Fatalf("bad %d", i)
+		}
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1889,7 +3580,7 @@ func TestStateStore_UpdateAlloc_Alloc(t *testing.T) {
 	}
 
 	// Ensure that summary hasb't changed
-	summary, err = state.JobSummaryByID(alloc.JobID)
+	summary, err = state.JobSummaryByID(ws, alloc.JobID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1898,7 +3589,9 @@ func TestStateStore_UpdateAlloc_Alloc(t *testing.T) {
 		t.Fatalf("expected starting: %v, actual: %v", 1, tgSummary.Starting)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 // This test ensures that the state store will mark the clients status as lost
@@ -1924,7 +3617,8 @@ func TestStateStore_UpdateAlloc_Lost(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc2.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1970,7 +3664,8 @@ func TestStateStore_UpdateAlloc_NoJob(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, _ := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, _ := state.AllocByID(ws, alloc.ID)
 	// Update the modify index of the alloc before comparing
 	allocCopy1.ModifyIndex = 1003
 	if !reflect.DeepEqual(out, allocCopy1) {
@@ -1986,16 +3681,17 @@ func TestStateStore_JobSummary(t *testing.T) {
 	state.UpsertJob(900, job)
 
 	// Get the job back
-	outJob, _ := state.JobByID(job.ID)
+	ws := memdb.NewWatchSet()
+	outJob, _ := state.JobByID(ws, job.ID)
 	if outJob.CreateIndex != 900 {
 		t.Fatalf("bad create index: %v", outJob.CreateIndex)
 	}
-	summary, _ := state.JobSummaryByID(job.ID)
+	summary, _ := state.JobSummaryByID(ws, job.ID)
 	if summary.CreateIndex != 900 {
 		t.Fatalf("bad create index: %v", summary.CreateIndex)
 	}
 
-	// Upser an allocation
+	// Upsert an allocation
 	alloc := mock.Alloc()
 	alloc.JobID = job.ID
 	alloc.Job = job
@@ -2024,6 +3720,10 @@ func TestStateStore_JobSummary(t *testing.T) {
 	alloc5.DesiredStatus = structs.AllocDesiredStatusRun
 	state.UpsertAllocs(970, []*structs.Allocation{alloc5})
 
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
 	expectedSummary := structs.JobSummary{
 		JobID: job.ID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -2031,11 +3731,12 @@ func TestStateStore_JobSummary(t *testing.T) {
 				Running: 1,
 			},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: 900,
 		ModifyIndex: 930,
 	}
 
-	summary, _ = state.JobSummaryByID(job.ID)
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	if !reflect.DeepEqual(&expectedSummary, summary) {
 		t.Fatalf("expected: %#v, actual: %v", expectedSummary, summary)
 	}
@@ -2050,7 +3751,7 @@ func TestStateStore_JobSummary(t *testing.T) {
 	state.UpdateAllocsFromClient(990, []*structs.Allocation{alloc6})
 
 	// We shouldn't have any summary at this point
-	summary, _ = state.JobSummaryByID(job.ID)
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	if summary != nil {
 		t.Fatalf("expected nil, actual: %#v", summary)
 	}
@@ -2059,11 +3760,11 @@ func TestStateStore_JobSummary(t *testing.T) {
 	job1 := mock.Job()
 	job1.ID = job.ID
 	state.UpsertJob(1000, job1)
-	outJob2, _ := state.JobByID(job1.ID)
+	outJob2, _ := state.JobByID(ws, job1.ID)
 	if outJob2.CreateIndex != 1000 {
 		t.Fatalf("bad create index: %v", outJob2.CreateIndex)
 	}
-	summary, _ = state.JobSummaryByID(job1.ID)
+	summary, _ = state.JobSummaryByID(ws, job1.ID)
 	if summary.CreateIndex != 1000 {
 		t.Fatalf("bad create index: %v", summary.CreateIndex)
 	}
@@ -2081,11 +3782,12 @@ func TestStateStore_JobSummary(t *testing.T) {
 		Summary: map[string]structs.TaskGroupSummary{
 			"web": structs.TaskGroupSummary{},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: 1000,
 		ModifyIndex: 1000,
 	}
 
-	summary, _ = state.JobSummaryByID(job1.ID)
+	summary, _ = state.JobSummaryByID(ws, job1.ID)
 	if !reflect.DeepEqual(&expectedSummary, summary) {
 		t.Fatalf("expected: %#v, actual: %#v", expectedSummary, summary)
 	}
@@ -2155,7 +3857,8 @@ func TestStateStore_ReconcileJobSummary(t *testing.T) {
 
 	state.ReconcileJobSummaries(120)
 
-	summary, _ := state.JobSummaryByID(alloc.Job.ID)
+	ws := memdb.NewWatchSet()
+	summary, _ := state.JobSummaryByID(ws, alloc.Job.ID)
 	expectedSummary := structs.JobSummary{
 		JobID: alloc.Job.ID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -2214,10 +3917,13 @@ func TestStateStore_UpdateAlloc_JobNotPresent(t *testing.T) {
 		Summary: map[string]structs.TaskGroupSummary{
 			"web": structs.TaskGroupSummary{},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: 500,
 		ModifyIndex: 500,
 	}
-	summary, _ := state.JobSummaryByID(alloc.Job.ID)
+
+	ws := memdb.NewWatchSet()
+	summary, _ := state.JobSummaryByID(ws, alloc.Job.ID)
 	if !reflect.DeepEqual(&expectedSummary, summary) {
 		t.Fatalf("expected: %v, actual: %v", expectedSummary, summary)
 	}
@@ -2241,7 +3947,8 @@ func TestStateStore_EvictAlloc_Alloc(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2278,7 +3985,8 @@ func TestStateStore_AllocsByNode(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocsByNode("foo")
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocsByNode(ws, "foo")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2288,6 +3996,10 @@ func TestStateStore_AllocsByNode(t *testing.T) {
 
 	if !reflect.DeepEqual(allocs, out) {
 		t.Fatalf("bad: %#v %#v", allocs, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -2317,7 +4029,8 @@ func TestStateStore_AllocsByNodeTerminal(t *testing.T) {
 	}
 
 	// Verify the terminal allocs
-	out, err := state.AllocsByNodeTerminal("foo", true)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocsByNodeTerminal(ws, "foo", true)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2330,7 +4043,7 @@ func TestStateStore_AllocsByNodeTerminal(t *testing.T) {
 	}
 
 	// Verify the non-terminal allocs
-	out, err = state.AllocsByNodeTerminal("foo", false)
+	out, err = state.AllocsByNodeTerminal(ws, "foo", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2340,6 +4053,10 @@ func TestStateStore_AllocsByNodeTerminal(t *testing.T) {
 
 	if !reflect.DeepEqual(nonterm, out) {
 		t.Fatalf("bad: %#v %#v", nonterm, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -2362,7 +4079,8 @@ func TestStateStore_AllocsByJob(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.AllocsByJob("foo")
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocsByJob(ws, "foo", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2372,6 +4090,69 @@ func TestStateStore_AllocsByJob(t *testing.T) {
 
 	if !reflect.DeepEqual(allocs, out) {
 		t.Fatalf("bad: %#v %#v", allocs, out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_AllocsForRegisteredJob(t *testing.T) {
+	state := testStateStore(t)
+	var allocs []*structs.Allocation
+	var allocs1 []*structs.Allocation
+
+	job := mock.Job()
+	job.ID = "foo"
+	state.UpsertJob(100, job)
+	for i := 0; i < 3; i++ {
+		alloc := mock.Alloc()
+		alloc.Job = job
+		alloc.JobID = job.ID
+		allocs = append(allocs, alloc)
+	}
+	if err := state.UpsertAllocs(200, allocs); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if err := state.DeleteJob(250, job.ID); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	job1 := mock.Job()
+	job1.ID = "foo"
+	job1.CreateIndex = 50
+	state.UpsertJob(300, job1)
+	for i := 0; i < 4; i++ {
+		alloc := mock.Alloc()
+		alloc.Job = job1
+		alloc.JobID = job1.ID
+		allocs1 = append(allocs1, alloc)
+	}
+
+	if err := state.UpsertAllocs(1000, allocs1); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocsByJob(ws, job1.ID, true)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	expected := len(allocs) + len(allocs1)
+	if len(out) != expected {
+		t.Fatalf("expected: %v, actual: %v", expected, len(out))
+	}
+
+	out1, err := state.AllocsByJob(ws, job1.ID, false)
+	expected = len(allocs1)
+	if len(out1) != expected {
+		t.Fatalf("expected: %v, actual: %v", expected, len(out1))
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -2405,7 +4186,8 @@ func TestStateStore_AllocsByIDPrefix(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err := state.AllocsByIDPrefix("aaaa")
+	ws := memdb.NewWatchSet()
+	iter, err := state.AllocsByIDPrefix(ws, "aaaa")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2435,7 +4217,7 @@ func TestStateStore_AllocsByIDPrefix(t *testing.T) {
 		}
 	}
 
-	iter, err = state.AllocsByIDPrefix("b-a7bfb")
+	iter, err = state.AllocsByIDPrefix(ws, "b-a7bfb")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2443,6 +4225,10 @@ func TestStateStore_AllocsByIDPrefix(t *testing.T) {
 	out = gatherAllocs(iter)
 	if len(out) != 0 {
 		t.Fatalf("bad: unexpected zero allocations, got: %#v", out)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -2463,7 +4249,8 @@ func TestStateStore_Allocs(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	iter, err := state.Allocs()
+	ws := memdb.NewWatchSet()
+	iter, err := state.Allocs(ws)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2483,19 +4270,15 @@ func TestStateStore_Allocs(t *testing.T) {
 	if !reflect.DeepEqual(allocs, out) {
 		t.Fatalf("bad: %#v %#v", allocs, out)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreAlloc(t *testing.T) {
 	state := testStateStore(t)
 	alloc := mock.Alloc()
-
-	notify := setupNotifyTest(
-		state,
-		watch.Item{Table: "allocs"},
-		watch.Item{Alloc: alloc.ID},
-		watch.Item{AllocEval: alloc.EvalID},
-		watch.Item{AllocJob: alloc.JobID},
-		watch.Item{AllocNode: alloc.NodeID})
 
 	restore, err := state.Restore()
 	if err != nil {
@@ -2509,7 +4292,8 @@ func TestStateStore_RestoreAlloc(t *testing.T) {
 
 	restore.Commit()
 
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2518,7 +4302,9 @@ func TestStateStore_RestoreAlloc(t *testing.T) {
 		t.Fatalf("Bad: %#v %#v", out, alloc)
 	}
 
-	notify.verify(t)
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_RestoreAlloc_NoEphemeralDisk(t *testing.T) {
@@ -2539,7 +4325,8 @@ func TestStateStore_RestoreAlloc_NoEphemeralDisk(t *testing.T) {
 
 	restore.Commit()
 
-	out, err := state.AllocByID(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.AllocByID(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2551,11 +4338,14 @@ func TestStateStore_RestoreAlloc_NoEphemeralDisk(t *testing.T) {
 	if !reflect.DeepEqual(out, expected) {
 		t.Fatalf("Bad: %#v %#v", out, expected)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_SetJobStatus_ForceStatus(t *testing.T) {
 	state := testStateStore(t)
-	watcher := watch.NewItems()
 	txn := state.db.Txn(true)
 
 	// Create and insert a mock job.
@@ -2568,7 +4358,7 @@ func TestStateStore_SetJobStatus_ForceStatus(t *testing.T) {
 
 	exp := "foobar"
 	index := uint64(1000)
-	if err := state.setJobStatus(index, watcher, txn, job, false, exp); err != nil {
+	if err := state.setJobStatus(index, txn, job, false, exp); err != nil {
 		t.Fatalf("setJobStatus() failed: %v", err)
 	}
 
@@ -2589,7 +4379,6 @@ func TestStateStore_SetJobStatus_ForceStatus(t *testing.T) {
 
 func TestStateStore_SetJobStatus_NoOp(t *testing.T) {
 	state := testStateStore(t)
-	watcher := watch.NewItems()
 	txn := state.db.Txn(true)
 
 	// Create and insert a mock job that should be pending.
@@ -2601,7 +4390,7 @@ func TestStateStore_SetJobStatus_NoOp(t *testing.T) {
 	}
 
 	index := uint64(1000)
-	if err := state.setJobStatus(index, watcher, txn, job, false, ""); err != nil {
+	if err := state.setJobStatus(index, txn, job, false, ""); err != nil {
 		t.Fatalf("setJobStatus() failed: %v", err)
 	}
 
@@ -2618,7 +4407,6 @@ func TestStateStore_SetJobStatus_NoOp(t *testing.T) {
 
 func TestStateStore_SetJobStatus(t *testing.T) {
 	state := testStateStore(t)
-	watcher := watch.NewItems()
 	txn := state.db.Txn(true)
 
 	// Create and insert a mock job that should be pending but has an incorrect
@@ -2631,7 +4419,7 @@ func TestStateStore_SetJobStatus(t *testing.T) {
 	}
 
 	index := uint64(1000)
-	if err := state.setJobStatus(index, watcher, txn, job, false, ""); err != nil {
+	if err := state.setJobStatus(index, txn, job, false, ""); err != nil {
 		t.Fatalf("setJobStatus() failed: %v", err)
 	}
 
@@ -2748,6 +4536,59 @@ func TestStateStore_GetJobStatus_RunningAlloc(t *testing.T) {
 	}
 }
 
+func TestStateStore_GetJobStatus_PeriodicJob(t *testing.T) {
+	state := testStateStore(t)
+	job := mock.PeriodicJob()
+
+	txn := state.db.Txn(false)
+	status, err := state.getJobStatus(txn, job, false)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if status != structs.JobStatusRunning {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, structs.JobStatusRunning)
+	}
+
+	// Mark it as stopped
+	job.Stop = true
+	status, err = state.getJobStatus(txn, job, false)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if status != structs.JobStatusDead {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, structs.JobStatusDead)
+	}
+}
+
+func TestStateStore_GetJobStatus_ParameterizedJob(t *testing.T) {
+	state := testStateStore(t)
+	job := mock.Job()
+	job.ParameterizedJob = &structs.ParameterizedJobConfig{}
+
+	txn := state.db.Txn(false)
+	status, err := state.getJobStatus(txn, job, false)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if status != structs.JobStatusRunning {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, structs.JobStatusRunning)
+	}
+
+	// Mark it as stopped
+	job.Stop = true
+	status, err = state.getJobStatus(txn, job, false)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if status != structs.JobStatusDead {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, structs.JobStatusDead)
+	}
+}
+
 func TestStateStore_SetJobStatus_PendingEval(t *testing.T) {
 	state := testStateStore(t)
 	job := mock.Job()
@@ -2771,52 +4612,40 @@ func TestStateStore_SetJobStatus_PendingEval(t *testing.T) {
 	}
 }
 
-func TestStateWatch_watch(t *testing.T) {
-	sw := newStateWatch()
-	notify1 := make(chan struct{}, 1)
-	notify2 := make(chan struct{}, 1)
-	notify3 := make(chan struct{}, 1)
+// TestStateStore_SetJobStatus_SystemJob asserts that system jobs are still
+// considered running until explicitly stopped.
+func TestStateStore_SetJobStatus_SystemJob(t *testing.T) {
+	state := testStateStore(t)
+	job := mock.SystemJob()
 
-	// Notifications trigger subscribed channels
-	sw.watch(watch.NewItems(watch.Item{Table: "foo"}), notify1)
-	sw.watch(watch.NewItems(watch.Item{Table: "bar"}), notify2)
-	sw.watch(watch.NewItems(watch.Item{Table: "baz"}), notify3)
-
-	items := watch.NewItems()
-	items.Add(watch.Item{Table: "foo"})
-	items.Add(watch.Item{Table: "bar"})
-
-	sw.notify(items)
-	if len(notify1) != 1 {
-		t.Fatalf("should notify")
-	}
-	if len(notify2) != 1 {
-		t.Fatalf("should notify")
-	}
-	if len(notify3) != 0 {
-		t.Fatalf("should not notify")
-	}
-}
-
-func TestStateWatch_stopWatch(t *testing.T) {
-	sw := newStateWatch()
-	notify := make(chan struct{})
-
-	// First subscribe
-	sw.watch(watch.NewItems(watch.Item{Table: "foo"}), notify)
-
-	// Unsubscribe stop notifications
-	sw.stopWatch(watch.NewItems(watch.Item{Table: "foo"}), notify)
-
-	// Check that the group was removed
-	if _, ok := sw.items[watch.Item{Table: "foo"}]; ok {
-		t.Fatalf("should remove group")
+	// Create a mock eval that is pending.
+	eval := mock.Eval()
+	eval.JobID = job.ID
+	eval.Type = job.Type
+	eval.Status = structs.EvalStatusComplete
+	if err := state.UpsertEvals(1000, []*structs.Evaluation{eval}); err != nil {
+		t.Fatalf("err: %v", err)
 	}
 
-	// Check that we are not notified
-	sw.notify(watch.NewItems(watch.Item{Table: "foo"}))
-	if len(notify) != 0 {
-		t.Fatalf("should not notify")
+	txn := state.db.Txn(false)
+	status, err := state.getJobStatus(txn, job, true)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if expected := structs.JobStatusRunning; status != expected {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, expected)
+	}
+
+	// Stop the job
+	job.Stop = true
+	status, err = state.getJobStatus(txn, job, true)
+	if err != nil {
+		t.Fatalf("getJobStatus() failed: %v", err)
+	}
+
+	if expected := structs.JobStatusDead; status != expected {
+		t.Fatalf("getJobStatus() returned %v; expected %v", status, expected)
 	}
 }
 
@@ -2825,15 +4654,27 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 	alloc := mock.Alloc()
 	job := alloc.Job
 	job.TaskGroups[0].Count = 3
-	err := state.UpsertJob(1000, job)
-	if err != nil {
+
+	// Create watchsets so we can test that upsert fires the watch
+	ws := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws, job.ID); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(1000, job); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
 	if err := state.UpsertAllocs(1001, []*structs.Allocation{alloc}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	summary, _ := state.JobSummaryByID(job.ID)
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	summary, _ := state.JobSummaryByID(ws, job.ID)
 	expectedSummary := structs.JobSummary{
 		JobID: job.ID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -2841,11 +4682,18 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 				Starting: 1,
 			},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: 1000,
 		ModifyIndex: 1001,
 	}
 	if !reflect.DeepEqual(summary, &expectedSummary) {
 		t.Fatalf("expected: %v, actual: %v", expectedSummary, summary)
+	}
+
+	// Create watchsets so we can test that upsert fires the watch
+	ws2 := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws2, job.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	alloc2 := mock.Alloc()
@@ -2860,9 +4708,13 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	outA, _ := state.AllocByID(alloc3.ID)
+	if !watchFired(ws2) {
+		t.Fatalf("bad")
+	}
 
-	summary, _ = state.JobSummaryByID(job.ID)
+	outA, _ := state.AllocByID(ws, alloc3.ID)
+
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	expectedSummary = structs.JobSummary{
 		JobID: job.ID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -2870,11 +4722,18 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 				Starting: 3,
 			},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: job.CreateIndex,
 		ModifyIndex: outA.ModifyIndex,
 	}
 	if !reflect.DeepEqual(summary, &expectedSummary) {
 		t.Fatalf("expected summary: %v, actual: %v", expectedSummary, summary)
+	}
+
+	// Create watchsets so we can test that upsert fires the watch
+	ws3 := memdb.NewWatchSet()
+	if _, err := state.JobSummaryByID(ws3, job.ID); err != nil {
+		t.Fatalf("bad: %v", err)
 	}
 
 	alloc4 := mock.Alloc()
@@ -2892,8 +4751,13 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 	if err := state.UpdateAllocsFromClient(1004, []*structs.Allocation{alloc4, alloc5}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	outA, _ = state.AllocByID(alloc5.ID)
-	summary, _ = state.JobSummaryByID(job.ID)
+
+	if !watchFired(ws2) {
+		t.Fatalf("bad")
+	}
+
+	outA, _ = state.AllocByID(ws, alloc5.ID)
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	expectedSummary = structs.JobSummary{
 		JobID: job.ID,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -2902,6 +4766,7 @@ func TestStateJobSummary_UpdateJobCount(t *testing.T) {
 				Starting: 1,
 			},
 		},
+		Children:    new(structs.JobChildrenSummary),
 		CreateIndex: job.CreateIndex,
 		ModifyIndex: outA.ModifyIndex,
 	}
@@ -2932,7 +4797,9 @@ func TestJobSummary_UpdateClientStatus(t *testing.T) {
 	if err := state.UpsertAllocs(1001, []*structs.Allocation{alloc, alloc2, alloc3}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	summary, _ := state.JobSummaryByID(job.ID)
+
+	ws := memdb.NewWatchSet()
+	summary, _ := state.JobSummaryByID(ws, job.ID)
 	if summary.Summary["web"].Starting != 3 {
 		t.Fatalf("bad job summary: %v", summary)
 	}
@@ -2958,7 +4825,12 @@ func TestJobSummary_UpdateClientStatus(t *testing.T) {
 	if err := state.UpdateAllocsFromClient(1002, []*structs.Allocation{alloc4, alloc5, alloc6}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	summary, _ = state.JobSummaryByID(job.ID)
+
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	if summary.Summary["web"].Running != 1 || summary.Summary["web"].Failed != 1 || summary.Summary["web"].Complete != 1 {
 		t.Fatalf("bad job summary: %v", summary)
 	}
@@ -2970,9 +4842,731 @@ func TestJobSummary_UpdateClientStatus(t *testing.T) {
 	if err := state.UpsertAllocs(1003, []*structs.Allocation{alloc7}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	summary, _ = state.JobSummaryByID(job.ID)
+	summary, _ = state.JobSummaryByID(ws, job.ID)
 	if summary.Summary["web"].Starting != 1 || summary.Summary["web"].Running != 1 || summary.Summary["web"].Failed != 1 || summary.Summary["web"].Complete != 1 {
 		t.Fatalf("bad job summary: %v", summary)
+	}
+}
+
+// Test that non-existent deployment can't be updated
+func TestStateStore_UpsertDeploymentStatusUpdate_NonExistent(t *testing.T) {
+	state := testStateStore(t)
+
+	// Update the non-existent deployment
+	req := &structs.DeploymentStatusUpdateRequest{
+		DeploymentUpdate: &structs.DeploymentStatusUpdate{
+			DeploymentID: structs.GenerateUUID(),
+			Status:       structs.DeploymentStatusRunning,
+		},
+	}
+	err := state.UpdateDeploymentStatus(2, req)
+	if err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("expected error updating the status because the deployment doesn't exist")
+	}
+}
+
+// Test that terminal deployment can't be updated
+func TestStateStore_UpsertDeploymentStatusUpdate_Terminal(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a terminal deployment
+	d := mock.Deployment()
+	d.Status = structs.DeploymentStatusFailed
+
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Update the deployment
+	req := &structs.DeploymentStatusUpdateRequest{
+		DeploymentUpdate: &structs.DeploymentStatusUpdate{
+			DeploymentID: d.ID,
+			Status:       structs.DeploymentStatusRunning,
+		},
+	}
+	err := state.UpdateDeploymentStatus(2, req)
+	if err == nil || !strings.Contains(err.Error(), "has terminal status") {
+		t.Fatalf("expected error updating the status because the deployment is terminal")
+	}
+}
+
+// Test that a non terminal deployment is updated and that a job and eval are
+// created.
+func TestStateStore_UpsertDeploymentStatusUpdate_NonTerminal(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a deployment
+	d := mock.Deployment()
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create an eval and a job
+	e := mock.Eval()
+	j := mock.Job()
+
+	// Update the deployment
+	status, desc := structs.DeploymentStatusFailed, "foo"
+	req := &structs.DeploymentStatusUpdateRequest{
+		DeploymentUpdate: &structs.DeploymentStatusUpdate{
+			DeploymentID:      d.ID,
+			Status:            status,
+			StatusDescription: desc,
+		},
+		Job:  j,
+		Eval: e,
+	}
+	err := state.UpdateDeploymentStatus(2, req)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the status was updated properly
+	ws := memdb.NewWatchSet()
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if dout.Status != status || dout.StatusDescription != desc {
+		t.Fatalf("bad: %#v", dout)
+	}
+
+	// Check that the evaluation was created
+	eout, _ := state.EvalByID(ws, e.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if eout == nil {
+		t.Fatalf("bad: %#v", eout)
+	}
+
+	// Check that the job was created
+	jout, _ := state.JobByID(ws, j.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if jout == nil {
+		t.Fatalf("bad: %#v", jout)
+	}
+}
+
+// Test that when a deployment is updated to successful the job is updated to
+// stable
+func TestStateStore_UpsertDeploymentStatusUpdate_Successful(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a job
+	job := mock.Job()
+	if err := state.UpsertJob(1, job); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Insert a deployment
+	d := structs.NewDeployment(job)
+	if err := state.UpsertDeployment(2, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Update the deployment
+	req := &structs.DeploymentStatusUpdateRequest{
+		DeploymentUpdate: &structs.DeploymentStatusUpdate{
+			DeploymentID:      d.ID,
+			Status:            structs.DeploymentStatusSuccessful,
+			StatusDescription: structs.DeploymentStatusDescriptionSuccessful,
+		},
+	}
+	err := state.UpdateDeploymentStatus(3, req)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the status was updated properly
+	ws := memdb.NewWatchSet()
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if dout.Status != structs.DeploymentStatusSuccessful ||
+		dout.StatusDescription != structs.DeploymentStatusDescriptionSuccessful {
+		t.Fatalf("bad: %#v", dout)
+	}
+
+	// Check that the job was created
+	jout, _ := state.JobByID(ws, job.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if jout == nil {
+		t.Fatalf("bad: %#v", jout)
+	}
+	if !jout.Stable {
+		t.Fatalf("job not marked stable %#v", jout)
+	}
+	if jout.Version != d.JobVersion {
+		t.Fatalf("job version changed; got %d; want %d", jout.Version, d.JobVersion)
+	}
+}
+
+func TestStateStore_UpdateJobStability(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a job twice to get two versions
+	job := mock.Job()
+	if err := state.UpsertJob(1, job); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	if err := state.UpsertJob(2, job); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Update the stability to true
+	err := state.UpdateJobStability(3, job.ID, 0, true)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the job was updated properly
+	ws := memdb.NewWatchSet()
+	jout, _ := state.JobByIDAndVersion(ws, job.ID, 0)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if jout == nil {
+		t.Fatalf("bad: %#v", jout)
+	}
+	if !jout.Stable {
+		t.Fatalf("job not marked stable %#v", jout)
+	}
+
+	// Update the stability to false
+	err = state.UpdateJobStability(3, job.ID, 0, false)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the job was updated properly
+	jout, _ = state.JobByIDAndVersion(ws, job.ID, 0)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if jout == nil {
+		t.Fatalf("bad: %#v", jout)
+	}
+	if jout.Stable {
+		t.Fatalf("job marked stable %#v", jout)
+	}
+}
+
+// Test that non-existent deployment can't be promoted
+func TestStateStore_UpsertDeploymentPromotion_NonExistent(t *testing.T) {
+	state := testStateStore(t)
+
+	// Promote the non-existent deployment
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: structs.GenerateUUID(),
+			All:          true,
+		},
+	}
+	err := state.UpdateDeploymentPromotion(2, req)
+	if err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("expected error promoting because the deployment doesn't exist")
+	}
+}
+
+// Test that terminal deployment can't be updated
+func TestStateStore_UpsertDeploymentPromotion_Terminal(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a terminal deployment
+	d := mock.Deployment()
+	d.Status = structs.DeploymentStatusFailed
+
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Promote the deployment
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: d.ID,
+			All:          true,
+		},
+	}
+	err := state.UpdateDeploymentPromotion(2, req)
+	if err == nil || !strings.Contains(err.Error(), "has terminal status") {
+		t.Fatalf("expected error updating the status because the deployment is terminal: %v", err)
+	}
+}
+
+// Test promoting unhealthy canaries in a deployment.
+func TestStateStore_UpsertDeploymentPromotion_Unhealthy(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job
+	j := mock.Job()
+	if err := state.UpsertJob(1, j); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a deployment
+	d := mock.Deployment()
+	d.JobID = j.ID
+	if err := state.UpsertDeployment(2, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a set of allocations
+	c1 := mock.Alloc()
+	c1.JobID = j.ID
+	c1.DeploymentID = d.ID
+	d.TaskGroups[c1.TaskGroup].PlacedCanaries = append(d.TaskGroups[c1.TaskGroup].PlacedCanaries, c1.ID)
+	c2 := mock.Alloc()
+	c2.JobID = j.ID
+	c2.DeploymentID = d.ID
+	d.TaskGroups[c2.TaskGroup].PlacedCanaries = append(d.TaskGroups[c2.TaskGroup].PlacedCanaries, c2.ID)
+
+	if err := state.UpsertAllocs(3, []*structs.Allocation{c1, c2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Promote the canaries
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: d.ID,
+			All:          true,
+		},
+	}
+	err := state.UpdateDeploymentPromotion(4, req)
+	if err == nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if !strings.Contains(err.Error(), c1.ID) {
+		t.Fatalf("expect canary %q to be listed as unhealth: %v", c1.ID, err)
+	}
+	if !strings.Contains(err.Error(), c2.ID) {
+		t.Fatalf("expect canary %q to be listed as unhealth: %v", c2.ID, err)
+	}
+}
+
+// Test promoting a deployment with no canaries
+func TestStateStore_UpsertDeploymentPromotion_NoCanaries(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job
+	j := mock.Job()
+	if err := state.UpsertJob(1, j); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a deployment
+	d := mock.Deployment()
+	d.JobID = j.ID
+	if err := state.UpsertDeployment(2, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Promote the canaries
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: d.ID,
+			All:          true,
+		},
+	}
+	err := state.UpdateDeploymentPromotion(4, req)
+	if err == nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no canaries to promote") {
+		t.Fatalf("expect error promoting non-existent canaries: %v", err)
+	}
+}
+
+// Test promoting all canaries in a deployment.
+func TestStateStore_UpsertDeploymentPromotion_All(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job with two task groups
+	j := mock.Job()
+	tg1 := j.TaskGroups[0]
+	tg2 := tg1.Copy()
+	tg2.Name = "foo"
+	j.TaskGroups = append(j.TaskGroups, tg2)
+	if err := state.UpsertJob(1, j); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a deployment
+	d := mock.Deployment()
+	d.StatusDescription = structs.DeploymentStatusDescriptionRunningNeedsPromotion
+	d.JobID = j.ID
+	d.TaskGroups = map[string]*structs.DeploymentState{
+		"web": &structs.DeploymentState{
+			DesiredTotal:    10,
+			DesiredCanaries: 1,
+		},
+		"foo": &structs.DeploymentState{
+			DesiredTotal:    10,
+			DesiredCanaries: 1,
+		},
+	}
+	if err := state.UpsertDeployment(2, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a set of allocations
+	c1 := mock.Alloc()
+	c1.JobID = j.ID
+	c1.DeploymentID = d.ID
+	d.TaskGroups[c1.TaskGroup].PlacedCanaries = append(d.TaskGroups[c1.TaskGroup].PlacedCanaries, c1.ID)
+	c1.DeploymentStatus = &structs.AllocDeploymentStatus{
+		Healthy: helper.BoolToPtr(true),
+	}
+	c2 := mock.Alloc()
+	c2.JobID = j.ID
+	c2.DeploymentID = d.ID
+	d.TaskGroups[c2.TaskGroup].PlacedCanaries = append(d.TaskGroups[c2.TaskGroup].PlacedCanaries, c2.ID)
+	c2.TaskGroup = tg2.Name
+	c2.DeploymentStatus = &structs.AllocDeploymentStatus{
+		Healthy: helper.BoolToPtr(true),
+	}
+
+	if err := state.UpsertAllocs(3, []*structs.Allocation{c1, c2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create an eval
+	e := mock.Eval()
+
+	// Promote the canaries
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: d.ID,
+			All:          true,
+		},
+		Eval: e,
+	}
+	err := state.UpdateDeploymentPromotion(4, req)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the status per task group was updated properly
+	ws := memdb.NewWatchSet()
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if dout.StatusDescription != structs.DeploymentStatusDescriptionRunning {
+		t.Fatalf("status description not updated: got %v; want %v", dout.StatusDescription, structs.DeploymentStatusDescriptionRunning)
+	}
+	if len(dout.TaskGroups) != 2 {
+		t.Fatalf("bad: %#v", dout.TaskGroups)
+	}
+	for tg, state := range dout.TaskGroups {
+		if !state.Promoted {
+			t.Fatalf("bad: group %q not promoted %#v", tg, state)
+		}
+	}
+
+	// Check that the evaluation was created
+	eout, _ := state.EvalByID(ws, e.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if eout == nil {
+		t.Fatalf("bad: %#v", eout)
+	}
+}
+
+// Test promoting a subset of canaries in a deployment.
+func TestStateStore_UpsertDeploymentPromotion_Subset(t *testing.T) {
+	state := testStateStore(t)
+
+	// Create a job with two task groups
+	j := mock.Job()
+	tg1 := j.TaskGroups[0]
+	tg2 := tg1.Copy()
+	tg2.Name = "foo"
+	j.TaskGroups = append(j.TaskGroups, tg2)
+	if err := state.UpsertJob(1, j); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a deployment
+	d := mock.Deployment()
+	d.JobID = j.ID
+	d.TaskGroups = map[string]*structs.DeploymentState{
+		"web": &structs.DeploymentState{
+			DesiredTotal:    10,
+			DesiredCanaries: 1,
+		},
+		"foo": &structs.DeploymentState{
+			DesiredTotal:    10,
+			DesiredCanaries: 1,
+		},
+	}
+	if err := state.UpsertDeployment(2, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a set of allocations
+	c1 := mock.Alloc()
+	c1.JobID = j.ID
+	c1.DeploymentID = d.ID
+	d.TaskGroups[c1.TaskGroup].PlacedCanaries = append(d.TaskGroups[c1.TaskGroup].PlacedCanaries, c1.ID)
+	c1.DeploymentStatus = &structs.AllocDeploymentStatus{
+		Healthy: helper.BoolToPtr(true),
+	}
+	c2 := mock.Alloc()
+	c2.JobID = j.ID
+	c2.DeploymentID = d.ID
+	d.TaskGroups[c2.TaskGroup].PlacedCanaries = append(d.TaskGroups[c2.TaskGroup].PlacedCanaries, c2.ID)
+	c2.TaskGroup = tg2.Name
+	c2.DeploymentStatus = &structs.AllocDeploymentStatus{
+		Healthy: helper.BoolToPtr(true),
+	}
+
+	if err := state.UpsertAllocs(3, []*structs.Allocation{c1, c2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create an eval
+	e := mock.Eval()
+
+	// Promote the canaries
+	req := &structs.ApplyDeploymentPromoteRequest{
+		DeploymentPromoteRequest: structs.DeploymentPromoteRequest{
+			DeploymentID: d.ID,
+			Groups:       []string{"web"},
+		},
+		Eval: e,
+	}
+	err := state.UpdateDeploymentPromotion(4, req)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the status per task group was updated properly
+	ws := memdb.NewWatchSet()
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if len(dout.TaskGroups) != 2 {
+		t.Fatalf("bad: %#v", dout.TaskGroups)
+	}
+	stateout, ok := dout.TaskGroups["web"]
+	if !ok {
+		t.Fatalf("bad: no state for task group web")
+	}
+	if !stateout.Promoted {
+		t.Fatalf("bad: task group web not promoted: %#v", stateout)
+	}
+
+	// Check that the evaluation was created
+	eout, _ := state.EvalByID(ws, e.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if eout == nil {
+		t.Fatalf("bad: %#v", eout)
+	}
+}
+
+// Test that allocation health can't be set against a non-existent deployment
+func TestStateStore_UpsertDeploymentAllocHealth_NonExistent(t *testing.T) {
+	state := testStateStore(t)
+
+	// Set health against the non-existent deployment
+	req := &structs.ApplyDeploymentAllocHealthRequest{
+		DeploymentAllocHealthRequest: structs.DeploymentAllocHealthRequest{
+			DeploymentID:         structs.GenerateUUID(),
+			HealthyAllocationIDs: []string{structs.GenerateUUID()},
+		},
+	}
+	err := state.UpdateDeploymentAllocHealth(2, req)
+	if err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("expected error because the deployment doesn't exist: %v", err)
+	}
+}
+
+// Test that allocation health can't be set against a terminal deployment
+func TestStateStore_UpsertDeploymentAllocHealth_Terminal(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a terminal deployment
+	d := mock.Deployment()
+	d.Status = structs.DeploymentStatusFailed
+
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Set health against the terminal deployment
+	req := &structs.ApplyDeploymentAllocHealthRequest{
+		DeploymentAllocHealthRequest: structs.DeploymentAllocHealthRequest{
+			DeploymentID:         d.ID,
+			HealthyAllocationIDs: []string{structs.GenerateUUID()},
+		},
+	}
+	err := state.UpdateDeploymentAllocHealth(2, req)
+	if err == nil || !strings.Contains(err.Error(), "has terminal status") {
+		t.Fatalf("expected error because the deployment is terminal: %v", err)
+	}
+}
+
+// Test that allocation health can't be set against a non-existent alloc
+func TestStateStore_UpsertDeploymentAllocHealth_BadAlloc_NonExistent(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a deployment
+	d := mock.Deployment()
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Set health against the terminal deployment
+	req := &structs.ApplyDeploymentAllocHealthRequest{
+		DeploymentAllocHealthRequest: structs.DeploymentAllocHealthRequest{
+			DeploymentID:         d.ID,
+			HealthyAllocationIDs: []string{structs.GenerateUUID()},
+		},
+	}
+	err := state.UpdateDeploymentAllocHealth(2, req)
+	if err == nil || !strings.Contains(err.Error(), "unknown alloc") {
+		t.Fatalf("expected error because the alloc doesn't exist: %v", err)
+	}
+}
+
+// Test that allocation health can't be set for an alloc with mismatched
+// deployment ids
+func TestStateStore_UpsertDeploymentAllocHealth_BadAlloc_MismatchDeployment(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert two  deployment
+	d1 := mock.Deployment()
+	d2 := mock.Deployment()
+	if err := state.UpsertDeployment(1, d1); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if err := state.UpsertDeployment(2, d2); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Insert an alloc for a random deployment
+	a := mock.Alloc()
+	a.DeploymentID = d1.ID
+	if err := state.UpsertAllocs(3, []*structs.Allocation{a}); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Set health against the terminal deployment
+	req := &structs.ApplyDeploymentAllocHealthRequest{
+		DeploymentAllocHealthRequest: structs.DeploymentAllocHealthRequest{
+			DeploymentID:         d2.ID,
+			HealthyAllocationIDs: []string{a.ID},
+		},
+	}
+	err := state.UpdateDeploymentAllocHealth(4, req)
+	if err == nil || !strings.Contains(err.Error(), "not part of deployment") {
+		t.Fatalf("expected error because the alloc isn't part of the deployment: %v", err)
+	}
+}
+
+// Test that allocation health is properly set
+func TestStateStore_UpsertDeploymentAllocHealth(t *testing.T) {
+	state := testStateStore(t)
+
+	// Insert a deployment
+	d := mock.Deployment()
+	if err := state.UpsertDeployment(1, d); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Insert two allocations
+	a1 := mock.Alloc()
+	a1.DeploymentID = d.ID
+	a2 := mock.Alloc()
+	a2.DeploymentID = d.ID
+	if err := state.UpsertAllocs(2, []*structs.Allocation{a1, a2}); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Create a job to roll back to
+	j := mock.Job()
+
+	// Create an eval that should be upserted
+	e := mock.Eval()
+
+	// Create a status update for the deployment
+	status, desc := structs.DeploymentStatusFailed, "foo"
+	u := &structs.DeploymentStatusUpdate{
+		DeploymentID:      d.ID,
+		Status:            status,
+		StatusDescription: desc,
+	}
+
+	// Set health against the deployment
+	req := &structs.ApplyDeploymentAllocHealthRequest{
+		DeploymentAllocHealthRequest: structs.DeploymentAllocHealthRequest{
+			DeploymentID:           d.ID,
+			HealthyAllocationIDs:   []string{a1.ID},
+			UnhealthyAllocationIDs: []string{a2.ID},
+		},
+		Job:              j,
+		Eval:             e,
+		DeploymentUpdate: u,
+	}
+	err := state.UpdateDeploymentAllocHealth(3, req)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Check that the status was updated properly
+	ws := memdb.NewWatchSet()
+	dout, err := state.DeploymentByID(ws, d.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if dout.Status != status || dout.StatusDescription != desc {
+		t.Fatalf("bad: %#v", dout)
+	}
+
+	// Check that the evaluation was created
+	eout, _ := state.EvalByID(ws, e.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if eout == nil {
+		t.Fatalf("bad: %#v", eout)
+	}
+
+	// Check that the job was created
+	jout, _ := state.JobByID(ws, j.ID)
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	if jout == nil {
+		t.Fatalf("bad: %#v", jout)
+	}
+
+	// Check the status of the allocs
+	out1, err := state.AllocByID(ws, a1.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	out2, err := state.AllocByID(ws, a2.ID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if !out1.DeploymentStatus.IsHealthy() {
+		t.Fatalf("bad: alloc %q not healthy", out1.ID)
+	}
+	if !out2.DeploymentStatus.IsUnhealthy() {
+		t.Fatalf("bad: alloc %q not unhealthy", out2.ID)
 	}
 }
 
@@ -2981,12 +5575,26 @@ func TestStateStore_UpsertVaultAccessors(t *testing.T) {
 	a := mock.VaultAccessor()
 	a2 := mock.VaultAccessor()
 
+	ws := memdb.NewWatchSet()
+	if _, err := state.VaultAccessor(ws, a.Accessor); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if _, err := state.VaultAccessor(ws, a2.Accessor); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
 	err := state.UpsertVaultAccessor(1000, []*structs.VaultAccessor{a, a2})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.VaultAccessor(a.Accessor)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.VaultAccessor(ws, a.Accessor)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -2995,7 +5603,7 @@ func TestStateStore_UpsertVaultAccessors(t *testing.T) {
 		t.Fatalf("bad: %#v %#v", a, out)
 	}
 
-	out, err = state.VaultAccessor(a2.Accessor)
+	out, err = state.VaultAccessor(ws, a2.Accessor)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3004,7 +5612,7 @@ func TestStateStore_UpsertVaultAccessors(t *testing.T) {
 		t.Fatalf("bad: %#v %#v", a2, out)
 	}
 
-	iter, err := state.VaultAccessors()
+	iter, err := state.VaultAccessors(ws)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3035,6 +5643,10 @@ func TestStateStore_UpsertVaultAccessors(t *testing.T) {
 	if index != 1000 {
 		t.Fatalf("bad: %d", index)
 	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
 }
 
 func TestStateStore_DeleteVaultAccessors(t *testing.T) {
@@ -3048,19 +5660,29 @@ func TestStateStore_DeleteVaultAccessors(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
+	ws := memdb.NewWatchSet()
+	if _, err := state.VaultAccessor(ws, a1.Accessor); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
 	err = state.DeleteVaultAccessors(1001, accessors)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.VaultAccessor(a1.Accessor)
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.VaultAccessor(ws, a1.Accessor)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if out != nil {
 		t.Fatalf("bad: %#v %#v", a1, out)
 	}
-	out, err = state.VaultAccessor(a2.Accessor)
+	out, err = state.VaultAccessor(ws, a2.Accessor)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3074,6 +5696,10 @@ func TestStateStore_DeleteVaultAccessors(t *testing.T) {
 	}
 	if index != 1001 {
 		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -3100,7 +5726,8 @@ func TestStateStore_VaultAccessorsByAlloc(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.VaultAccessorsByAlloc(alloc.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.VaultAccessorsByAlloc(ws, alloc.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3115,6 +5742,10 @@ func TestStateStore_VaultAccessorsByAlloc(t *testing.T) {
 	}
 	if index != 1000 {
 		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -3141,7 +5772,8 @@ func TestStateStore_VaultAccessorsByNode(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := state.VaultAccessorsByNode(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.VaultAccessorsByNode(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3156,6 +5788,10 @@ func TestStateStore_VaultAccessorsByNode(t *testing.T) {
 	}
 	if index != 1000 {
 		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
 }
 
@@ -3174,7 +5810,8 @@ func TestStateStore_RestoreVaultAccessor(t *testing.T) {
 	}
 	restore.Commit()
 
-	out, err := state.VaultAccessor(a.Accessor)
+	ws := memdb.NewWatchSet()
+	out, err := state.VaultAccessor(ws, a.Accessor)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -3182,36 +5819,526 @@ func TestStateStore_RestoreVaultAccessor(t *testing.T) {
 	if !reflect.DeepEqual(out, a) {
 		t.Fatalf("Bad: %#v %#v", out, a)
 	}
-}
 
-// setupNotifyTest takes a state store and a set of watch items, then creates
-// and subscribes a notification channel for each item.
-func setupNotifyTest(state *StateStore, items ...watch.Item) notifyTest {
-	var n notifyTest
-	for _, item := range items {
-		ch := make(chan struct{}, 1)
-		state.Watch(watch.NewItems(item), ch)
-		n = append(n, &notifyTestCase{item, ch})
+	if watchFired(ws) {
+		t.Fatalf("bad")
 	}
-	return n
 }
 
-// notifyTestCase is used to set up and verify watch triggers.
-type notifyTestCase struct {
-	item watch.Item
-	ch   chan struct{}
-}
+func TestStateStore_UpsertACLPolicy(t *testing.T) {
+	state := testStateStore(t)
+	policy := mock.ACLPolicy()
+	policy2 := mock.ACLPolicy()
 
-// notifyTest is a suite of notifyTestCases.
-type notifyTest []*notifyTestCase
+	ws := memdb.NewWatchSet()
+	if _, err := state.ACLPolicyByName(ws, policy.Name); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err := state.ACLPolicyByName(ws, policy2.Name); err != nil {
+		t.Fatalf("err: %v", err)
+	}
 
-// verify ensures that each channel received a notification.
-func (n notifyTest) verify(t *testing.T) {
-	for _, tcase := range n {
-		if len(tcase.ch) != 1 {
-			t.Fatalf("should notify %#v", tcase.item)
+	if err := state.UpsertACLPolicies(1000,
+		[]*structs.ACLPolicy{policy, policy2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.ACLPolicyByName(ws, policy.Name)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, policy, out)
+
+	out, err = state.ACLPolicyByName(ws, policy2.Name)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, policy2, out)
+
+	iter, err := state.ACLPolicies(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
 		}
+		count++
 	}
+	if count != 2 {
+		t.Fatalf("bad: %d", count)
+	}
+
+	index, err := state.Index("acl_policy")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeleteACLPolicy(t *testing.T) {
+	state := testStateStore(t)
+	policy := mock.ACLPolicy()
+	policy2 := mock.ACLPolicy()
+
+	// Create the policy
+	if err := state.UpsertACLPolicies(1000,
+		[]*structs.ACLPolicy{policy, policy2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watcher
+	ws := memdb.NewWatchSet()
+	if _, err := state.ACLPolicyByName(ws, policy.Name); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Delete the policy
+	if err := state.DeleteACLPolicies(1001,
+		[]string{policy.Name, policy2.Name}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure watching triggered
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	// Ensure we don't get the object back
+	ws = memdb.NewWatchSet()
+	out, err := state.ACLPolicyByName(ws, policy.Name)
+	assert.Equal(t, nil, err)
+	if out != nil {
+		t.Fatalf("bad: %#v", out)
+	}
+
+	iter, err := state.ACLPolicies(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("bad: %d", count)
+	}
+
+	index, err := state.Index("acl_policy")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1001 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_ACLPolicyByNamePrefix(t *testing.T) {
+	state := testStateStore(t)
+	names := []string{
+		"foo",
+		"bar",
+		"foobar",
+		"foozip",
+		"zip",
+	}
+
+	// Create the policies
+	var baseIndex uint64 = 1000
+	for _, name := range names {
+		p := mock.ACLPolicy()
+		p.Name = name
+		if err := state.UpsertACLPolicies(baseIndex, []*structs.ACLPolicy{p}); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		baseIndex++
+	}
+
+	// Scan by prefix
+	iter, err := state.ACLPolicyByNamePrefix(nil, "foo")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	out := []string{}
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+		out = append(out, raw.(*structs.ACLPolicy).Name)
+	}
+	if count != 3 {
+		t.Fatalf("bad: %d %v", count, out)
+	}
+	sort.Strings(out)
+
+	expect := []string{"foo", "foobar", "foozip"}
+	assert.Equal(t, expect, out)
+}
+
+func TestStateStore_BootstrapACLTokens(t *testing.T) {
+	state := testStateStore(t)
+	tk1 := mock.ACLToken()
+	tk2 := mock.ACLToken()
+
+	ok, err := state.CanBootstrapACLToken()
+	assert.Nil(t, err)
+	assert.Equal(t, true, ok)
+
+	if err := state.BootstrapACLTokens(1000, tk1); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	out, err := state.ACLTokenByAccessorID(nil, tk1.AccessorID)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tk1, out)
+
+	ok, err = state.CanBootstrapACLToken()
+	assert.Nil(t, err)
+	assert.Equal(t, false, ok)
+
+	if err := state.BootstrapACLTokens(1001, tk2); err == nil {
+		t.Fatalf("expected error")
+	}
+
+	iter, err := state.ACLTokens(nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+	}
+	if count != 1 {
+		t.Fatalf("bad: %d", count)
+	}
+
+	index, err := state.Index("acl_token")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+	index, err = state.Index("acl_token_bootstrap")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+}
+
+func TestStateStore_UpsertACLTokens(t *testing.T) {
+	state := testStateStore(t)
+	tk1 := mock.ACLToken()
+	tk2 := mock.ACLToken()
+
+	ws := memdb.NewWatchSet()
+	if _, err := state.ACLTokenByAccessorID(ws, tk1.AccessorID); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err := state.ACLTokenByAccessorID(ws, tk2.AccessorID); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if err := state.UpsertACLTokens(1000,
+		[]*structs.ACLToken{tk1, tk2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	ws = memdb.NewWatchSet()
+	out, err := state.ACLTokenByAccessorID(ws, tk1.AccessorID)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tk1, out)
+
+	out, err = state.ACLTokenByAccessorID(ws, tk2.AccessorID)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tk2, out)
+
+	out, err = state.ACLTokenBySecretID(ws, tk1.SecretID)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tk1, out)
+
+	out, err = state.ACLTokenBySecretID(ws, tk2.SecretID)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tk2, out)
+
+	iter, err := state.ACLTokens(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+	}
+	if count != 2 {
+		t.Fatalf("bad: %d", count)
+	}
+
+	index, err := state.Index("acl_token")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1000 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_DeleteACLTokens(t *testing.T) {
+	state := testStateStore(t)
+	tk1 := mock.ACLToken()
+	tk2 := mock.ACLToken()
+
+	// Create the tokens
+	if err := state.UpsertACLTokens(1000,
+		[]*structs.ACLToken{tk1, tk2}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Create a watcher
+	ws := memdb.NewWatchSet()
+	if _, err := state.ACLTokenByAccessorID(ws, tk1.AccessorID); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Delete the token
+	if err := state.DeleteACLTokens(1001,
+		[]string{tk1.AccessorID, tk2.AccessorID}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure watching triggered
+	if !watchFired(ws) {
+		t.Fatalf("bad")
+	}
+
+	// Ensure we don't get the object back
+	ws = memdb.NewWatchSet()
+	out, err := state.ACLTokenByAccessorID(ws, tk1.AccessorID)
+	assert.Equal(t, nil, err)
+	if out != nil {
+		t.Fatalf("bad: %#v", out)
+	}
+
+	iter, err := state.ACLTokens(ws)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("bad: %d", count)
+	}
+
+	index, err := state.Index("acl_token")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if index != 1001 {
+		t.Fatalf("bad: %d", index)
+	}
+
+	if watchFired(ws) {
+		t.Fatalf("bad")
+	}
+}
+
+func TestStateStore_ACLTokenByAccessorIDPrefix(t *testing.T) {
+	state := testStateStore(t)
+	prefixes := []string{
+		"aaaa",
+		"aabb",
+		"bbbb",
+		"bbcc",
+		"ffff",
+	}
+
+	// Create the tokens
+	var baseIndex uint64 = 1000
+	for _, prefix := range prefixes {
+		tk := mock.ACLToken()
+		tk.AccessorID = prefix + tk.AccessorID[4:]
+		if err := state.UpsertACLTokens(baseIndex, []*structs.ACLToken{tk}); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		baseIndex++
+	}
+
+	// Scan by prefix
+	iter, err := state.ACLTokenByAccessorIDPrefix(nil, "aa")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see both tokens
+	count := 0
+	out := []string{}
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+		out = append(out, raw.(*structs.ACLToken).AccessorID[:4])
+	}
+	if count != 2 {
+		t.Fatalf("bad: %d %v", count, out)
+	}
+	sort.Strings(out)
+
+	expect := []string{"aaaa", "aabb"}
+	assert.Equal(t, expect, out)
+}
+
+func TestStateStore_RestoreACLPolicy(t *testing.T) {
+	state := testStateStore(t)
+	policy := mock.ACLPolicy()
+
+	restore, err := state.Restore()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = restore.ACLPolicyRestore(policy)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	restore.Commit()
+
+	ws := memdb.NewWatchSet()
+	out, err := state.ACLPolicyByName(ws, policy.Name)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	assert.Equal(t, policy, out)
+}
+
+func TestStateStore_ACLTokensByGlobal(t *testing.T) {
+	state := testStateStore(t)
+	tk1 := mock.ACLToken()
+	tk2 := mock.ACLToken()
+	tk3 := mock.ACLToken()
+	tk4 := mock.ACLToken()
+	tk3.Global = true
+
+	if err := state.UpsertACLTokens(1000,
+		[]*structs.ACLToken{tk1, tk2, tk3, tk4}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	iter, err := state.ACLTokensByGlobal(nil, true)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure we see the one global policies
+	count := 0
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		count++
+	}
+	if count != 1 {
+		t.Fatalf("bad: %d", count)
+	}
+}
+
+func TestStateStore_RestoreACLToken(t *testing.T) {
+	state := testStateStore(t)
+	token := mock.ACLToken()
+
+	restore, err := state.Restore()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = restore.ACLTokenRestore(token)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	restore.Commit()
+
+	ws := memdb.NewWatchSet()
+	out, err := state.ACLTokenByAccessorID(ws, token.AccessorID)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	assert.Equal(t, token, out)
+}
+
+func TestStateStore_Abandon(t *testing.T) {
+	s := testStateStore(t)
+	abandonCh := s.AbandonCh()
+	s.Abandon()
+	select {
+	case <-abandonCh:
+	default:
+		t.Fatalf("bad")
+	}
+}
+
+// watchFired is a helper for unit tests that returns if the given watch set
+// fired (it doesn't care which watch actually fired). This uses a fixed
+// timeout since we already expect the event happened before calling this and
+// just need to distinguish a fire from a timeout. We do need a little time to
+// allow the watch to set up any goroutines, though.
+func watchFired(ws memdb.WatchSet) bool {
+	timedOut := ws.Watch(time.After(50 * time.Millisecond))
+	return !timedOut
 }
 
 // NodeIDSort is used to sort nodes by ID

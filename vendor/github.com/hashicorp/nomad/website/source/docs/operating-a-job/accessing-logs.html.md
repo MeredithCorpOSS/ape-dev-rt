@@ -16,7 +16,7 @@ as simple as possible, Nomad provides:
 
 - Job specification for [log rotation](/docs/job-specification/logs.html)
 - CLI command for [log viewing](/docs/commands/logs.html)
-- API for programatic [log access](/docs/http/client-fs.html#logs)
+- API for programatic [log access](/api/client.html#stream-logs)
 
 This section will utilize the job named "docs" from the [previous
 sections](/docs/operating-a-job/submitting-jobs.html), but these operations
@@ -60,13 +60,21 @@ $ nomad logs 04d9627d server
 
 The logs command supports both displaying the logs as well as following logs,
 blocking for more output, similar to `tail -f`. To follow the logs, use the
-`-tail` flag:
+appropriately named `-f` flag:
 
 ```shell
-$ nomad logs -tail 04d9627d
+$ nomad logs -f 04d9627d
 ```
 
 This will stream logs to our console.
+
+If you wish to see only the tail of a log, use the `-tail` and `-n` flags:
+
+```shell
+$ nomad logs -tail -n 25 04d9627d
+```
+This will show the last 25 lines. If you omit the `-n` flag, `-tail` will
+default to 10 lines.
 
 By default, only the logs on stdout are displayed. To show the log output from
 stderr, use the `-stderr` flag:
@@ -79,9 +87,9 @@ $ nomad logs -stderr 04d9627d
 
 While the logs command works well for quickly accessing application logs, it
 generally does not scale to large systems or systems that produce a lot of log
-output, especially for the long-term storage of logs. Nomad only retains log
-files for a configurable period of time, so chatty applications should use a
-better log retention strategy.
+output, especially for the long-term storage of logs. Nomad's retention of log
+files is best effort, so chatty applications should use a better log retention
+strategy.
 
 Since applications log to the `alloc/` directory, all tasks within the same task
 group have access to each others logs. Thus it is possible to have a task group
@@ -91,6 +99,10 @@ as follows:
 group "my-group" {
   task "server" {
     # ...
+
+    # Setting the server task as the leader of the task group allows us to
+    # signal the log shipper task to gracefully shutdown when the server exits.
+    leader = true
   }
 
   task "log-shipper" {
@@ -103,3 +115,11 @@ In the above example, the `server` task is the application that should be run
 and will be producing the logs. The `log-shipper` reads those logs from the
 `alloc/logs/` directory and sends them to a longer-term storage solution such as
 Amazon S3 or an internal log aggregation system.
+
+When using the log shipper pattern, especially for batch jobs, the main task
+should be marked as the [leader task](/docs/job-specification/task.html#leader).
+By marking the main task as a leader, when the task completes all other tasks
+within the group will be gracefully shutdown. This allows the log shipper to
+finish sending any logs and then exiting itself. The log shipper should set a
+high enough [`kill_timeout`](/docs/job-specification/task.html#kill_timeout)
+such that it can ship any remaining logs before exiting.

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestSystemEndpoint_GarbageCollect(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -21,8 +23,16 @@ func TestSystemEndpoint_GarbageCollect(t *testing.T) {
 	state := s1.fsm.State()
 	job := mock.Job()
 	job.Type = structs.JobTypeBatch
+	job.Stop = true
 	if err := state.UpsertJob(1000, job); err != nil {
-		t.Fatalf("UpsertAllocs() failed: %v", err)
+		t.Fatalf("UpsertJob() failed: %v", err)
+	}
+
+	eval := mock.Eval()
+	eval.Status = structs.EvalStatusComplete
+	eval.JobID = job.ID
+	if err := state.UpsertEvals(1001, []*structs.Evaluation{eval}); err != nil {
+		t.Fatalf("UpsertEvals() failed: %v", err)
 	}
 
 	// Make the GC request
@@ -38,12 +48,13 @@ func TestSystemEndpoint_GarbageCollect(t *testing.T) {
 
 	testutil.WaitForResult(func() (bool, error) {
 		// Check if the job has been GC'd
-		exist, err := state.JobByID(job.ID)
+		ws := memdb.NewWatchSet()
+		exist, err := state.JobByID(ws, job.ID)
 		if err != nil {
 			return false, err
 		}
 		if exist != nil {
-			return false, fmt.Errorf("job %q wasn't garbage collected", job.ID)
+			return false, fmt.Errorf("job %+v wasn't garbage collected", job)
 		}
 		return true, nil
 	}, func(err error) {
@@ -52,6 +63,7 @@ func TestSystemEndpoint_GarbageCollect(t *testing.T) {
 }
 
 func TestSystemEndpoint_ReconcileSummaries(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -81,7 +93,8 @@ func TestSystemEndpoint_ReconcileSummaries(t *testing.T) {
 
 	testutil.WaitForResult(func() (bool, error) {
 		// Check if Nomad has reconciled the summary for the job
-		summary, err := state.JobSummaryByID(job.ID)
+		ws := memdb.NewWatchSet()
+		summary, err := state.JobSummaryByID(ws, job.ID)
 		if err != nil {
 			return false, err
 		}

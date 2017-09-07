@@ -47,6 +47,14 @@ vault {
 - `enabled` `(bool: false)` - Specifies if the Vault integration should be
   activated.
 
+- `create_from_role` `(string: "")` - Specifies the role to create tokens from.
+  The token given to Nomad does not have to be created from this role but must
+  have "update" capability on "auth/token/create/<create_from_role>" path in
+  Vault. If this value is unset and the token is created from a role, the value
+  is defaulted to the role the token is from. This is largely for backwards
+  compatibility. It is recommended to set the `create_from_role` field if Nomad
+  is deriving child tokens from a role.
+
 - `task_token_ttl` `(string: "")` - Specifies the TTL of created tokens when
   using a root token. This is specified using a label suffix like "30s" or "1h".
 
@@ -111,6 +119,11 @@ vault {
   # should set the VAULT_TOKEN environment variable when starting the Nomad
   # agent 
   token       = "debecfdc-9ed7-ea22-c6ee-948f22cdd474"
+
+  # Setting the create_from_role option causes Nomad to create tokens for tasks
+  # via the provided role. This allows the role to manage what policies are
+  # allowed and disallowed for use by tasks.
+  create_from_role = "nomad-cluster"
 }
 ```
 
@@ -129,6 +142,12 @@ vault {
 ```
 
 The key difference is that the token is not necessary on the client.
+
+## `vault` Configuration Reloads
+
+The Vault configuration can be reloaded on servers. This can be useful if a new
+token needs to be given to the servers without having to restart them. A reload
+can be accomplished by sending the process a `SIGHUP` signal.
 
 [vault]: https://www.vaultproject.io/ "Vault by HashiCorp"
 [nomad-vault]: /docs/vault-integration/index.html "Nomad Vault Integration"

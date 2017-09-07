@@ -12,6 +12,8 @@ import (
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/hashicorp/nomad/api"
+	"github.com/hashicorp/nomad/api/contexts"
+	"github.com/posener/complete"
 )
 
 const (
@@ -21,7 +23,7 @@ const (
 	bytesToLines int64 = 120
 
 	// defaultTailLines is the number of lines to tail by default if the value
-	// is not overriden.
+	// is not overridden.
 	defaultTailLines int64 = 10
 )
 
@@ -31,7 +33,7 @@ type FSCommand struct {
 
 func (f *FSCommand) Help() string {
 	helpText := `
-Usage: nomad fs <alloc-id> <path>
+Usage: nomad fs [options] <allocation> <path>
 
   fs displays either the contents of an allocation directory for the passed allocation,
   or displays the file at the given path. The path is relative to the root of the alloc
@@ -59,7 +61,7 @@ FS Specific Options:
     Causes the output to not stop when the end of the file is reached, but rather to
     wait for additional output.
 
-  -tail 
+  -tail
     Show the files contents with offsets relative to the end of the file. If no
     offset is given, -n is defaulted to 10.
 
@@ -75,6 +77,35 @@ FS Specific Options:
 
 func (f *FSCommand) Synopsis() string {
 	return "Inspect the contents of an allocation directory"
+}
+
+func (c *FSCommand) AutocompleteFlags() complete.Flags {
+	return mergeAutocompleteFlags(c.Meta.AutocompleteFlags(FlagSetClient),
+		complete.Flags{
+			"-H":       complete.PredictNothing,
+			"-verbose": complete.PredictNothing,
+			"-job":     complete.PredictAnything,
+			"-stat":    complete.PredictNothing,
+			"-f":       complete.PredictNothing,
+			"-tail":    complete.PredictNothing,
+			"-n":       complete.PredictAnything,
+			"-c":       complete.PredictAnything,
+		})
+}
+
+func (f *FSCommand) AutocompleteArgs() complete.Predictor {
+	return complete.PredictFunc(func(a complete.Args) []string {
+		client, err := f.Meta.Client()
+		if err != nil {
+			return nil
+		}
+
+		resp, _, err := client.Search().PrefixSearch(a.Last, contexts.Allocs, nil)
+		if err != nil {
+			return []string{}
+		}
+		return resp.Matches[contexts.Allocs]
+	})
 }
 
 func (f *FSCommand) Run(args []string) int {
@@ -142,12 +173,8 @@ func (f *FSCommand) Run(args []string) int {
 		f.Ui.Error(fmt.Sprintf("Alloc ID must contain at least two characters."))
 		return 1
 	}
-	if len(allocID)%2 == 1 {
-		// Identifiers must be of even length, so we strip off the last byte
-		// to provide a consistent user experience.
-		allocID = allocID[:len(allocID)-1]
-	}
 
+	allocID = sanatizeUUIDPrefix(allocID)
 	allocs, _, err := client.Allocations().PrefixList(allocID)
 	if err != nil {
 		f.Ui.Error(fmt.Sprintf("Error querying allocation: %v", err))
@@ -159,20 +186,9 @@ func (f *FSCommand) Run(args []string) int {
 	}
 	if len(allocs) > 1 {
 		// Format the allocs
-		out := make([]string, len(allocs)+1)
-		out[0] = "ID|Eval ID|Job ID|Task Group|Desired Status|Client Status"
-		for i, alloc := range allocs {
-			out[i+1] = fmt.Sprintf("%s|%s|%s|%s|%s|%s",
-				limit(alloc.ID, length),
-				limit(alloc.EvalID, length),
-				alloc.JobID,
-				alloc.TaskGroup,
-				alloc.DesiredStatus,
-				alloc.ClientStatus,
-			)
-		}
-		f.Ui.Output(fmt.Sprintf("Prefix matched multiple allocations\n\n%s", formatList(out)))
-		return 0
+		out := formatAllocListStubs(allocs, verbose, length)
+		f.Ui.Error(fmt.Sprintf("Prefix matched multiple allocations\n\n%s", out))
+		return 1
 	}
 	// Prefix lookup matched a single allocation
 	alloc, _, err := client.Allocations().Info(allocs[0].ID, nil)
@@ -348,7 +364,7 @@ func (f *FSCommand) followFile(client *api.Client, alloc *api.Allocation,
 // but use a dead allocation if no running allocations are found
 func getRandomJobAlloc(client *api.Client, jobID string) (string, error) {
 	var runningAllocs []*api.AllocationListStub
-	allocs, _, err := client.Jobs().Allocations(jobID, nil)
+	allocs, _, err := client.Jobs().Allocations(jobID, false, nil)
 
 	// Check that the job actually has allocations
 	if len(allocs) == 0 {

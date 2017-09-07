@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
-	"github.com/hashicorp/nomad/nomad/watch"
 	"github.com/hashicorp/raft"
 	vapi "github.com/hashicorp/vault/api"
 )
@@ -98,12 +97,14 @@ func (n *Node) Register(args *structs.NodeRegisterRequest, reply *structs.NodeUp
 		return fmt.Errorf("failed to computed node class: %v", err)
 	}
 
-	// Look for the node so we can detect a state transistion
+	// Look for the node so we can detect a state transition
 	snap, err := n.srv.fsm.State().Snapshot()
 	if err != nil {
 		return err
 	}
-	originalNode, err := snap.NodeByID(args.Node.ID)
+
+	ws := memdb.NewWatchSet()
+	originalNode, err := snap.NodeByID(ws, args.Node.ID)
 	if err != nil {
 		return err
 	}
@@ -184,14 +185,14 @@ func nodePreSecretID(node *structs.Node) (bool, error) {
 
 // updateNodeUpdateResponse assumes the n.srv.peerLock is held for reading.
 func (n *Node) constructNodeServerInfoResponse(snap *state.StateSnapshot, reply *structs.NodeUpdateResponse) error {
-	reply.LeaderRPCAddr = n.srv.raft.Leader()
+	reply.LeaderRPCAddr = string(n.srv.raft.Leader())
 
 	// Reply with config information required for future RPC requests
 	reply.Servers = make([]*structs.NodeServerInfo, 0, len(n.srv.localPeers))
 	for k, v := range n.srv.localPeers {
 		reply.Servers = append(reply.Servers,
 			&structs.NodeServerInfo{
-				RPCAdvertiseAddr: k,
+				RPCAdvertiseAddr: string(k),
 				RPCMajorVersion:  int32(v.MajorVersion),
 				RPCMinorVersion:  int32(v.MinorVersion),
 				Datacenter:       v.Datacenter,
@@ -203,7 +204,8 @@ func (n *Node) constructNodeServerInfoResponse(snap *state.StateSnapshot, reply 
 	// Snapshot is used only to iterate over all nodes to create a node
 	// count to send back to Nomad Clients in their heartbeat so Clients
 	// can estimate the size of the cluster.
-	iter, err := snap.Nodes()
+	ws := memdb.NewWatchSet()
+	iter, err := snap.Nodes(ws)
 	if err == nil {
 		for {
 			raw := iter.Next()
@@ -248,13 +250,15 @@ func (n *Node) Deregister(args *structs.NodeDeregisterRequest, reply *structs.No
 	}
 
 	// Determine if there are any Vault accessors on the node
-	accessors, err := n.srv.State().VaultAccessorsByNode(args.NodeID)
+	ws := memdb.NewWatchSet()
+	accessors, err := n.srv.State().VaultAccessorsByNode(ws, args.NodeID)
 	if err != nil {
 		n.srv.logger.Printf("[ERR] nomad.client: looking up accessors for node %q failed: %v", args.NodeID, err)
 		return err
 	}
 
-	if len(accessors) != 0 {
+	if l := len(accessors); l != 0 {
+		n.srv.logger.Printf("[DEBUG] nomad.client: revoking %d accessors on node %q due to deregister", l, args.NodeID)
 		if err := n.srv.vault.RevokeTokens(context.Background(), accessors, true); err != nil {
 			n.srv.logger.Printf("[ERR] nomad.client: revoking accessors for node %q failed: %v", args.NodeID, err)
 			return err
@@ -289,7 +293,9 @@ func (n *Node) UpdateStatus(args *structs.NodeUpdateStatusRequest, reply *struct
 	if err != nil {
 		return err
 	}
-	node, err := snap.NodeByID(args.NodeID)
+
+	ws := memdb.NewWatchSet()
+	node, err := snap.NodeByID(ws, args.NodeID)
 	if err != nil {
 		return err
 	}
@@ -330,13 +336,14 @@ func (n *Node) UpdateStatus(args *structs.NodeUpdateStatusRequest, reply *struct
 	switch args.Status {
 	case structs.NodeStatusDown:
 		// Determine if there are any Vault accessors on the node
-		accessors, err := n.srv.State().VaultAccessorsByNode(args.NodeID)
+		accessors, err := n.srv.State().VaultAccessorsByNode(ws, args.NodeID)
 		if err != nil {
 			n.srv.logger.Printf("[ERR] nomad.client: looking up accessors for node %q failed: %v", args.NodeID, err)
 			return err
 		}
 
-		if len(accessors) != 0 {
+		if l := len(accessors); l != 0 {
+			n.srv.logger.Printf("[DEBUG] nomad.client: revoking %d accessors on node %q due to down state", l, args.NodeID)
 			if err := n.srv.vault.RevokeTokens(context.Background(), accessors, true); err != nil {
 				n.srv.logger.Printf("[ERR] nomad.client: revoking accessors for node %q failed: %v", args.NodeID, err)
 				return err
@@ -389,7 +396,8 @@ func (n *Node) UpdateDrain(args *structs.NodeUpdateDrainRequest,
 	if err != nil {
 		return err
 	}
-	node, err := snap.NodeByID(args.NodeID)
+	ws := memdb.NewWatchSet()
+	node, err := snap.NodeByID(ws, args.NodeID)
 	if err != nil {
 		return err
 	}
@@ -443,7 +451,8 @@ func (n *Node) Evaluate(args *structs.NodeEvaluateRequest, reply *structs.NodeUp
 	if err != nil {
 		return err
 	}
-	node, err := snap.NodeByID(args.NodeID)
+	ws := memdb.NewWatchSet()
+	node, err := snap.NodeByID(ws, args.NodeID)
 	if err != nil {
 		return err
 	}
@@ -484,19 +493,14 @@ func (n *Node) GetNode(args *structs.NodeSpecificRequest,
 	opts := blockingOptions{
 		queryOpts: &args.QueryOptions,
 		queryMeta: &reply.QueryMeta,
-		watch:     watch.NewItems(watch.Item{Node: args.NodeID}),
-		run: func() error {
+		run: func(ws memdb.WatchSet, state *state.StateStore) error {
 			// Verify the arguments
 			if args.NodeID == "" {
 				return fmt.Errorf("missing node ID")
 			}
 
 			// Look for the node
-			snap, err := n.srv.fsm.State().Snapshot()
-			if err != nil {
-				return err
-			}
-			out, err := snap.NodeByID(args.NodeID)
+			out, err := state.NodeByID(ws, args.NodeID)
 			if err != nil {
 				return err
 			}
@@ -509,7 +513,7 @@ func (n *Node) GetNode(args *structs.NodeSpecificRequest,
 				reply.Index = out.ModifyIndex
 			} else {
 				// Use the last index that affected the nodes table
-				index, err := snap.Index("nodes")
+				index, err := state.Index("nodes")
 				if err != nil {
 					return err
 				}
@@ -541,14 +545,9 @@ func (n *Node) GetAllocs(args *structs.NodeSpecificRequest,
 	opts := blockingOptions{
 		queryOpts: &args.QueryOptions,
 		queryMeta: &reply.QueryMeta,
-		watch:     watch.NewItems(watch.Item{AllocNode: args.NodeID}),
-		run: func() error {
+		run: func(ws memdb.WatchSet, state *state.StateStore) error {
 			// Look for the node
-			snap, err := n.srv.fsm.State().Snapshot()
-			if err != nil {
-				return err
-			}
-			allocs, err := snap.AllocsByNode(args.NodeID)
+			allocs, err := state.AllocsByNode(ws, args.NodeID)
 			if err != nil {
 				return err
 			}
@@ -563,7 +562,7 @@ func (n *Node) GetAllocs(args *structs.NodeSpecificRequest,
 				reply.Allocs = nil
 
 				// Use the last index that affected the nodes table
-				index, err := snap.Index("allocs")
+				index, err := state.Index("allocs")
 				if err != nil {
 					return err
 				}
@@ -599,16 +598,9 @@ func (n *Node) GetClientAllocs(args *structs.NodeSpecificRequest,
 	opts := blockingOptions{
 		queryOpts: &args.QueryOptions,
 		queryMeta: &reply.QueryMeta,
-		watch:     watch.NewItems(watch.Item{AllocNode: args.NodeID}),
-		run: func() error {
+		run: func(ws memdb.WatchSet, state *state.StateStore) error {
 			// Look for the node
-			snap, err := n.srv.fsm.State().Snapshot()
-			if err != nil {
-				return err
-			}
-
-			// Look for the node
-			node, err := snap.NodeByID(args.NodeID)
+			node, err := state.NodeByID(ws, args.NodeID)
 			if err != nil {
 				return err
 			}
@@ -628,7 +620,7 @@ func (n *Node) GetClientAllocs(args *structs.NodeSpecificRequest,
 				}
 
 				var err error
-				allocs, err = snap.AllocsByNode(args.NodeID)
+				allocs, err = state.AllocsByNode(ws, args.NodeID)
 				if err != nil {
 					return err
 				}
@@ -643,7 +635,7 @@ func (n *Node) GetClientAllocs(args *structs.NodeSpecificRequest,
 				}
 			} else {
 				// Use the last index that affected the nodes table
-				index, err := snap.Index("allocs")
+				index, err := state.Index("allocs")
 				if err != nil {
 					return err
 				}
@@ -734,7 +726,8 @@ func (n *Node) batchUpdate(future *batchFuture, updates []*structs.Allocation) {
 		}
 
 		// Determine if there are any Vault accessors for the allocation
-		accessors, err := n.srv.State().VaultAccessorsByAlloc(alloc.ID)
+		ws := memdb.NewWatchSet()
+		accessors, err := n.srv.State().VaultAccessorsByAlloc(ws, alloc.ID)
 		if err != nil {
 			n.srv.logger.Printf("[ERR] nomad.client: looking up accessors for alloc %q failed: %v", alloc.ID, err)
 			mErr.Errors = append(mErr.Errors, err)
@@ -743,7 +736,8 @@ func (n *Node) batchUpdate(future *batchFuture, updates []*structs.Allocation) {
 		revoke = append(revoke, accessors...)
 	}
 
-	if len(revoke) != 0 {
+	if l := len(revoke); l != 0 {
+		n.srv.logger.Printf("[DEBUG] nomad.client: revoking %d accessors due to terminal allocations", l)
 		if err := n.srv.vault.RevokeTokens(context.Background(), revoke, true); err != nil {
 			n.srv.logger.Printf("[ERR] nomad.client: batched accessor revocation failed: %v", err)
 			mErr.Errors = append(mErr.Errors, err)
@@ -766,18 +760,14 @@ func (n *Node) List(args *structs.NodeListRequest,
 	opts := blockingOptions{
 		queryOpts: &args.QueryOptions,
 		queryMeta: &reply.QueryMeta,
-		watch:     watch.NewItems(watch.Item{Table: "nodes"}),
-		run: func() error {
+		run: func(ws memdb.WatchSet, state *state.StateStore) error {
 			// Capture all the nodes
-			snap, err := n.srv.fsm.State().Snapshot()
-			if err != nil {
-				return err
-			}
+			var err error
 			var iter memdb.ResultIterator
 			if prefix := args.QueryOptions.Prefix; prefix != "" {
-				iter, err = snap.NodesByIDPrefix(prefix)
+				iter, err = state.NodesByIDPrefix(ws, prefix)
 			} else {
-				iter, err = snap.Nodes()
+				iter, err = state.Nodes(ws)
 			}
 			if err != nil {
 				return err
@@ -795,7 +785,7 @@ func (n *Node) List(args *structs.NodeListRequest,
 			reply.Nodes = nodes
 
 			// Use the last index that affected the jobs table
-			index, err := snap.Index("nodes")
+			index, err := state.Index("nodes")
 			if err != nil {
 				return err
 			}
@@ -818,12 +808,13 @@ func (n *Node) createNodeEvals(nodeID string, nodeIndex uint64) ([]string, uint6
 	}
 
 	// Find all the allocations for this node
-	allocs, err := snap.AllocsByNode(nodeID)
+	ws := memdb.NewWatchSet()
+	allocs, err := snap.AllocsByNode(ws, nodeID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to find allocs for '%s': %v", nodeID, err)
 	}
 
-	sysJobsIter, err := snap.JobsByScheduler("system")
+	sysJobsIter, err := snap.JobsByScheduler(ws, "system")
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to find system jobs for '%s': %v", nodeID, err)
 	}
@@ -944,12 +935,15 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 	// setErr is a helper for setting the recoverable error on the reply and
 	// logging it
 	setErr := func(e error, recoverable bool) {
-		reply.Error = structs.NewRecoverableError(e, recoverable)
+		if e == nil {
+			return
+		}
+		reply.Error = structs.NewRecoverableError(e, recoverable).(*structs.RecoverableError)
 		n.srv.logger.Printf("[ERR] nomad.client: DeriveVaultToken failed (recoverable %v): %v", recoverable, e)
 	}
 
 	if done, err := n.srv.forward("Node.DeriveVaultToken", args, args, reply); done {
-		setErr(err, err == structs.ErrNoLeader)
+		setErr(err, structs.IsRecoverable(err) || err == structs.ErrNoLeader)
 		return nil
 	}
 	defer metrics.MeasureSince([]string{"nomad", "client", "derive_vault_token"}, time.Now())
@@ -982,7 +976,8 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 		setErr(err, false)
 		return nil
 	}
-	node, err := snap.NodeByID(args.NodeID)
+	ws := memdb.NewWatchSet()
+	node, err := snap.NodeByID(ws, args.NodeID)
 	if err != nil {
 		setErr(err, false)
 		return nil
@@ -996,7 +991,7 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 		return nil
 	}
 
-	alloc, err := snap.AllocByID(args.AllocID)
+	alloc, err := snap.AllocByID(ws, args.AllocID)
 	if err != nil {
 		setErr(err, false)
 		return nil
@@ -1069,13 +1064,8 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 
 					secret, err := n.srv.vault.CreateToken(ctx, alloc, task)
 					if err != nil {
-						wrapped := fmt.Errorf("failed to create token for task %q: %v", task, err)
-						if rerr, ok := err.(*structs.RecoverableError); ok && rerr.Recoverable {
-							// If the error is recoverable, propogate it
-							return structs.NewRecoverableError(wrapped, true)
-						}
-
-						return wrapped
+						wrapped := fmt.Sprintf("failed to create token for task %q on alloc %q: %v", task, alloc.ID, err)
+						return structs.WrapRecoverable(wrapped, err)
 					}
 
 					results[task] = secret
@@ -1125,16 +1115,16 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 
 	// If there was an error revoke the created tokens
 	if createErr != nil {
-		n.srv.logger.Printf("[ERR] nomad.node: Vault token creation failed: %v", createErr)
+		n.srv.logger.Printf("[ERR] nomad.node: Vault token creation for alloc %q failed: %v", alloc.ID, createErr)
 
 		if revokeErr := n.srv.vault.RevokeTokens(context.Background(), accessors, false); revokeErr != nil {
-			n.srv.logger.Printf("[ERR] nomad.node: Vault token revocation failed: %v", revokeErr)
+			n.srv.logger.Printf("[ERR] nomad.node: Vault token revocation for alloc %q failed: %v", alloc.ID, revokeErr)
 		}
 
 		if rerr, ok := createErr.(*structs.RecoverableError); ok {
 			reply.Error = rerr
 		} else {
-			reply.Error = structs.NewRecoverableError(createErr, false)
+			reply.Error = structs.NewRecoverableError(createErr, false).(*structs.RecoverableError)
 		}
 
 		return nil
@@ -1144,7 +1134,7 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest,
 	req := structs.VaultAccessorsRequest{Accessors: accessors}
 	_, index, err := n.srv.raftApply(structs.VaultAccessorRegisterRequestType, &req)
 	if err != nil {
-		n.srv.logger.Printf("[ERR] nomad.client: Register Vault accessors failed: %v", err)
+		n.srv.logger.Printf("[ERR] nomad.client: Register Vault accessors for alloc %q failed: %v", alloc.ID, err)
 
 		// Determine if we can recover from the error
 		retry := false

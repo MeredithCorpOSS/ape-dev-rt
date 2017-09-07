@@ -2,118 +2,117 @@ package dependency
 
 import (
 	"log"
-	"sync"
 	"time"
+
+	"github.com/hashicorp/vault/api"
+	"github.com/pkg/errors"
 )
 
-// VaultToken is the dependency to Vault for a secret
-type VaultToken struct {
-	sync.Mutex
+var (
+	// Ensure implements
+	_ Dependency = (*VaultTokenQuery)(nil)
+)
 
-	leaseID       string
-	leaseDuration int
+// VaultTokenQuery is the dependency to Vault for a secret
+type VaultTokenQuery struct {
+	stopCh      chan struct{}
+	secret      *Secret
+	vaultSecret *api.Secret
+}
 
-	stopped bool
-	stopCh  chan struct{}
+// NewVaultTokenQuery creates a new dependency.
+func NewVaultTokenQuery(token string) (*VaultTokenQuery, error) {
+	vaultSecret := &api.Secret{
+		Auth: &api.SecretAuth{
+			ClientToken:   token,
+			Renewable:     true,
+			LeaseDuration: 1,
+		},
+	}
+	return &VaultTokenQuery{
+		stopCh:      make(chan struct{}, 1),
+		vaultSecret: vaultSecret,
+		secret:      transformSecret(vaultSecret),
+	}, nil
 }
 
 // Fetch queries the Vault API
-func (d *VaultToken) Fetch(clients *ClientSet, opts *QueryOptions) (interface{}, *ResponseMetadata, error) {
-	d.Lock()
-	if d.stopped {
-		defer d.Unlock()
+func (d *VaultTokenQuery) Fetch(clients *ClientSet, opts *QueryOptions) (interface{}, *ResponseMetadata, error) {
+	select {
+	case <-d.stopCh:
+		return nil, nil, ErrStopped
+	default:
+	}
+
+	opts = opts.Merge(&QueryOptions{})
+
+	if vaultSecretRenewable(d.secret) {
+		log.Printf("[TRACE] %s: starting renewer", d)
+
+		renewer, err := clients.Vault().NewRenewer(&api.RenewerInput{
+			Grace:  opts.VaultGrace,
+			Secret: d.vaultSecret,
+		})
+		if err != nil {
+			return nil, nil, errors.Wrap(err, d.String())
+		}
+		go renewer.Renew()
+		defer renewer.Stop()
+
+	RENEW:
+		for {
+			select {
+			case err := <-renewer.DoneCh():
+				if err != nil {
+					log.Printf("[WARN] %s: failed to renew: %s", d, err)
+				}
+				log.Printf("[WARN] %s: renewer returned (maybe the lease expired)", d)
+				break RENEW
+			case renewal := <-renewer.RenewCh():
+				log.Printf("[TRACE] %s: successfully renewed", d)
+				printVaultWarnings(d, renewal.Secret.Warnings)
+				updateSecret(d.secret, renewal.Secret)
+			case <-d.stopCh:
+				return nil, nil, ErrStopped
+			}
+		}
+	}
+
+	// The secret isn't renewable, probably the generic secret backend.
+	// TODO This is incorrect when given a non-renewable template. We should
+	// instead to a lookup self to determine the lease duration.
+	dur := vaultRenewDuration(d.secret)
+	if dur < opts.VaultGrace {
+		dur = opts.VaultGrace
+	}
+
+	log.Printf("[TRACE] %s: token is not renewable, sleeping for %s", d, dur)
+	select {
+	case <-time.After(dur):
+		// The lease is almost expired, it's time to request a new one.
+	case <-d.stopCh:
 		return nil, nil, ErrStopped
 	}
-	d.Unlock()
 
-	if opts == nil {
-		opts = &QueryOptions{}
-	}
-
-	log.Printf("[DEBUG] (%s) renewing vault token", d.Display())
-
-	// If this is not the first query and we have a lease duration, sleep until we
-	// try to renew.
-	if opts.WaitIndex != 0 && d.leaseDuration != 0 {
-		duration := time.Duration(d.leaseDuration/2.0) * time.Second
-
-		if duration < 1*time.Second {
-			log.Printf("[DEBUG] (%s) increasing sleep to 1s (was %q)",
-				d.Display(), duration)
-			duration = 1 * time.Second
-		}
-
-		log.Printf("[DEBUG] (%s) sleeping for %q", d.Display(), duration)
-		select {
-		case <-d.stopCh:
-			return nil, nil, ErrStopped
-		case <-time.After(duration):
-		}
-	}
-
-	// Grab the vault client
-	vault, err := clients.Vault()
-	if err != nil {
-		return nil, nil, ErrWithExitf("vault_token: %s", err)
-	}
-
-	token, err := vault.Auth().Token().RenewSelf(0)
-	if err != nil {
-		return nil, nil, ErrWithExitf("error renewing vault token: %s", err)
-	}
-
-	// Create our cloned secret
-	secret := &Secret{
-		LeaseID:       token.LeaseID,
-		LeaseDuration: token.Auth.LeaseDuration,
-		Renewable:     token.Auth.Renewable,
-		Data:          token.Data,
-	}
-
-	leaseDuration := token.Auth.LeaseDuration
-	if leaseDuration == 0 {
-		log.Printf("[WARN] (%s) lease duration is 0, setting to 5s", d.Display())
-		leaseDuration = 5
-	}
-
-	d.Lock()
-	d.leaseID = secret.LeaseID
-	d.leaseDuration = leaseDuration
-	d.Unlock()
-
-	log.Printf("[DEBUG] (%s) successfully renewed token", d.Display())
-
-	return respWithMetadata(secret)
+	return nil, nil, ErrLeaseExpired
 }
 
 // CanShare returns if this dependency is shareable.
-func (d *VaultToken) CanShare() bool {
+func (d *VaultTokenQuery) CanShare() bool {
 	return false
 }
 
-// HashCode returns the hash code for this dependency.
-func (d *VaultToken) HashCode() string {
-	return "VaultToken"
-}
-
-// Display returns a string that should be displayed to the user in output (for
-// example).
-func (d *VaultToken) Display() string {
-	return "vault_token"
-}
-
 // Stop halts the dependency's fetch function.
-func (d *VaultToken) Stop() {
-	d.Lock()
-	defer d.Unlock()
-
-	if !d.stopped {
-		close(d.stopCh)
-		d.stopped = true
-	}
+func (d *VaultTokenQuery) Stop() {
+	close(d.stopCh)
 }
 
-// ParseVaultToken creates a new VaultToken dependency.
-func ParseVaultToken() (*VaultToken, error) {
-	return &VaultToken{stopCh: make(chan struct{})}, nil
+// String returns the human-friendly version of this dependency.
+func (d *VaultTokenQuery) String() string {
+	return "vault.token"
+}
+
+// Type returns the type of this dependency.
+func (d *VaultTokenQuery) Type() Type {
+	return TypeVault
 }

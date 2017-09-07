@@ -24,10 +24,6 @@ via CLI arguments. The `agent` command accepts the following arguments:
 
 * `-alloc-dir=<path>`: Equivalent to the Client [alloc_dir](#alloc_dir) config
    option.
-* `-atlas=<infrastructure>`: Equivalent to the Atlas
-  [infrastructure](#infrastructure) config option.
-* `-atlas-join`: Equivalent to the Atlas [join](#join) config option.
-* `-atlas-token=<token>`: Equivalent to the Atlas [token](#token) config option.
 * `-bind=<address>`: Equivalent to the [bind_addr](#bind_addr) config option.
 * `-bootstrap-expect=<num>`: Equivalent to the
   [bootstrap_expect](#bootstrap_expect) config option.
@@ -39,6 +35,8 @@ via CLI arguments. The `agent` command accepts the following arguments:
 * `-dev`: Start the agent in development mode. This enables a pre-configured
   dual-role agent (client + server) which is useful for developing or testing
   Nomad. No other configuration is required to start the agent in this mode.
+* `-encrypt`: Set the Serf encryption key. See [Agent
+  Encryption](/docs/agent/encryption.html) for more details.
 * `-join=<address>`: Address of another agent to join upon starting up. This can
   be specified multiple times to specify multiple agents to join.
 * `-log-level=<level>`: Equivalent to the [log_level](#log_level) config option.
@@ -65,6 +63,7 @@ via CLI arguments. The `agent` command accepts the following arguments:
 * `-vault-token=<token>`: The Vault token used to derive tokens. Only needs to
   be set on Servers. Overrides the Vault token read from the VAULT_TOKEN
   environment variable.
+* `-vault-create-from-role=<role>`: The role name to create tokens for tasks from.
 * `-vault-ca-file=<path>`: Path to a PEM-encoded CA cert file used to verify the
   Vault server SSL certificate.
 * `-vault-ca-path=<path>`: Path to a directory of PEM-encoded CA cert files used

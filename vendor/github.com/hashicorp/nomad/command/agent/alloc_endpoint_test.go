@@ -3,15 +3,18 @@ package agent
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/golang/snappy"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
 
 func TestHTTP_AllocsList(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Directly manipulate the state
 		state := s.Agent.server.State()
 		alloc1 := mock.Alloc()
@@ -57,7 +60,8 @@ func TestHTTP_AllocsList(t *testing.T) {
 }
 
 func TestHTTP_AllocsPrefixList(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Directly manipulate the state
 		state := s.Agent.server.State()
 
@@ -116,7 +120,8 @@ func TestHTTP_AllocsPrefixList(t *testing.T) {
 }
 
 func TestHTTP_AllocQuery(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Directly manipulate the state
 		state := s.Agent.server.State()
 		alloc := mock.Alloc()
@@ -161,8 +166,66 @@ func TestHTTP_AllocQuery(t *testing.T) {
 	})
 }
 
+func TestHTTP_AllocQuery_Payload(t *testing.T) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
+		// Directly manipulate the state
+		state := s.Agent.server.State()
+		alloc := mock.Alloc()
+		if err := state.UpsertJobSummary(999, mock.JobSummary(alloc.JobID)); err != nil {
+			t.Fatal(err)
+		}
+
+		// Insert Payload compressed
+		expected := []byte("hello world")
+		compressed := snappy.Encode(nil, expected)
+		alloc.Job.Payload = compressed
+
+		err := state.UpsertAllocs(1000, []*structs.Allocation{alloc})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		// Make the HTTP request
+		req, err := http.NewRequest("GET", "/v1/allocation/"+alloc.ID, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		respW := httptest.NewRecorder()
+
+		// Make the request
+		obj, err := s.Server.AllocSpecificRequest(respW, req)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		// Check for the index
+		if respW.HeaderMap.Get("X-Nomad-Index") == "" {
+			t.Fatalf("missing index")
+		}
+		if respW.HeaderMap.Get("X-Nomad-KnownLeader") != "true" {
+			t.Fatalf("missing known leader")
+		}
+		if respW.HeaderMap.Get("X-Nomad-LastContact") == "" {
+			t.Fatalf("missing last contact")
+		}
+
+		// Check the job
+		a := obj.(*structs.Allocation)
+		if a.ID != alloc.ID {
+			t.Fatalf("bad: %#v", a)
+		}
+
+		// Check the payload is decompressed
+		if !reflect.DeepEqual(a.Job.Payload, expected) {
+			t.Fatalf("Payload not decompressed properly; got %#v; want %#v", a.Job.Payload, expected)
+		}
+	})
+}
+
 func TestHTTP_AllocStats(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Make the HTTP request
 		req, err := http.NewRequest("GET", "/v1/client/allocation/123/foo", nil)
 		if err != nil {
@@ -179,7 +242,8 @@ func TestHTTP_AllocStats(t *testing.T) {
 }
 
 func TestHTTP_AllocSnapshot(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Make the HTTP request
 		req, err := http.NewRequest("GET", "/v1/client/allocation/123/snapshot", nil)
 		if err != nil {
@@ -193,4 +257,41 @@ func TestHTTP_AllocSnapshot(t *testing.T) {
 			t.Fatalf("err: %v", err)
 		}
 	})
+}
+
+func TestHTTP_AllocGC(t *testing.T) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
+		// Make the HTTP request
+		req, err := http.NewRequest("GET", "/v1/client/allocation/123/gc", nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		respW := httptest.NewRecorder()
+
+		// Make the request
+		_, err = s.Server.ClientAllocRequest(respW, req)
+		if !strings.Contains(err.Error(), "unable to collect allocation") {
+			t.Fatalf("err: %v", err)
+		}
+	})
+}
+
+func TestHTTP_AllocAllGC(t *testing.T) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
+		// Make the HTTP request
+		req, err := http.NewRequest("GET", "/v1/client/gc", nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		respW := httptest.NewRecorder()
+
+		// Make the request
+		_, err = s.Server.ClientGCRequest(respW, req)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	})
+
 }

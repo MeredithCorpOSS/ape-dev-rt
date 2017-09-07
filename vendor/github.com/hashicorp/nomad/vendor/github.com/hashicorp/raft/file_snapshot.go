@@ -37,10 +37,11 @@ type snapMetaSlice []*fileSnapshotMeta
 
 // FileSnapshotSink implements SnapshotSink with a file.
 type FileSnapshotSink struct {
-	store  *FileSnapshotStore
-	logger *log.Logger
-	dir    string
-	meta   fileSnapshotMeta
+	store     *FileSnapshotStore
+	logger    *log.Logger
+	dir       string
+	parentDir string
+	meta      fileSnapshotMeta
 
 	stateFile *os.File
 	stateHash hash.Hash64
@@ -119,8 +120,14 @@ func (f *FileSnapshotStore) testPermissions() error {
 	if err != nil {
 		return err
 	}
-	fh.Close()
-	os.Remove(path)
+
+	if err = fh.Close(); err != nil {
+		return err
+	}
+
+	if err = os.Remove(path); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -132,7 +139,13 @@ func snapshotName(term, index uint64) string {
 }
 
 // Create is used to start a new snapshot
-func (f *FileSnapshotStore) Create(index, term uint64, peers []byte) (SnapshotSink, error) {
+func (f *FileSnapshotStore) Create(version SnapshotVersion, index, term uint64,
+	configuration Configuration, configurationIndex uint64, trans Transport) (SnapshotSink, error) {
+	// We only support version 1 snapshots at this time.
+	if version != 1 {
+		return nil, fmt.Errorf("unsupported snapshot version %d", version)
+	}
+
 	// Create a new path
 	name := snapshotName(term, index)
 	path := filepath.Join(f.path, name+tmpSuffix)
@@ -146,15 +159,19 @@ func (f *FileSnapshotStore) Create(index, term uint64, peers []byte) (SnapshotSi
 
 	// Create the sink
 	sink := &FileSnapshotSink{
-		store:  f,
-		logger: f.logger,
-		dir:    path,
+		store:     f,
+		logger:    f.logger,
+		dir:       path,
+		parentDir: f.path,
 		meta: fileSnapshotMeta{
 			SnapshotMeta: SnapshotMeta{
-				ID:    name,
-				Index: index,
-				Term:  term,
-				Peers: peers,
+				Version:            version,
+				ID:                 name,
+				Index:              index,
+				Term:               term,
+				Peers:              encodePeers(configuration, trans),
+				Configuration:      configuration,
+				ConfigurationIndex: configurationIndex,
 			},
 			CRC: nil,
 		},
@@ -233,6 +250,12 @@ func (f *FileSnapshotStore) getSnapshots() ([]*fileSnapshotMeta, error) {
 		meta, err := f.readMeta(dirName)
 		if err != nil {
 			f.logger.Printf("[WARN] snapshot: Failed to read metadata for %v: %v", dirName, err)
+			continue
+		}
+
+		// Make sure we can understand this version.
+		if meta.Version < SnapshotVersionMin || meta.Version > SnapshotVersionMax {
+			f.logger.Printf("[WARN] snapshot: Snapshot version for %v not supported: %d", dirName, meta.Version)
 			continue
 		}
 
@@ -363,6 +386,10 @@ func (s *FileSnapshotSink) Close() error {
 	// Close the open handles
 	if err := s.finalize(); err != nil {
 		s.logger.Printf("[ERR] snapshot: Failed to finalize snapshot: %v", err)
+		if delErr := os.RemoveAll(s.dir); delErr != nil {
+			s.logger.Printf("[ERR] snapshot: Failed to delete temporary snapshot directory at path %v: %v", s.dir, delErr)
+			return delErr
+		}
 		return err
 	}
 
@@ -379,8 +406,24 @@ func (s *FileSnapshotSink) Close() error {
 		return err
 	}
 
+	// fsync the parent directory, to sync directory edits to disk
+	parentFH, err := os.Open(s.parentDir)
+	defer parentFH.Close()
+	if err != nil {
+		s.logger.Printf("[ERR] snapshot: Failed to open snapshot parent directory %v, error: %v", s.parentDir, err)
+		return err
+	}
+
+	if err = parentFH.Sync(); err != nil {
+		s.logger.Printf("[ERR] snapshot: Failed syncing parent directory %v, error: %v", s.parentDir, err)
+		return err
+	}
+
 	// Reap any old snapshots
-	s.store.ReapSnapshots()
+	if err := s.store.ReapSnapshots(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -406,6 +449,11 @@ func (s *FileSnapshotSink) Cancel() error {
 func (s *FileSnapshotSink) finalize() error {
 	// Flush any remaining data
 	if err := s.buffered.Flush(); err != nil {
+		return err
+	}
+
+	// Sync to force fsync to disk
+	if err := s.stateFile.Sync(); err != nil {
 		return err
 	}
 
@@ -440,13 +488,21 @@ func (s *FileSnapshotSink) writeMeta() error {
 
 	// Buffer the file IO
 	buffered := bufio.NewWriter(fh)
-	defer buffered.Flush()
 
 	// Write out as JSON
 	enc := json.NewEncoder(buffered)
 	if err := enc.Encode(&s.meta); err != nil {
 		return err
 	}
+
+	if err = buffered.Flush(); err != nil {
+		return err
+	}
+
+	if err = fh.Sync(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

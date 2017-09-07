@@ -62,34 +62,55 @@ The `rkt` driver supports the following configuration in the job spec:
 
 * `trust_prefix` - (Optional) The trust prefix to be passed to rkt. Must be
   reachable from the box running the nomad agent. If not specified, the image is
-  run without verifying the image signature.
+  run with `--insecure-options=all`.
 
-* `dns_servers` - (Optional) A list of DNS servers to be used in the containers.
+* `insecure_options` - (Optional) List of insecure options for rkt. Consult `rkt --help`
+  for list of supported values. This list overrides the `--insecure-options=all` default when
+  no ```trust_prefix``` is provided in the job config, which can be effectively used to enforce
+  secure runs, using ```insecure_options = ["none"]``` option.
+
+  ```hcl
+  config {
+      image = "example.com/image:1.0"
+      insecure_options = ["image", "tls", "ondisk"]
+  }
+  ```
+
+* `dns_servers` - (Optional) A list of DNS servers to be used in the container.
+  Alternatively a list containing just `host` or `none`. `host` uses the host's
+  `resolv.conf` while `none` forces use of the image's name resolution configuration.
 
 * `dns_search_domains` - (Optional) A list of DNS search domains to be used in
    the containers.
 
 * `net` - (Optional) A list of networks to be used by the containers
 
-* `port_map` - (Optional) A key/value map of port to be used by the container.
-   port name in the image manifest file needs to be specified for the value. For example:
+* `port_map` - (Optional) A key/value map of ports used by the container. The
+   value is the port name specified in the image manifest file.  When running
+   Docker images with rkt the port names will be of the form `${PORT}-tcp`. See
+   [networking](#networking) below for more details.
 
-   ```
+   ```hcl
     port_map {
+            # If running a Docker image that exposes port 8080
             app = "8080-tcp"
     }
    ```
-
-   See below for more details.
+   
 
 * `debug` - (Optional) Enable rkt command debug option.
 
-* `volumes` - (Optional) A list of `host_path:container_path` strings to bind
+* `no_overlay` - (Optional) When enabled, will use `--no-overlay=true` flag for 'rkt run'.
+  Useful when running jobs on older systems affected by https://github.com/rkt/rkt/issues/1922
+
+* `volumes` - (Optional) A list of `host_path:container_path[:readOnly]` strings to bind
   host paths to container paths.
+  Mount is done read-write by default; an optional third parameter `readOnly` can be provided
+  to make it read-only.
 
     ```hcl
     config {
-      volumes = ["/path/on/host:/path/in/container"]
+      volumes = ["/path/on/host:/path/in/container", "/readonly/path/on/host:/path/in/container:readOnly"]
     }
     ```
 
@@ -159,9 +180,9 @@ The `rkt` driver will set the following client attributes:
 
 * `driver.rkt` - Set to `1` if rkt is found on the host node. Nomad determines
   this by executing `rkt version` on the host and parsing the output
-* `driver.rkt.version` - Version of `rkt` eg: `1.1.0`. Note that the minimum required
+* `driver.rkt.version` - Version of `rkt` e.g.: `1.1.0`. Note that the minimum required
   version is `1.0.0`
-* `driver.rkt.appc.version` - Version of `appc` that `rkt` is using eg: `1.1.0`
+* `driver.rkt.appc.version` - Version of `appc` that `rkt` is using e.g.: `1.1.0`
 
 Here is an example of using these properties in a job file:
 

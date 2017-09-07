@@ -93,7 +93,20 @@ does not automatically enable service discovery.
   this service. If this is not supplied, no tags will be assigned to the service
   when it is registered.
 
+- `address_mode` `(string: "auto")` - Specifies what address (host or
+  driver-specific) this service should advertise. `host` indicates the host IP
+  and port. `driver` advertises the IP used in the driver (e.g. Docker's internal
+  IP) and uses the ports specified in the port map. The default is `auto` which
+  behaves the same as `host` unless the driver determines its IP should be used.
+  This setting was added in Nomad 0.6 and only supported by the Docker driver.
+  It will advertise the container IP if a network plugin is used (e.g. weave).
+
 ### `check` Parameters
+
+Note that health checks run inside the task. If your task is a Docker container,
+the script will run inside the Docker container. If your task is running in a
+chroot, it will run in the chroot. Please keep this in mind when authoring check
+scripts.
 
 - `args` `(array<string>: [])` - Specifies additional arguments to the
   `command`. This only applies to script-based health checks.
@@ -106,7 +119,7 @@ does not automatically enable service discovery.
     ~> **Caveat:** The command must be the path to the command on disk, and no
     shell exists by default. That means operators like `||` or `&&` are not
     available. Additionally, all arguments must be supplied via the `args`
-    parameter. The achieve the behavior of shell operators, specify the command
+    parameter. To achieve the behavior of shell operators, specify the command
     as a shell, like `/bin/bash` and then use `args` to run the check.
 
 - `initial_status` `(string: <enum>)` - Specifies the originating status of the
@@ -116,6 +129,9 @@ does not automatically enable service discovery.
 - `interval` `(string: <required>)` - Specifies the frequency of the health checks
   that Consul will perform. This is specified using a label suffix like "30s"
   or "1h". This must be greater than or equal to "1s"
+
+- `method` `(string: "GET")` - Specifies the HTTP method to use for HTTP
+  checks.
 
 - `name` `(string: "service: <name> check")` - Specifies the name of the health
   check.
@@ -131,7 +147,7 @@ does not automatically enable service discovery.
   stanza. If a port value was declared on the `service`, this will inherit from
   that value if not supplied. If supplied, this value takes precedence over the
   `service.port` value. This is useful for services which operate on multiple
-  ports.
+  ports. Checks will *always use the host IP and ports*.
 
 - `protocol` `(string: "http")` - Specifies the protocol for the http-based
   health checks. Valid options are `http` and `https`.
@@ -142,6 +158,30 @@ does not automatically enable service discovery.
 
 - `type` `(string: <required>)` - This indicates the check types supported by
   Nomad. Valid options are `script`, `http`, and `tcp`.
+
+- `tls_skip_verify` `(bool: false)` - Skip verifying TLS certificates for HTTPS
+  checks. Requires Consul >= 0.7.2.
+
+#### `header` Stanza
+
+HTTP checks may include a `header` stanza to set HTTP headers. The `header`
+stanza parameters have lists of strings as values. Multiple values will cause
+the header to be set multiple times, once for each value.
+
+```hcl
+service {
+  check {
+    type     = "http"
+    port     = "lb"
+    path     = "/_healthz"
+    interval = "5s"
+    timeout  = "2s"
+    header {
+      Authorization = ["Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="]
+    }
+  }
+}
+```
 
 
 ## `service` Examples
@@ -216,8 +256,8 @@ argument provided as a value to the `args` array.
 
 This example shows a service with an HTTP health check. This will query the
 service on the IP and port registered with Nomad at `/_healthz` every 5 seconds,
-giving the service a maximum of 2 seconds to return a response. Any non-2xx code
-is considered a failure.
+giving the service a maximum of 2 seconds to return a response, and include an
+Authorization header. Any non-2xx code is considered a failure.
 
 ```hcl
 service {
@@ -227,6 +267,9 @@ service {
     path     = "/_healthz"
     interval = "5s"
     timeout  = "2s"
+    header {
+      Authorization = ["Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="]
+    }
   }
 }
 ```
@@ -253,6 +296,7 @@ service {
     path     = "/_healthz"
     interval = "5s"
     timeout  = "2s"
+    method   = "POST"
   }
 
   check {

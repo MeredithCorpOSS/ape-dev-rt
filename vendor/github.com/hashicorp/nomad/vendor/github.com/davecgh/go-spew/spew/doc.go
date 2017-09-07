@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Dave Collins <dave@davec.name>
+ * Copyright (c) 2013-2016 Dave Collins <dave@davec.name>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -91,6 +91,15 @@ The following configuration options are available:
 		which only accept pointer receivers from non-pointer variables.
 		Pointer method invocation is enabled by default.
 
+	* DisablePointerAddresses
+		DisablePointerAddresses specifies whether to disable the printing of
+		pointer addresses. This is useful when diffing data structures in tests.
+
+	* DisableCapacities
+		DisableCapacities specifies whether to disable the printing of
+		capacities for arrays, slices, maps and channels. This is useful when
+		diffing data structures in tests.
+
 	* ContinueOnMethod
 		Enables recursion into types after invoking error and Stringer interface
 		methods. Recursion after method invocation is disabled by default.
@@ -156,7 +165,7 @@ standard %v format specifier.
 
 The custom formatter only responds to the %v (most compact), %+v (adds pointer
 addresses), %#v (adds types), or %#+v (adds types and pointer addresses) verb
-combinations.  Any other verbs such as %x and %q will be sent to the
+combinations.  Any other verbs such as %x and %q will be sent to the the
 standard fmt package for formatting.  In addition, the custom formatter ignores
 the width and precision arguments (however they will still work on the format
 specifiers not handled by the custom formatter).

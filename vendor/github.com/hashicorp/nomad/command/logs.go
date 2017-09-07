@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/nomad/api"
+	"github.com/hashicorp/nomad/api/contexts"
+	"github.com/posener/complete"
 )
 
 type LogsCommand struct {
@@ -18,7 +20,7 @@ type LogsCommand struct {
 
 func (l *LogsCommand) Help() string {
 	helpText := `
-Usage: nomad logs [options] <alloc-id> <task>
+Usage: nomad logs [options] <allocation> <task>
 
   Streams the stdout/stderr of the given allocation and task.
 
@@ -28,7 +30,7 @@ General Options:
 
 Logs Specific Options:
 
-  -stderr:
+  -stderr
     Display stderr logs.
 
   -verbose
@@ -51,12 +53,40 @@ Logs Specific Options:
 
   -c
     Sets the tail location in number of bytes relative to the end of the logs.
-	`
+  `
 	return strings.TrimSpace(helpText)
 }
 
 func (l *LogsCommand) Synopsis() string {
 	return "Streams the logs of a task."
+}
+
+func (c *LogsCommand) AutocompleteFlags() complete.Flags {
+	return mergeAutocompleteFlags(c.Meta.AutocompleteFlags(FlagSetClient),
+		complete.Flags{
+			"-stderr":  complete.PredictNothing,
+			"-verbose": complete.PredictNothing,
+			"-job":     complete.PredictAnything,
+			"-f":       complete.PredictNothing,
+			"-tail":    complete.PredictAnything,
+			"-n":       complete.PredictAnything,
+			"-c":       complete.PredictAnything,
+		})
+}
+
+func (l *LogsCommand) AutocompleteArgs() complete.Predictor {
+	return complete.PredictFunc(func(a complete.Args) []string {
+		client, err := l.Meta.Client()
+		if err != nil {
+			return nil
+		}
+
+		resp, _, err := client.Search().PrefixSearch(a.Last, contexts.Allocs, nil)
+		if err != nil {
+			return []string{}
+		}
+		return resp.Matches[contexts.Allocs]
+	})
 }
 
 func (l *LogsCommand) Run(args []string) int {
@@ -118,12 +148,8 @@ func (l *LogsCommand) Run(args []string) int {
 		l.Ui.Error(fmt.Sprintf("Alloc ID must contain at least two characters."))
 		return 1
 	}
-	if len(allocID)%2 == 1 {
-		// Identifiers must be of even length, so we strip off the last byte
-		// to provide a consistent user experience.
-		allocID = allocID[:len(allocID)-1]
-	}
 
+	allocID = sanatizeUUIDPrefix(allocID)
 	allocs, _, err := client.Allocations().PrefixList(allocID)
 	if err != nil {
 		l.Ui.Error(fmt.Sprintf("Error querying allocation: %v", err))
@@ -135,20 +161,9 @@ func (l *LogsCommand) Run(args []string) int {
 	}
 	if len(allocs) > 1 {
 		// Format the allocs
-		out := make([]string, len(allocs)+1)
-		out[0] = "ID|Eval ID|Job ID|Task Group|Desired Status|Client Status"
-		for i, alloc := range allocs {
-			out[i+1] = fmt.Sprintf("%s|%s|%s|%s|%s|%s",
-				limit(alloc.ID, length),
-				limit(alloc.EvalID, length),
-				alloc.JobID,
-				alloc.TaskGroup,
-				alloc.DesiredStatus,
-				alloc.ClientStatus,
-			)
-		}
-		l.Ui.Output(fmt.Sprintf("Prefix matched multiple allocations\n\n%s", formatList(out)))
-		return 0
+		out := formatAllocListStubs(allocs, verbose, length)
+		l.Ui.Error(fmt.Sprintf("Prefix matched multiple allocations\n\n%s", out))
+		return 1
 	}
 	// Prefix lookup matched a single allocation
 	alloc, _, err := client.Allocations().Info(allocs[0].ID, nil)
@@ -169,7 +184,7 @@ func (l *LogsCommand) Run(args []string) int {
 		// Try to determine the tasks name from the allocation
 		var tasks []*api.Task
 		for _, tg := range alloc.Job.TaskGroups {
-			if tg.Name == alloc.TaskGroup {
+			if *tg.Name == alloc.TaskGroup {
 				if len(tg.Tasks) == 1 {
 					task = tg.Tasks[0].Name
 					break

@@ -7,6 +7,7 @@ import (
 )
 
 func TestAllocations_List(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 	a := c.Allocations()
@@ -27,32 +28,33 @@ func TestAllocations_List(t *testing.T) {
 	// so we can query for them.
 	return
 
-	job := &Job{
-		ID:   "job1",
-		Name: "Job #1",
-		Type: JobTypeService,
-	}
-	eval, _, err := c.Jobs().Register(job, nil)
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
+	//job := &Job{
+	//ID:   helper.StringToPtr("job1"),
+	//Name: helper.StringToPtr("Job #1"),
+	//Type: helper.StringToPtr(JobTypeService),
+	//}
+	//eval, _, err := c.Jobs().Register(job, nil)
+	//if err != nil {
+	//t.Fatalf("err: %s", err)
+	//}
 
-	// List the allocations again
-	allocs, qm, err = a.List(nil)
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
-	if qm.LastIndex == 0 {
-		t.Fatalf("bad index: %d", qm.LastIndex)
-	}
+	//// List the allocations again
+	//allocs, qm, err = a.List(nil)
+	//if err != nil {
+	//t.Fatalf("err: %s", err)
+	//}
+	//if qm.LastIndex == 0 {
+	//t.Fatalf("bad index: %d", qm.LastIndex)
+	//}
 
-	// Check that we got the allocation back
-	if len(allocs) == 0 || allocs[0].EvalID != eval {
-		t.Fatalf("bad: %#v", allocs)
-	}
+	//// Check that we got the allocation back
+	//if len(allocs) == 0 || allocs[0].EvalID != eval {
+	//t.Fatalf("bad: %#v", allocs)
+	//}
 }
 
 func TestAllocations_PrefixList(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 	a := c.Allocations()
@@ -73,32 +75,34 @@ func TestAllocations_PrefixList(t *testing.T) {
 	// so we can query for them.
 	return
 
-	job := &Job{
-		ID:   "job1",
-		Name: "Job #1",
-		Type: JobTypeService,
-	}
-	eval, _, err := c.Jobs().Register(job, nil)
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
+	//job := &Job{
+	//ID:   helper.StringToPtr("job1"),
+	//Name: helper.StringToPtr("Job #1"),
+	//Type: helper.StringToPtr(JobTypeService),
+	//}
 
-	// List the allocations by prefix
-	allocs, qm, err = a.PrefixList("foobar")
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
-	if qm.LastIndex == 0 {
-		t.Fatalf("bad index: %d", qm.LastIndex)
-	}
+	//eval, _, err := c.Jobs().Register(job, nil)
+	//if err != nil {
+	//t.Fatalf("err: %s", err)
+	//}
 
-	// Check that we got the allocation back
-	if len(allocs) == 0 || allocs[0].EvalID != eval {
-		t.Fatalf("bad: %#v", allocs)
-	}
+	//// List the allocations by prefix
+	//allocs, qm, err = a.PrefixList("foobar")
+	//if err != nil {
+	//t.Fatalf("err: %s", err)
+	//}
+	//if qm.LastIndex == 0 {
+	//t.Fatalf("bad index: %d", qm.LastIndex)
+	//}
+
+	//// Check that we got the allocation back
+	//if len(allocs) == 0 || allocs[0].EvalID != eval {
+	//t.Fatalf("bad: %#v", allocs)
+	//}
 }
 
 func TestAllocations_CreateIndexSort(t *testing.T) {
+	t.Parallel()
 	allocs := []*AllocationListStub{
 		&AllocationListStub{CreateIndex: 2},
 		&AllocationListStub{CreateIndex: 1},

@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/tomb.v2"
 
+	metrics "github.com/armon/go-metrics"
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/nomad/structs/config"
@@ -47,11 +48,68 @@ const (
 	// vaultRevocationIntv is the interval at which Vault tokens that failed
 	// initial revocation are retried
 	vaultRevocationIntv = 5 * time.Minute
+
+	// vaultCapabilitiesLookupPath is the path to lookup the capabilities of
+	// ones token.
+	vaultCapabilitiesLookupPath = "sys/capabilities-self"
+
+	// vaultTokenRenewPath is the path used to renew our token
+	vaultTokenRenewPath = "auth/token/renew-self"
+
+	// vaultTokenLookupPath is the path used to lookup a token
+	vaultTokenLookupPath = "auth/token/lookup"
+
+	// vaultTokenLookupSelfPath is the path used to lookup self token
+	vaultTokenLookupSelfPath = "auth/token/lookup-self"
+
+	// vaultTokenRevokePath is the path used to revoke a token
+	vaultTokenRevokePath = "auth/token/revoke-accessor"
+
+	// vaultRoleLookupPath is the path to lookup a role
+	vaultRoleLookupPath = "auth/token/roles/%s"
+
+	// vaultRoleCreatePath is the path to create a token from a role
+	vaultTokenRoleCreatePath = "auth/token/create/%s"
 )
 
 var (
 	// vaultUnrecoverableError matches unrecoverable errors
 	vaultUnrecoverableError = regexp.MustCompile(`Code:\s+40(0|3|4)`)
+
+	// vaultCapabilitiesCapability is the expected capability of Nomad's Vault
+	// token on the the path. The token must have at least one of the
+	// capabilities.
+	vaultCapabilitiesCapability = []string{"update", "root"}
+
+	// vaultTokenRenewCapability is the expected capability Nomad's
+	// Vault token should have on the path. The token must have at least one of
+	// the capabilities.
+	vaultTokenRenewCapability = []string{"update", "root"}
+
+	// vaultTokenLookupCapability is the expected capability Nomad's
+	// Vault token should have on the path. The token must have at least one of
+	// the capabilities.
+	vaultTokenLookupCapability = []string{"update", "root"}
+
+	// vaultTokenLookupSelfCapability is the expected capability Nomad's
+	// Vault token should have on the path. The token must have at least one of
+	// the capabilities.
+	vaultTokenLookupSelfCapability = []string{"update", "root"}
+
+	// vaultTokenRevokeCapability is the expected capability Nomad's
+	// Vault token should have on the path. The token must have at least one of
+	// the capabilities.
+	vaultTokenRevokeCapability = []string{"update", "root"}
+
+	// vaultRoleLookupCapability is the the expected capability Nomad's Vault
+	// token should have on the path. The token must have at least one of the
+	// capabilities.
+	vaultRoleLookupCapability = []string{"read", "root"}
+
+	// vaultTokenRoleCreateCapability is the the expected capability Nomad's Vault
+	// token should have on the path. The token must have at least one of the
+	// capabilities.
+	vaultTokenRoleCreateCapability = []string{"update", "root"}
 )
 
 // VaultClient is the Servers interface for interfacing with Vault
@@ -75,6 +133,24 @@ type VaultClient interface {
 
 	// Stop is used to stop token renewal
 	Stop()
+
+	// Running returns whether the Vault client is running
+	Running() bool
+
+	// Stats returns the Vault clients statistics
+	Stats() *VaultStats
+
+	// EmitStats emits that clients statistics at the given period until stopCh
+	// is called.
+	EmitStats(period time.Duration, stopCh chan struct{})
+}
+
+// VaultStats returns all the stats about Vault tokens created and managed by
+// Nomad.
+type VaultStats struct {
+	// TrackedForRevoke is the count of tokens that are being tracked to be
+	// revoked since they could not be immediately revoked.
+	TrackedForRevoke int
 }
 
 // PurgeVaultAccessor is called to remove VaultAccessors from the system. If
@@ -144,6 +220,10 @@ type vaultClient struct {
 	tomb   *tomb.Tomb
 	logger *log.Logger
 
+	// stats stores the stats
+	stats     *VaultStats
+	statsLock sync.RWMutex
+
 	// l is used to lock the configuration aspects of the client such that
 	// multiple callers can't cause conflicting config updates
 	l sync.Mutex
@@ -167,6 +247,7 @@ func NewVaultClient(c *config.VaultConfig, logger *log.Logger, purgeFn PurgeVaul
 		revoking: make(map[*structs.VaultAccessor]time.Time),
 		purgeFn:  purgeFn,
 		tomb:     &tomb.Tomb{},
+		stats:    new(VaultStats),
 	}
 
 	if v.config.IsEnabled() {
@@ -195,6 +276,12 @@ func (v *vaultClient) Stop() {
 		v.tomb.Wait()
 		v.flush()
 	}
+}
+
+func (v *vaultClient) Running() bool {
+	v.l.Lock()
+	defer v.l.Unlock()
+	return v.running
 }
 
 // SetActive activates or de-activates the Vault client. When active, token
@@ -241,10 +328,8 @@ func (v *vaultClient) SetConfig(config *config.VaultConfig) error {
 	v.l.Lock()
 	defer v.l.Unlock()
 
-	// Store the new config
-	v.config = config
-
-	if v.config.IsEnabled() {
+	// Kill any background routintes
+	if v.running {
 		// Stop accepting any new request
 		v.connEstablished = false
 
@@ -252,16 +337,23 @@ func (v *vaultClient) SetConfig(config *config.VaultConfig) error {
 		v.tomb.Kill(nil)
 		v.tomb.Wait()
 		v.tomb = &tomb.Tomb{}
+		v.running = false
+	}
 
+	// Store the new config
+	v.config = config
+
+	// Check if we should relaunch
+	if v.config.IsEnabled() {
 		// Rebuild the client
 		if err := v.buildClient(); err != nil {
-			v.l.Unlock()
 			return err
 		}
 
 		// Launch the required goroutines
 		v.tomb.Go(wrapNilError(v.establishConnection))
 		v.tomb.Go(wrapNilError(v.revokeDaemon))
+		v.running = true
 	}
 
 	return nil
@@ -417,7 +509,7 @@ func (v *vaultClient) renewalLoop() {
 
 			// Set base values and add some backoff
 
-			v.logger.Printf("[DEBUG] vault: got error or bad auth, so backing off: %v", err)
+			v.logger.Printf("[WARN] vault: got error or bad auth, so backing off: %v", err)
 			switch {
 			case backoff < 5:
 				backoff = 5
@@ -470,15 +562,16 @@ func (v *vaultClient) renew() error {
 	}
 
 	v.lastRenewed = time.Now()
-	v.logger.Printf("[DEBUG] vault: succesfully renewed server token")
+	v.logger.Printf("[DEBUG] vault: successfully renewed server token")
 	return nil
 }
 
 // getWrappingFn returns an appropriate wrapping function for Nomad Servers
 func (v *vaultClient) getWrappingFn() func(operation, path string) string {
 	createPath := "auth/token/create"
-	if !v.tokenData.Root {
-		createPath = fmt.Sprintf("auth/token/create/%s", v.tokenData.Role)
+	role := v.getRole()
+	if role != "" {
+		createPath = fmt.Sprintf("auth/token/create/%s", role)
 	}
 
 	return func(operation, path string) string {
@@ -497,10 +590,18 @@ func (v *vaultClient) getWrappingFn() func(operation, path string) string {
 func (v *vaultClient) parseSelfToken() error {
 	// Get the initial lease duration
 	auth := v.client.Auth().Token()
-	self, err := auth.LookupSelf()
+	var self *vapi.Secret
+
+	// Try looking up the token using the self endpoint
+	secret, err := auth.LookupSelf()
 	if err != nil {
-		return fmt.Errorf("failed to lookup Vault periodic token: %v", err)
+		// Try looking up our token directly
+		self, err = auth.Lookup(v.client.Token())
+		if err != nil {
+			return fmt.Errorf("failed to lookup Vault periodic token: %v", err)
+		}
 	}
+	self = secret
 
 	// Read and parse the fields
 	var data tokenData
@@ -516,7 +617,28 @@ func (v *vaultClient) parseSelfToken() error {
 		}
 	}
 
+	// Store the token data
+	data.Root = root
+	v.tokenData = &data
+
+	// The criteria that must be met for the token to be valid are as follows:
+	// 1) If token is non-root or is but has a creation ttl
+	//   a) The token must be renewable
+	//   b) Token must have a non-zero TTL
+	// 2) Must have update capability for "auth/token/lookup/" (used to verify incoming tokens)
+	// 3) Must have update capability for "/auth/token/revoke-accessor/" (used to revoke unneeded tokens)
+	// 4) If configured to create tokens against a role:
+	//   a) Must have read capability for "auth/token/roles/<role_name" (Can just attempt a read)
+	//   b) Must have update capability for path "auth/token/create/<role_name>"
+	//   c) Role must:
+	//     1) Not allow orphans
+	//     2) Must allow tokens to be renewed
+	//     3) Must not have an explicit max TTL
+	//     4) Must have non-zero period
+	// 5) If not configured against a role, the token must be root
+
 	var mErr multierror.Error
+	role := v.getRole()
 	if !root {
 		// All non-root tokens must be renewable
 		if !data.Renewable {
@@ -534,7 +656,7 @@ func (v *vaultClient) parseSelfToken() error {
 		}
 
 		// There must be a valid role since we aren't root
-		if data.Role == "" {
+		if role == "" {
 			multierror.Append(&mErr, fmt.Errorf("token role name must be set when not using a root token"))
 		}
 
@@ -548,16 +670,104 @@ func (v *vaultClient) parseSelfToken() error {
 		}
 	}
 
+	// Check we have the correct capabilities
+	if err := v.validateCapabilities(role, root); err != nil {
+		multierror.Append(&mErr, err)
+	}
+
 	// If given a role validate it
-	if data.Role != "" {
-		if err := v.validateRole(data.Role); err != nil {
+	if role != "" {
+		if err := v.validateRole(role); err != nil {
 			multierror.Append(&mErr, err)
 		}
 	}
 
-	data.Root = root
-	v.tokenData = &data
 	return mErr.ErrorOrNil()
+}
+
+// getRole returns the role name to be used when creating tokens
+func (v *vaultClient) getRole() string {
+	if v.config.Role != "" {
+		return v.config.Role
+	}
+
+	return v.tokenData.Role
+}
+
+// validateCapabilities checks that Nomad's Vault token has the correct
+// capabilities.
+func (v *vaultClient) validateCapabilities(role string, root bool) error {
+	// Check if the token can lookup capabilities.
+	var mErr multierror.Error
+	_, _, err := v.hasCapability(vaultCapabilitiesLookupPath, vaultCapabilitiesCapability)
+	if err != nil {
+		// Check if there is a permission denied
+		if vaultUnrecoverableError.MatchString(err.Error()) {
+			// Since we can't read permissions, we just log a warning that we
+			// can't tell if the Vault token will work
+			msg := fmt.Sprintf("Can not lookup token capabilities. "+
+				"As such certain operations may fail in the future. "+
+				"Please give Nomad a Vault token with one of the following "+
+				"capabilities %q on %q so that the required capabilities can be verified",
+				vaultCapabilitiesCapability, vaultCapabilitiesLookupPath)
+			v.logger.Printf("[WARN] vault: %s", msg)
+			return nil
+		} else {
+			multierror.Append(&mErr, err)
+		}
+	}
+
+	// verify is a helper function that verifies the token has one of the
+	// capabilities on the given path and adds an issue to the error
+	verify := func(path string, requiredCaps []string) {
+		ok, caps, err := v.hasCapability(path, requiredCaps)
+		if err != nil {
+			multierror.Append(&mErr, err)
+		} else if !ok {
+			multierror.Append(&mErr,
+				fmt.Errorf("token must have one of the following capabilities %q on %q; has %v", requiredCaps, path, caps))
+		}
+	}
+
+	// Check if we are verifying incoming tokens
+	if !v.config.AllowsUnauthenticated() {
+		verify(vaultTokenLookupPath, vaultTokenLookupCapability)
+	}
+
+	// Verify we can renew our selves tokens
+	verify(vaultTokenRenewPath, vaultTokenRenewCapability)
+
+	// Verify we can revoke tokens
+	verify(vaultTokenRevokePath, vaultTokenRevokeCapability)
+
+	// If we are using a role verify the capability
+	if role != "" {
+		// Verify we can read the role
+		verify(fmt.Sprintf(vaultRoleLookupPath, role), vaultRoleLookupCapability)
+
+		// Verify we can create from the role
+		verify(fmt.Sprintf(vaultTokenRoleCreatePath, role), vaultTokenRoleCreateCapability)
+	}
+
+	return mErr.ErrorOrNil()
+}
+
+// hasCapability takes a path and returns whether the token has at least one of
+// the required capabilities on the given path. It also returns the set of
+// capabilities the token does have as well as any error that occurred.
+func (v *vaultClient) hasCapability(path string, required []string) (bool, []string, error) {
+	caps, err := v.client.Sys().CapabilitiesSelf(path)
+	if err != nil {
+		return false, nil, err
+	}
+	for _, c := range caps {
+		for _, r := range required {
+			if c == r {
+				return true, caps, nil
+			}
+		}
+	}
+	return false, caps, nil
 }
 
 // validateRole contacts Vault and checks that the given Vault role is valid for
@@ -571,6 +781,9 @@ func (v *vaultClient) validateRole(role string) error {
 	rsecret, err := v.client.Logical().Read(fmt.Sprintf("auth/token/roles/%s", role))
 	if err != nil {
 		return fmt.Errorf("failed to lookup role %q: %v", role, err)
+	}
+	if rsecret == nil {
+		return fmt.Errorf("Role %q does not exist", role)
 	}
 
 	// Read and parse the fields
@@ -632,7 +845,6 @@ func (v *vaultClient) CreateToken(ctx context.Context, a *structs.Allocation, ta
 	if !v.Enabled() {
 		return nil, fmt.Errorf("Vault integration disabled")
 	}
-
 	if !v.Active() {
 		return nil, structs.NewRecoverableError(fmt.Errorf("Vault client not active"), true)
 	}
@@ -643,6 +855,9 @@ func (v *vaultClient) CreateToken(ctx context.Context, a *structs.Allocation, ta
 	} else if !established {
 		return nil, fmt.Errorf("Connection to Vault failed: %v", err)
 	}
+
+	// Track how long the request takes
+	defer metrics.MeasureSince([]string{"nomad", "vault", "create_token"}, time.Now())
 
 	// Retrieve the Vault block for the task
 	policies := a.Job.VaultPolicies()
@@ -679,12 +894,13 @@ func (v *vaultClient) CreateToken(ctx context.Context, a *structs.Allocation, ta
 	// token or a role based token
 	var secret *vapi.Secret
 	var err error
-	if v.tokenData.Root {
+	role := v.getRole()
+	if v.tokenData.Root && role == "" {
 		req.Period = v.childTTL
 		secret, err = v.auth.Create(req)
 	} else {
 		// Make the token using the role
-		secret, err = v.auth.CreateWithRole(req, v.tokenData.Role)
+		secret, err = v.auth.CreateWithRole(req, v.getRole())
 	}
 
 	// Determine whether it is unrecoverable
@@ -717,6 +933,9 @@ func (v *vaultClient) LookupToken(ctx context.Context, token string) (*vapi.Secr
 	} else if !established {
 		return nil, fmt.Errorf("Connection to Vault failed: %v", err)
 	}
+
+	// Track how long the request takes
+	defer metrics.MeasureSince([]string{"nomad", "vault", "lookup_token"}, time.Now())
 
 	// Ensure we are under our rate limit
 	if err := v.limiter.Wait(ctx); err != nil {
@@ -753,6 +972,9 @@ func (v *vaultClient) RevokeTokens(ctx context.Context, accessors []*structs.Vau
 		return fmt.Errorf("Vault client not active")
 	}
 
+	// Track how long the request takes
+	defer metrics.MeasureSince([]string{"nomad", "vault", "revoke_tokens"}, time.Now())
+
 	// Check if we have established a connection with Vault. If not just add it
 	// to the queue
 	if established, err := v.ConnectionEstablished(); !established && err == nil {
@@ -762,21 +984,28 @@ func (v *vaultClient) RevokeTokens(ctx context.Context, accessors []*structs.Vau
 			v.storeForRevocation(accessors)
 		}
 
+		// Track that we are abandoning these accessors.
+		metrics.IncrCounter([]string{"nomad", "vault", "undistributed_tokens_abandoned"}, float32(len(accessors)))
 		return nil
 	}
 
 	// Attempt to revoke immediately and if it fails, add it to the revoke queue
 	err := v.parallelRevoke(ctx, accessors)
-	if !committed {
+	if err != nil {
 		// If it is uncommitted, it is a best effort revoke as it will shortly
 		// TTL within the cubbyhole and has not been leaked to any outside
 		// system
-		return nil
-	}
+		if !committed {
+			metrics.IncrCounter([]string{"nomad", "vault", "undistributed_tokens_abandoned"}, float32(len(accessors)))
+			return nil
+		}
 
-	if err != nil {
 		v.logger.Printf("[WARN] vault: failed to revoke tokens. Will reattempt til TTL: %v", err)
 		v.storeForRevocation(accessors)
+		return nil
+	} else if !committed {
+		// Mark that it was revoked but there is nothing to purge so exit
+		metrics.IncrCounter([]string{"nomad", "vault", "undistributed_tokens_revoked"}, float32(len(accessors)))
 		return nil
 	}
 
@@ -786,6 +1015,9 @@ func (v *vaultClient) RevokeTokens(ctx context.Context, accessors []*structs.Vau
 		return nil
 	}
 
+	// Track that it was revoked successfully
+	metrics.IncrCounter([]string{"nomad", "vault", "distributed_tokens_revoked"}, float32(len(accessors)))
+
 	return nil
 }
 
@@ -794,10 +1026,13 @@ func (v *vaultClient) RevokeTokens(ctx context.Context, accessors []*structs.Vau
 // time.
 func (v *vaultClient) storeForRevocation(accessors []*structs.VaultAccessor) {
 	v.revLock.Lock()
+	v.statsLock.Lock()
 	now := time.Now()
 	for _, a := range accessors {
 		v.revoking[a] = now.Add(time.Duration(a.CreationTTL) * time.Second)
 	}
+	v.stats.TrackedForRevoke = len(v.revoking)
+	v.statsLock.Unlock()
 	v.revLock.Unlock()
 }
 
@@ -913,12 +1148,19 @@ func (v *vaultClient) revokeDaemon() {
 				continue
 			}
 
+			// Track that tokens were revoked successfully
+			metrics.IncrCounter([]string{"nomad", "vault", "distributed_tokens_revoked"}, float32(len(revoking)))
+
 			// Can delete from the tracked list now that we have purged
 			v.revLock.Lock()
+			v.statsLock.Lock()
 			for _, va := range revoking {
 				delete(v.revoking, va)
 			}
+			v.stats.TrackedForRevoke = len(v.revoking)
+			v.statsLock.Unlock()
 			v.revLock.Unlock()
+
 		}
 	}
 }
@@ -946,4 +1188,31 @@ func (v *vaultClient) setLimit(l rate.Limit) {
 	v.l.Lock()
 	defer v.l.Unlock()
 	v.limiter = rate.NewLimiter(l, int(l))
+}
+
+// Stats is used to query the state of the blocked eval tracker.
+func (v *vaultClient) Stats() *VaultStats {
+	// Allocate a new stats struct
+	stats := new(VaultStats)
+
+	v.statsLock.RLock()
+	defer v.statsLock.RUnlock()
+
+	// Copy all the stats
+	stats.TrackedForRevoke = v.stats.TrackedForRevoke
+
+	return stats
+}
+
+// EmitStats is used to export metrics about the blocked eval tracker while enabled
+func (v *vaultClient) EmitStats(period time.Duration, stopCh chan struct{}) {
+	for {
+		select {
+		case <-time.After(period):
+			stats := v.Stats()
+			metrics.SetGauge([]string{"nomad", "vault", "distributed_tokens_revoking"}, float32(stats.TrackedForRevoke))
+		case <-stopCh:
+			return
+		}
+	}
 }

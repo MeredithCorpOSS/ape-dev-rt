@@ -3,6 +3,7 @@
 package driver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/config"
 	"github.com/hashicorp/nomad/client/fingerprint"
 	"github.com/hashicorp/nomad/client/stats"
@@ -59,14 +59,14 @@ type LxcDriverConfig struct {
 	Distro               string
 	Release              string
 	Arch                 string
-	ImageVariant         string   "mapstructure:`image_variant`"
-	ImageServer          string   "mapstructure:`image_server`"
-	GPGKeyID             string   "mapstructure:`gpg_key_id`"
-	GPGKeyServer         string   "mapstructure:`gpg_key_server`"
-	DisableGPGValidation bool     "mapstructure:`disable_gpg`"
-	FlushCache           bool     "mapstructure:`flush_cache`"
-	ForceCache           bool     "mapstructure:`force_cache`"
-	TemplateArgs         []string "mapstructure:`template_args`"
+	ImageVariant         string   `mapstructure:"image_variant"`
+	ImageServer          string   `mapstructure:"image_server"`
+	GPGKeyID             string   `mapstructure:"gpg_key_id"`
+	GPGKeyServer         string   `mapstructure:"gpg_key_server"`
+	DisableGPGValidation bool     `mapstructure:"disable_gpg"`
+	FlushCache           bool     `mapstructure:"flush_cache"`
+	ForceCache           bool     `mapstructure:"force_cache"`
+	TemplateArgs         []string `mapstructure:"template_args"`
 	LogLevel             string   `mapstructure:"log_level"`
 	Verbosity            string
 }
@@ -150,7 +150,12 @@ func (d *LxcDriver) Validate(config map[string]interface{}) error {
 func (d *LxcDriver) Abilities() DriverAbilities {
 	return DriverAbilities{
 		SendSignals: false,
+		Exec:        false,
 	}
+}
+
+func (d *LxcDriver) FSIsolation() cstructs.FSIsolation {
+	return cstructs.FSIsolationImage
 }
 
 // Fingerprint fingerprints the lxc driver configuration
@@ -168,8 +173,12 @@ func (d *LxcDriver) Fingerprint(cfg *config.Config, node *structs.Node) (bool, e
 	return true, nil
 }
 
+func (d *LxcDriver) Prestart(*ExecContext, *structs.Task) (*PrestartResponse, error) {
+	return nil, nil
+}
+
 // Start starts the LXC Driver
-func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, error) {
+func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (*StartResponse, error) {
 	var driverConfig LxcDriverConfig
 	if err := mapstructure.WeakDecode(task.Config, &driverConfig); err != nil {
 		return nil, err
@@ -179,10 +188,10 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 		lxcPath = path
 	}
 
-	containerName := fmt.Sprintf("%s-%s", task.Name, ctx.AllocID)
+	containerName := fmt.Sprintf("%s-%s", task.Name, d.DriverContext.allocID)
 	c, err := lxc.NewContainer(containerName, lxcPath)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create container: %v", err)
+		return nil, fmt.Errorf("unable to initialize container: %v", err)
 	}
 
 	var verbosity lxc.Verbosity
@@ -213,7 +222,7 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 	}
 	c.SetLogLevel(logLevel)
 
-	logFile := filepath.Join(ctx.AllocDir.LogDir(), fmt.Sprintf("%v-lxc.log", task.Name))
+	logFile := filepath.Join(ctx.TaskDir.LogDir, fmt.Sprintf("%v-lxc.log", task.Name))
 	c.SetLogFile(logFile)
 
 	options := lxc.TemplateOptions{
@@ -223,6 +232,7 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 		Arch:                 driverConfig.Arch,
 		FlushCache:           driverConfig.FlushCache,
 		DisableGPGValidation: driverConfig.DisableGPGValidation,
+		ExtraArgs:            driverConfig.TemplateArgs,
 	}
 
 	if err := c.Create(options); err != nil {
@@ -235,19 +245,10 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 	}
 
 	// Bind mount the shared alloc dir and task local dir in the container
-	taskDir, ok := ctx.AllocDir.TaskDirs[task.Name]
-	if !ok {
-		return nil, fmt.Errorf("failed to find task local directory: %v", task.Name)
-	}
-	secretdir, err := ctx.AllocDir.GetSecretDir(task.Name)
-	if err != nil {
-		return nil, fmt.Errorf("faild getting secret path for task: %v", err)
-	}
-	taskLocalDir := filepath.Join(taskDir, allocdir.TaskLocal)
 	mounts := []string{
-		fmt.Sprintf("%s local none rw,bind,create=dir", taskLocalDir),
-		fmt.Sprintf("%s alloc none rw,bind,create=dir", ctx.AllocDir.SharedDir),
-		fmt.Sprintf("%s secret none rw,bind,create=dir", secretdir),
+		fmt.Sprintf("%s local none rw,bind,create=dir", ctx.TaskDir.LocalDir),
+		fmt.Sprintf("%s alloc none rw,bind,create=dir", ctx.TaskDir.SharedAllocDir),
+		fmt.Sprintf("%s secrets none rw,bind,create=dir", ctx.TaskDir.SecretsDir),
 	}
 	for _, mnt := range mounts {
 		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
@@ -268,7 +269,7 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 		return nil, fmt.Errorf("unable to set cpu shares: %v", err)
 	}
 
-	handle := lxcDriverHandle{
+	h := lxcDriverHandle{
 		container:      c,
 		initPid:        c.InitPid(),
 		lxcPath:        lxcPath,
@@ -282,10 +283,12 @@ func (d *LxcDriver) Start(ctx *ExecContext, task *structs.Task) (DriverHandle, e
 		doneCh:         make(chan bool, 1),
 	}
 
-	go handle.run()
+	go h.run()
 
-	return &handle, nil
+	return &StartResponse{Handle: &h}, nil
 }
+
+func (d *LxcDriver) Cleanup(*ExecContext, *CreatedResources) error { return nil }
 
 // Open creates the driver to monitor an existing LXC container
 func (d *LxcDriver) Open(ctx *ExecContext, handleID string) (DriverHandle, error) {
@@ -374,14 +377,21 @@ func (h *lxcDriverHandle) Update(task *structs.Task) error {
 	return nil
 }
 
+func (h *lxcDriverHandle) Exec(ctx context.Context, cmd string, args []string) ([]byte, int, error) {
+	return nil, 0, fmt.Errorf("lxc driver cannot execute commands")
+}
+
 func (h *lxcDriverHandle) Kill() error {
-	h.logger.Printf("[INFO] driver.lxc: shutting down container %q", h.container.Name())
+	name := h.container.Name()
+
+	h.logger.Printf("[INFO] driver.lxc: shutting down container %q", name)
 	if err := h.container.Shutdown(h.killTimeout); err != nil {
-		h.logger.Printf("[INFO] driver.lxc: shutting down container %q failed: %v", h.container.Name(), err)
+		h.logger.Printf("[INFO] driver.lxc: shutting down container %q failed: %v", name, err)
 		if err := h.container.Stop(); err != nil {
-			h.logger.Printf("[ERR] driver.lxc: error stopping container %q: %v", h.container.Name(), err)
+			h.logger.Printf("[ERR] driver.lxc: error stopping container %q: %v", name, err)
 		}
 	}
+
 	close(h.doneCh)
 	return nil
 }

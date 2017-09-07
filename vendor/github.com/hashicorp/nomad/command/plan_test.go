@@ -1,21 +1,30 @@
 package command
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/nomad/testutil"
 	"github.com/mitchellh/cli"
 )
 
 func TestPlanCommand_Implements(t *testing.T) {
+	t.Parallel()
 	var _ cli.Command = &RunCommand{}
 }
 
 func TestPlanCommand_Fails(t *testing.T) {
+	t.Parallel()
 	ui := new(cli.MockUi)
 	cmd := &PlanCommand{Meta: Meta{Ui: ui}}
+
+	// Create a server
+	s := testutil.NewTestServer(t, nil)
+	defer s.Stop()
+	os.Setenv("NOMAD_ADDR", fmt.Sprintf("http://%s", s.HTTPAddr))
 
 	// Fails on misuse
 	if code := cmd.Run([]string{"some", "bad", "args"}); code != 255 {
@@ -64,7 +73,7 @@ func TestPlanCommand_Fails(t *testing.T) {
 	if code := cmd.Run([]string{fh2.Name()}); code != 255 {
 		t.Fatalf("expect exit 255, got: %d", code)
 	}
-	if out := ui.ErrorWriter.String(); !strings.Contains(out, "Error validating") {
+	if out := ui.ErrorWriter.String(); !strings.Contains(out, "Error during plan") {
 		t.Fatalf("expect validation error, got: %s", out)
 	}
 	ui.ErrorWriter.Reset()
@@ -102,6 +111,7 @@ job "job1" {
 }
 
 func TestPlanCommand_From_STDIN(t *testing.T) {
+	t.Parallel()
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -144,6 +154,7 @@ job "job1" {
 }
 
 func TestPlanCommand_From_URL(t *testing.T) {
+	t.Parallel()
 	ui := new(cli.MockUi)
 	cmd := &PlanCommand{
 		Meta: Meta{Ui: ui},

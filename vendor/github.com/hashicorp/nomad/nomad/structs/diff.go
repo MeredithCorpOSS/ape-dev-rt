@@ -57,24 +57,22 @@ type JobDiff struct {
 // diffable. If contextual diff is enabled, objects within the job will contain
 // field information even if unchanged.
 func (j *Job) Diff(other *Job, contextual bool) (*JobDiff, error) {
+	// COMPAT: Remove "Update" in 0.7.0. Update pushed down to task groups
+	// in 0.6.0
 	diff := &JobDiff{Type: DiffTypeNone}
 	var oldPrimitiveFlat, newPrimitiveFlat map[string]string
-	filter := []string{"ID", "Status", "StatusDescription", "CreateIndex", "ModifyIndex", "JobModifyIndex"}
-
-	// Have to treat this special since it is a struct literal, not a pointer
-	var jUpdate, otherUpdate *UpdateStrategy
+	filter := []string{"ID", "Status", "StatusDescription", "Version", "Stable", "CreateIndex",
+		"ModifyIndex", "JobModifyIndex", "Update", "SubmitTime"}
 
 	if j == nil && other == nil {
 		return diff, nil
 	} else if j == nil {
 		j = &Job{}
-		otherUpdate = &other.Update
 		diff.Type = DiffTypeAdded
 		newPrimitiveFlat = flatmap.Flatten(other, filter, true)
 		diff.ID = other.ID
 	} else if other == nil {
 		other = &Job{}
-		jUpdate = &j.Update
 		diff.Type = DiffTypeDeleted
 		oldPrimitiveFlat = flatmap.Flatten(j, filter, true)
 		diff.ID = j.ID
@@ -83,12 +81,6 @@ func (j *Job) Diff(other *Job, contextual bool) (*JobDiff, error) {
 			return nil, fmt.Errorf("can not diff jobs with different IDs: %q and %q", j.ID, other.ID)
 		}
 
-		if !reflect.DeepEqual(j, other) {
-			diff.Type = DiffTypeEdited
-		}
-
-		jUpdate = &j.Update
-		otherUpdate = &other.Update
 		oldPrimitiveFlat = flatmap.Flatten(j, filter, true)
 		newPrimitiveFlat = flatmap.Flatten(other, filter, true)
 		diff.ID = other.ID
@@ -98,7 +90,7 @@ func (j *Job) Diff(other *Job, contextual bool) (*JobDiff, error) {
 	diff.Fields = fieldDiffs(oldPrimitiveFlat, newPrimitiveFlat, false)
 
 	// Datacenters diff
-	if setDiff := stringSetDiff(j.Datacenters, other.Datacenters, "Datacenters", contextual); setDiff != nil {
+	if setDiff := stringSetDiff(j.Datacenters, other.Datacenters, "Datacenters", contextual); setDiff != nil && setDiff.Type != DiffTypeNone {
 		diff.Objects = append(diff.Objects, setDiff)
 	}
 
@@ -120,14 +112,43 @@ func (j *Job) Diff(other *Job, contextual bool) (*JobDiff, error) {
 	}
 	diff.TaskGroups = tgs
 
-	// Update diff
-	if uDiff := primitiveObjectDiff(jUpdate, otherUpdate, nil, "Update", contextual); uDiff != nil {
-		diff.Objects = append(diff.Objects, uDiff)
-	}
-
 	// Periodic diff
 	if pDiff := primitiveObjectDiff(j.Periodic, other.Periodic, nil, "Periodic", contextual); pDiff != nil {
 		diff.Objects = append(diff.Objects, pDiff)
+	}
+
+	// ParameterizedJob diff
+	if cDiff := parameterizedJobDiff(j.ParameterizedJob, other.ParameterizedJob, contextual); cDiff != nil {
+		diff.Objects = append(diff.Objects, cDiff)
+	}
+
+	// Check to see if there is a diff. We don't use reflect because we are
+	// filtering quite a few fields that will change on each diff.
+	if diff.Type == DiffTypeNone {
+		for _, fd := range diff.Fields {
+			if fd.Type != DiffTypeNone {
+				diff.Type = DiffTypeEdited
+				break
+			}
+		}
+	}
+
+	if diff.Type == DiffTypeNone {
+		for _, od := range diff.Objects {
+			if od.Type != DiffTypeNone {
+				diff.Type = DiffTypeEdited
+				break
+			}
+		}
+	}
+
+	if diff.Type == DiffTypeNone {
+		for _, tg := range diff.TaskGroups {
+			if tg.Type != DiffTypeNone {
+				diff.Type = DiffTypeEdited
+				break
+			}
+		}
 	}
 
 	return diff, nil
@@ -217,6 +238,12 @@ func (tg *TaskGroup) Diff(other *TaskGroup, contextual bool) (*TaskGroupDiff, er
 	diskDiff := primitiveObjectDiff(tg.EphemeralDisk, other.EphemeralDisk, nil, "EphemeralDisk", contextual)
 	if diskDiff != nil {
 		diff.Objects = append(diff.Objects, diskDiff)
+	}
+
+	// Update diff
+	// COMPAT: Remove "Stagger" in 0.7.0.
+	if uDiff := primitiveObjectDiff(tg.Update, other.Update, []string{"Stagger"}, "Update", contextual); uDiff != nil {
+		diff.Objects = append(diff.Objects, uDiff)
 	}
 
 	// Tasks diff
@@ -370,6 +397,12 @@ func (t *Task) Diff(other *Task, contextual bool) (*TaskDiff, error) {
 		diff.Objects = append(diff.Objects, lDiff)
 	}
 
+	// Dispatch payload diff
+	dDiff := primitiveObjectDiff(t.DispatchPayload, other.DispatchPayload, nil, "DispatchPayload", contextual)
+	if dDiff != nil {
+		diff.Objects = append(diff.Objects, dDiff)
+	}
+
 	// Artifacts diff
 	diffs := primitiveObjectSetDiff(
 		interfaceSlice(t.Artifacts),
@@ -392,7 +425,7 @@ func (t *Task) Diff(other *Task, contextual bool) (*TaskDiff, error) {
 		diff.Objects = append(diff.Objects, vDiff)
 	}
 
-	// Artifacts diff
+	// Template diff
 	tmplDiffs := primitiveObjectSetDiff(
 		interfaceSlice(t.Templates),
 		interfaceSlice(other.Templates),
@@ -559,6 +592,32 @@ func serviceCheckDiff(old, new *ServiceCheck, contextual bool) *ObjectDiff {
 
 	// Diff the primitive fields.
 	diff.Fields = fieldDiffs(oldPrimitiveFlat, newPrimitiveFlat, contextual)
+
+	// Diff Header
+	if headerDiff := checkHeaderDiff(old.Header, new.Header, contextual); headerDiff != nil {
+		diff.Objects = append(diff.Objects, headerDiff)
+	}
+
+	return diff
+}
+
+// checkHeaderDiff returns the diff of two service check header objects. If
+// contextual diff is enabled, all fields will be returned, even if no diff
+// occurred.
+func checkHeaderDiff(old, new map[string][]string, contextual bool) *ObjectDiff {
+	diff := &ObjectDiff{Type: DiffTypeNone, Name: "Header"}
+	if reflect.DeepEqual(old, new) {
+		return nil
+	} else if len(old) == 0 {
+		diff.Type = DiffTypeAdded
+	} else if len(new) == 0 {
+		diff.Type = DiffTypeDeleted
+	} else {
+		diff.Type = DiffTypeEdited
+	}
+	oldFlat := flatmap.Flatten(old, nil, false)
+	newFlat := flatmap.Flatten(new, nil, false)
+	diff.Fields = fieldDiffs(oldFlat, newFlat, contextual)
 	return diff
 }
 
@@ -576,17 +635,17 @@ func serviceCheckDiffs(old, new []*ServiceCheck, contextual bool) []*ObjectDiff 
 	}
 
 	var diffs []*ObjectDiff
-	for name, oldService := range oldMap {
+	for name, oldCheck := range oldMap {
 		// Diff the same, deleted and edited
-		if diff := serviceCheckDiff(oldService, newMap[name], contextual); diff != nil {
+		if diff := serviceCheckDiff(oldCheck, newMap[name], contextual); diff != nil {
 			diffs = append(diffs, diff)
 		}
 	}
 
-	for name, newService := range newMap {
+	for name, newCheck := range newMap {
 		// Diff the added
 		if old, ok := oldMap[name]; !ok {
-			if diff := serviceCheckDiff(old, newService, contextual); diff != nil {
+			if diff := serviceCheckDiff(old, newCheck, contextual); diff != nil {
 				diffs = append(diffs, diff)
 			}
 		}
@@ -624,6 +683,44 @@ func vaultDiff(old, new *Vault, contextual bool) *ObjectDiff {
 	// Policies diffs
 	if setDiff := stringSetDiff(old.Policies, new.Policies, "Policies", contextual); setDiff != nil {
 		diff.Objects = append(diff.Objects, setDiff)
+	}
+
+	return diff
+}
+
+// parameterizedJobDiff returns the diff of two parameterized job objects. If
+// contextual diff is enabled, all fields will be returned, even if no diff
+// occurred.
+func parameterizedJobDiff(old, new *ParameterizedJobConfig, contextual bool) *ObjectDiff {
+	diff := &ObjectDiff{Type: DiffTypeNone, Name: "ParameterizedJob"}
+	var oldPrimitiveFlat, newPrimitiveFlat map[string]string
+
+	if reflect.DeepEqual(old, new) {
+		return nil
+	} else if old == nil {
+		old = &ParameterizedJobConfig{}
+		diff.Type = DiffTypeAdded
+		newPrimitiveFlat = flatmap.Flatten(new, nil, true)
+	} else if new == nil {
+		new = &ParameterizedJobConfig{}
+		diff.Type = DiffTypeDeleted
+		oldPrimitiveFlat = flatmap.Flatten(old, nil, true)
+	} else {
+		diff.Type = DiffTypeEdited
+		oldPrimitiveFlat = flatmap.Flatten(old, nil, true)
+		newPrimitiveFlat = flatmap.Flatten(new, nil, true)
+	}
+
+	// Diff the primitive fields.
+	diff.Fields = fieldDiffs(oldPrimitiveFlat, newPrimitiveFlat, contextual)
+
+	// Meta diffs
+	if optionalDiff := stringSetDiff(old.MetaOptional, new.MetaOptional, "MetaOptional", contextual); optionalDiff != nil {
+		diff.Objects = append(diff.Objects, optionalDiff)
+	}
+
+	if requiredDiff := stringSetDiff(old.MetaRequired, new.MetaRequired, "MetaRequired", contextual); requiredDiff != nil {
+		diff.Objects = append(diff.Objects, requiredDiff)
 	}
 
 	return diff

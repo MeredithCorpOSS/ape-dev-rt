@@ -454,50 +454,55 @@ func TestShuffleNodes(t *testing.T) {
 func TestTasksUpdated(t *testing.T) {
 	j1 := mock.Job()
 	j2 := mock.Job()
+	name := j1.TaskGroups[0].Name
 
-	if tasksUpdated(j1.TaskGroups[0], j2.TaskGroups[0]) {
+	if tasksUpdated(j1, j2, name) {
 		t.Fatalf("bad")
 	}
 
 	j2.TaskGroups[0].Tasks[0].Config["command"] = "/bin/other"
-	if !tasksUpdated(j1.TaskGroups[0], j2.TaskGroups[0]) {
+	if !tasksUpdated(j1, j2, name) {
 		t.Fatalf("bad")
 	}
 
 	j3 := mock.Job()
 	j3.TaskGroups[0].Tasks[0].Name = "foo"
-	if !tasksUpdated(j1.TaskGroups[0], j3.TaskGroups[0]) {
+	if !tasksUpdated(j1, j3, name) {
 		t.Fatalf("bad")
 	}
 
 	j4 := mock.Job()
 	j4.TaskGroups[0].Tasks[0].Driver = "foo"
-	if !tasksUpdated(j1.TaskGroups[0], j4.TaskGroups[0]) {
+	if !tasksUpdated(j1, j4, name) {
 		t.Fatalf("bad")
 	}
 
 	j5 := mock.Job()
 	j5.TaskGroups[0].Tasks = append(j5.TaskGroups[0].Tasks,
 		j5.TaskGroups[0].Tasks[0])
-	if !tasksUpdated(j1.TaskGroups[0], j5.TaskGroups[0]) {
+	if !tasksUpdated(j1, j5, name) {
 		t.Fatalf("bad")
 	}
 
 	j6 := mock.Job()
-	j6.TaskGroups[0].Tasks[0].Resources.Networks[0].DynamicPorts = []structs.Port{{"http", 0}, {"https", 0}, {"admin", 0}}
-	if !tasksUpdated(j1.TaskGroups[0], j6.TaskGroups[0]) {
+	j6.TaskGroups[0].Tasks[0].Resources.Networks[0].DynamicPorts = []structs.Port{
+		{Label: "http", Value: 0},
+		{Label: "https", Value: 0},
+		{Label: "admin", Value: 0},
+	}
+	if !tasksUpdated(j1, j6, name) {
 		t.Fatalf("bad")
 	}
 
 	j7 := mock.Job()
 	j7.TaskGroups[0].Tasks[0].Env["NEW_ENV"] = "NEW_VALUE"
-	if !tasksUpdated(j1.TaskGroups[0], j7.TaskGroups[0]) {
+	if !tasksUpdated(j1, j7, name) {
 		t.Fatalf("bad")
 	}
 
 	j8 := mock.Job()
 	j8.TaskGroups[0].Tasks[0].User = "foo"
-	if !tasksUpdated(j1.TaskGroups[0], j8.TaskGroups[0]) {
+	if !tasksUpdated(j1, j8, name) {
 		t.Fatalf("bad")
 	}
 
@@ -507,49 +512,63 @@ func TestTasksUpdated(t *testing.T) {
 			GetterSource: "http://foo.com/bar",
 		},
 	}
-	if !tasksUpdated(j1.TaskGroups[0], j9.TaskGroups[0]) {
+	if !tasksUpdated(j1, j9, name) {
 		t.Fatalf("bad")
 	}
 
 	j10 := mock.Job()
 	j10.TaskGroups[0].Tasks[0].Meta["baz"] = "boom"
-	if !tasksUpdated(j1.TaskGroups[0], j10.TaskGroups[0]) {
+	if !tasksUpdated(j1, j10, name) {
 		t.Fatalf("bad")
 	}
 
 	j11 := mock.Job()
 	j11.TaskGroups[0].Tasks[0].Resources.CPU = 1337
-	if !tasksUpdated(j1.TaskGroups[0], j11.TaskGroups[0]) {
+	if !tasksUpdated(j1, j11, name) {
 		t.Fatalf("bad")
 	}
 
 	j12 := mock.Job()
 	j12.TaskGroups[0].Tasks[0].Resources.Networks[0].MBits = 100
-	if !tasksUpdated(j1.TaskGroups[0], j12.TaskGroups[0]) {
+	if !tasksUpdated(j1, j12, name) {
 		t.Fatalf("bad")
 	}
 
 	j13 := mock.Job()
 	j13.TaskGroups[0].Tasks[0].Resources.Networks[0].DynamicPorts[0].Label = "foobar"
-	if !tasksUpdated(j1.TaskGroups[0], j13.TaskGroups[0]) {
+	if !tasksUpdated(j1, j13, name) {
 		t.Fatalf("bad")
 	}
 
 	j14 := mock.Job()
 	j14.TaskGroups[0].Tasks[0].Resources.Networks[0].ReservedPorts = []structs.Port{{Label: "foo", Value: 1312}}
-	if !tasksUpdated(j1.TaskGroups[0], j14.TaskGroups[0]) {
+	if !tasksUpdated(j1, j14, name) {
 		t.Fatalf("bad")
 	}
 
 	j15 := mock.Job()
 	j15.TaskGroups[0].Tasks[0].Vault = &structs.Vault{Policies: []string{"foo"}}
-	if !tasksUpdated(j1.TaskGroups[0], j15.TaskGroups[0]) {
+	if !tasksUpdated(j1, j15, name) {
 		t.Fatalf("bad")
 	}
 
 	j16 := mock.Job()
 	j16.TaskGroups[0].EphemeralDisk.Sticky = true
-	if !tasksUpdated(j1.TaskGroups[0], j16.TaskGroups[0]) {
+	if !tasksUpdated(j1, j16, name) {
+		t.Fatal("bad")
+	}
+
+	// Change group meta
+	j17 := mock.Job()
+	j17.TaskGroups[0].Meta["j17_test"] = "roll_baby_roll"
+	if !tasksUpdated(j1, j17, name) {
+		t.Fatal("bad")
+	}
+
+	// Change job meta
+	j18 := mock.Job()
+	j18.Meta["j18_test"] = "roll_baby_roll"
+	if !tasksUpdated(j1, j18, name) {
 		t.Fatal("bad")
 	}
 }
@@ -608,7 +627,7 @@ func TestSetStatus(t *testing.T) {
 	eval := mock.Eval()
 	status := "a"
 	desc := "b"
-	if err := setStatus(logger, h, eval, nil, nil, nil, status, desc, nil); err != nil {
+	if err := setStatus(logger, h, eval, nil, nil, nil, status, desc, nil, ""); err != nil {
 		t.Fatalf("setStatus() failed: %v", err)
 	}
 
@@ -624,7 +643,7 @@ func TestSetStatus(t *testing.T) {
 	// Test next evals
 	h = NewHarness(t)
 	next := mock.Eval()
-	if err := setStatus(logger, h, eval, next, nil, nil, status, desc, nil); err != nil {
+	if err := setStatus(logger, h, eval, next, nil, nil, status, desc, nil, ""); err != nil {
 		t.Fatalf("setStatus() failed: %v", err)
 	}
 
@@ -640,7 +659,7 @@ func TestSetStatus(t *testing.T) {
 	// Test blocked evals
 	h = NewHarness(t)
 	blocked := mock.Eval()
-	if err := setStatus(logger, h, eval, nil, blocked, nil, status, desc, nil); err != nil {
+	if err := setStatus(logger, h, eval, nil, blocked, nil, status, desc, nil, ""); err != nil {
 		t.Fatalf("setStatus() failed: %v", err)
 	}
 
@@ -656,7 +675,7 @@ func TestSetStatus(t *testing.T) {
 	// Test metrics
 	h = NewHarness(t)
 	metrics := map[string]*structs.AllocMetric{"foo": nil}
-	if err := setStatus(logger, h, eval, nil, nil, metrics, status, desc, nil); err != nil {
+	if err := setStatus(logger, h, eval, nil, nil, metrics, status, desc, nil, ""); err != nil {
 		t.Fatalf("setStatus() failed: %v", err)
 	}
 
@@ -673,7 +692,7 @@ func TestSetStatus(t *testing.T) {
 	h = NewHarness(t)
 	queuedAllocs := map[string]int{"web": 1}
 
-	if err := setStatus(logger, h, eval, nil, nil, metrics, status, desc, queuedAllocs); err != nil {
+	if err := setStatus(logger, h, eval, nil, nil, metrics, status, desc, queuedAllocs, ""); err != nil {
 		t.Fatalf("setStatus() failed: %v", err)
 	}
 
@@ -684,6 +703,21 @@ func TestSetStatus(t *testing.T) {
 	newEval = h.Evals[0]
 	if !reflect.DeepEqual(newEval.QueuedAllocations, queuedAllocs) {
 		t.Fatalf("setStatus() didn't set failed task group metrics correctly: %v", newEval)
+	}
+
+	h = NewHarness(t)
+	dID := structs.GenerateUUID()
+	if err := setStatus(logger, h, eval, nil, nil, metrics, status, desc, queuedAllocs, dID); err != nil {
+		t.Fatalf("setStatus() failed: %v", err)
+	}
+
+	if len(h.Evals) != 1 {
+		t.Fatalf("setStatus() didn't update plan: %v", h.Evals)
+	}
+
+	newEval = h.Evals[0]
+	if newEval.DeploymentID != dID {
+		t.Fatalf("setStatus() didn't set deployment id correctly: %v", newEval)
 	}
 }
 
@@ -972,7 +1006,14 @@ func TestProgressMade(t *testing.T) {
 	}
 	update := &structs.PlanResult{NodeUpdate: m}
 	alloc := &structs.PlanResult{NodeAllocation: m}
-	if !(progressMade(both) && progressMade(update) && progressMade(alloc)) {
+	deployment := &structs.PlanResult{Deployment: mock.Deployment()}
+	deploymentUpdates := &structs.PlanResult{
+		DeploymentUpdates: []*structs.DeploymentStatusUpdate{
+			{DeploymentID: structs.GenerateUUID()},
+		},
+	}
+	if !(progressMade(both) && progressMade(update) && progressMade(alloc) &&
+		progressMade(deployment) && progressMade(deploymentUpdates)) {
 		t.Fatal("bad")
 	}
 }
@@ -1040,10 +1081,13 @@ func TestUtil_AdjustQueuedAllocations(t *testing.T) {
 	alloc1 := mock.Alloc()
 	alloc2 := mock.Alloc()
 	alloc2.CreateIndex = 4
+	alloc2.ModifyIndex = 4
 	alloc3 := mock.Alloc()
 	alloc3.CreateIndex = 3
+	alloc3.ModifyIndex = 5
 	alloc4 := mock.Alloc()
 	alloc4.CreateIndex = 6
+	alloc4.ModifyIndex = 8
 
 	planResult := structs.PlanResult{
 		NodeUpdate: map[string][]*structs.Allocation{
@@ -1058,7 +1102,7 @@ func TestUtil_AdjustQueuedAllocations(t *testing.T) {
 			},
 		},
 		RefreshIndex: 3,
-		AllocIndex:   4,
+		AllocIndex:   16, // Should not be considered
 	}
 
 	queuedAllocs := map[string]int{"web": 2}

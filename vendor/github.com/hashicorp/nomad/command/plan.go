@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/hashicorp/nomad/api"
-	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/scheduler"
 	"github.com/mitchellh/colorstring"
+	"github.com/posener/complete"
 )
 
 const (
@@ -31,7 +31,7 @@ type PlanCommand struct {
 
 func (c *PlanCommand) Help() string {
 	helpText := `
-Usage: nomad plan [options] <file>
+Usage: nomad plan [options] <path>
 
   Plan invokes a dry-run of the scheduler to determine the effects of submitting
   either a new or updated version of a job. The plan will not result in any
@@ -78,6 +78,18 @@ func (c *PlanCommand) Synopsis() string {
 	return "Dry-run a job update to determine its effects"
 }
 
+func (c *PlanCommand) AutocompleteFlags() complete.Flags {
+	return mergeAutocompleteFlags(c.Meta.AutocompleteFlags(FlagSetClient),
+		complete.Flags{
+			"-diff":    complete.PredictNothing,
+			"-verbose": complete.PredictNothing,
+		})
+}
+
+func (c *PlanCommand) AutocompleteArgs() complete.Predictor {
+	return complete.PredictOr(complete.PredictFiles("*.nomad"), complete.PredictFiles("*.hcl"))
+}
+
 func (c *PlanCommand) Run(args []string) int {
 	var diff, verbose bool
 
@@ -99,25 +111,9 @@ func (c *PlanCommand) Run(args []string) int {
 
 	path := args[0]
 	// Get Job struct from Jobfile
-	job, err := c.JobGetter.StructJob(args[0])
+	job, err := c.JobGetter.ApiJob(args[0])
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Error getting job struct: %s", err))
-		return 255
-	}
-
-	// Initialize any fields that need to be.
-	job.Canonicalize()
-
-	// Check that the job is valid
-	if err := job.Validate(); err != nil {
-		c.Ui.Error(fmt.Sprintf("Error validating job: %s", err))
-		return 255
-	}
-
-	// Convert it to something we can use
-	apiJob, err := convertStructJob(job)
-	if err != nil {
-		c.Ui.Error(fmt.Sprintf("Error converting job: %s", err))
 		return 255
 	}
 
@@ -129,12 +125,12 @@ func (c *PlanCommand) Run(args []string) int {
 	}
 
 	// Force the region to be that of the job.
-	if r := job.Region; r != "" {
-		client.SetRegion(r)
+	if r := job.Region; r != nil {
+		client.SetRegion(*r)
 	}
 
 	// Submit the job
-	resp, _, err := client.Jobs().Plan(apiJob, diff, nil)
+	resp, _, err := client.Jobs().Plan(job, diff, nil)
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Error during plan: %s", err))
 		return 255
@@ -151,6 +147,12 @@ func (c *PlanCommand) Run(args []string) int {
 	c.Ui.Output(c.Colorize().Color(formatDryRun(resp, job)))
 	c.Ui.Output("")
 
+	// Print any warnings if there are any
+	if resp.Warnings != "" {
+		c.Ui.Output(
+			c.Colorize().Color(fmt.Sprintf("[bold][yellow]Job Warnings:\n%s[reset]\n", resp.Warnings)))
+	}
+
 	// Print the job index info
 	c.Ui.Output(c.Colorize().Color(formatJobModifyIndex(resp.JobModifyIndex, path)))
 	return getExitCode(resp)
@@ -162,7 +164,7 @@ func (c *PlanCommand) Run(args []string) int {
 func getExitCode(resp *api.JobPlanResponse) int {
 	// Check for changes
 	for _, d := range resp.Annotations.DesiredTGUpdates {
-		if d.Stop+d.Place+d.Migrate+d.DestructiveUpdate > 0 {
+		if d.Stop+d.Place+d.Migrate+d.DestructiveUpdate+d.Canary > 0 {
 			return 1
 		}
 	}
@@ -179,7 +181,7 @@ func formatJobModifyIndex(jobModifyIndex uint64, jobName string) string {
 }
 
 // formatDryRun produces a string explaining the results of the dry run.
-func formatDryRun(resp *api.JobPlanResponse, job *structs.Job) string {
+func formatDryRun(resp *api.JobPlanResponse, job *api.Job) string {
 	var rolling *api.Evaluation
 	for _, eval := range resp.CreatedEvals {
 		if eval.TriggeredBy == "rolling-update" {
@@ -192,7 +194,7 @@ func formatDryRun(resp *api.JobPlanResponse, job *structs.Job) string {
 		out = "[bold][green]- All tasks successfully allocated.[reset]\n"
 	} else {
 		// Change the output depending on if we are a system job or not
-		if job.Type == "system" {
+		if job.Type != nil && *job.Type == "system" {
 			out = "[bold][yellow]- WARNING: Failed to place allocations on all nodes.[reset]\n"
 		} else {
 			out = "[bold][yellow]- WARNING: Failed to place all allocations.[reset]\n"
@@ -217,9 +219,15 @@ func formatDryRun(resp *api.JobPlanResponse, job *structs.Job) string {
 		out += fmt.Sprintf("[green]- Rolling update, next evaluation will be in %s.\n", rolling.Wait)
 	}
 
-	if next := resp.NextPeriodicLaunch; !next.IsZero() {
-		out += fmt.Sprintf("[green]- If submitted now, next periodic launch would be at %s (%s from now).\n",
-			formatTime(next), formatTimeDifference(time.Now().UTC(), next, time.Second))
+	if next := resp.NextPeriodicLaunch; !next.IsZero() && !job.IsParameterized() {
+		loc, err := job.Periodic.GetLocation()
+		if err != nil {
+			out += fmt.Sprintf("[yellow]- Invalid time zone: %v", err)
+		} else {
+			now := time.Now().In(loc)
+			out += fmt.Sprintf("[green]- If submitted now, next periodic launch would be at %s (%s from now).\n",
+				formatTime(next), formatTimeDifference(now, next, time.Second))
+		}
 	}
 
 	out = strings.TrimSuffix(out, "\n")
@@ -293,6 +301,8 @@ func formatTaskGroupDiff(tg *api.TaskGroupDiff, tgPrefix int, verbose bool) stri
 				color = "[cyan]"
 			case scheduler.UpdateTypeDestructiveUpdate:
 				color = "[yellow]"
+			case scheduler.UpdateTypeCanary:
+				color = "[light_yellow]"
 			}
 			updates = append(updates, fmt.Sprintf("[reset]%s%d %s", color, count, updateType))
 		}
@@ -364,15 +374,17 @@ func formatTaskDiff(task *api.TaskDiff, startPrefix, taskPrefix int, verbose boo
 // of spaces to put between the marker and object name output.
 func formatObjectDiff(diff *api.ObjectDiff, startPrefix, keyPrefix int) string {
 	start := strings.Repeat(" ", startPrefix)
-	marker, _ := getDiffString(diff.Type)
+	marker, markerLen := getDiffString(diff.Type)
 	out := fmt.Sprintf("%s%s%s%s {\n", start, marker, strings.Repeat(" ", keyPrefix), diff.Name)
 
 	// Determine the length of the longest name and longest diff marker to
 	// properly align names and values
 	longestField, longestMarker := getLongestPrefixes(diff.Fields, diff.Objects)
-	subStartPrefix := startPrefix + 2
+	subStartPrefix := startPrefix + keyPrefix + 2
 	out += alignedFieldAndObjects(diff.Fields, diff.Objects, subStartPrefix, longestField, longestMarker)
-	return fmt.Sprintf("%s\n%s}", out, start)
+
+	endprefix := strings.Repeat(" ", startPrefix+markerLen+keyPrefix)
+	return fmt.Sprintf("%s\n%s}", out, endprefix)
 }
 
 // formatFieldDiff produces an annotated diff of a field. startPrefix is the

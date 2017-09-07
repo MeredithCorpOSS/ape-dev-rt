@@ -1,10 +1,13 @@
 package driver
 
 import (
+	"context"
+	"crypto/md5"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/config"
@@ -16,16 +19,22 @@ import (
 	cstructs "github.com/hashicorp/nomad/client/structs"
 )
 
-// BuiltinDrivers contains the built in registered drivers
-// which are available for allocation handling
-var BuiltinDrivers = map[string]Factory{
-	"docker":   NewDockerDriver,
-	"exec":     NewExecDriver,
-	"raw_exec": NewRawExecDriver,
-	"java":     NewJavaDriver,
-	"qemu":     NewQemuDriver,
-	"rkt":      NewRktDriver,
-}
+var (
+	// BuiltinDrivers contains the built in registered drivers
+	// which are available for allocation handling
+	BuiltinDrivers = map[string]Factory{
+		"docker":   NewDockerDriver,
+		"exec":     NewExecDriver,
+		"raw_exec": NewRawExecDriver,
+		"java":     NewJavaDriver,
+		"qemu":     NewQemuDriver,
+		"rkt":      NewRktDriver,
+	}
+
+	// DriverStatsNotImplemented is the error to be returned if a driver doesn't
+	// implement stats.
+	DriverStatsNotImplemented = errors.New("stats not implemented for driver")
+)
 
 // NewDriver is used to instantiate and return a new driver
 // given the name and a logger
@@ -37,12 +46,160 @@ func NewDriver(name string, ctx *DriverContext) (Driver, error) {
 	}
 
 	// Instantiate the driver
-	f := factory(ctx)
-	return f, nil
+	d := factory(ctx)
+	return d, nil
 }
 
 // Factory is used to instantiate a new Driver
 type Factory func(*DriverContext) Driver
+
+// PrestartResponse is driver state returned by Driver.Prestart.
+type PrestartResponse struct {
+	// CreatedResources by the driver.
+	CreatedResources *CreatedResources
+
+	// Network contains driver-specific network parameters such as the port
+	// map between the host and a container.
+	//
+	// Since the network configuration may not be fully populated by
+	// Prestart, it will only be used for creating an environment for
+	// Start. It will be overridden by the DriverNetwork returned by Start.
+	Network *cstructs.DriverNetwork
+}
+
+// NewPrestartResponse creates a new PrestartResponse with CreatedResources
+// initialized.
+func NewPrestartResponse() *PrestartResponse {
+	return &PrestartResponse{
+		CreatedResources: NewCreatedResources(),
+	}
+}
+
+// CreatedResources is a map of resources (eg downloaded images) created by a driver
+// that must be cleaned up.
+type CreatedResources struct {
+	Resources map[string][]string
+}
+
+func NewCreatedResources() *CreatedResources {
+	return &CreatedResources{Resources: make(map[string][]string)}
+}
+
+// Add a new resource if it doesn't already exist.
+func (r *CreatedResources) Add(k, v string) {
+	if r.Resources == nil {
+		r.Resources = map[string][]string{k: []string{v}}
+		return
+	}
+	existing, ok := r.Resources[k]
+	if !ok {
+		// Key doesn't exist, create it
+		r.Resources[k] = []string{v}
+		return
+	}
+	for _, item := range existing {
+		if item == v {
+			// resource exists, return
+			return
+		}
+	}
+
+	// Resource type exists but value did not, append it
+	r.Resources[k] = append(existing, v)
+	return
+}
+
+// Remove a resource. Return true if removed, otherwise false.
+//
+// Removes the entire key if the needle is the last value in the list.
+func (r *CreatedResources) Remove(k, needle string) bool {
+	haystack := r.Resources[k]
+	for i, item := range haystack {
+		if item == needle {
+			r.Resources[k] = append(haystack[:i], haystack[i+1:]...)
+			if len(r.Resources[k]) == 0 {
+				delete(r.Resources, k)
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// Copy returns a new deep copy of CreatedResrouces.
+func (r *CreatedResources) Copy() *CreatedResources {
+	if r == nil {
+		return nil
+	}
+
+	newr := CreatedResources{
+		Resources: make(map[string][]string, len(r.Resources)),
+	}
+	for k, v := range r.Resources {
+		newv := make([]string, len(v))
+		copy(newv, v)
+		newr.Resources[k] = newv
+	}
+	return &newr
+}
+
+// Merge another CreatedResources into this one. If the other CreatedResources
+// is nil this method is a noop.
+func (r *CreatedResources) Merge(o *CreatedResources) {
+	if o == nil {
+		return
+	}
+
+	for k, v := range o.Resources {
+		// New key
+		if len(r.Resources[k]) == 0 {
+			r.Resources[k] = v
+			continue
+		}
+
+		// Existing key
+	OUTER:
+		for _, item := range v {
+			for _, existing := range r.Resources[k] {
+				if item == existing {
+					// Found it, move on
+					continue OUTER
+				}
+			}
+
+			// New item, append it
+			r.Resources[k] = append(r.Resources[k], item)
+		}
+	}
+}
+
+func (r *CreatedResources) Hash() []byte {
+	h := md5.New()
+
+	for k, values := range r.Resources {
+		io.WriteString(h, k)
+		io.WriteString(h, "values")
+		for i, v := range values {
+			io.WriteString(h, fmt.Sprintf("%d-%v", i, v))
+		}
+	}
+
+	return h.Sum(nil)
+}
+
+// StartResponse is returned by Driver.Start.
+type StartResponse struct {
+	// Handle to the driver's task executor for controlling the lifecycle
+	// of the task.
+	Handle DriverHandle
+
+	// Network contains driver-specific network parameters such as the port
+	// map between the host and a container.
+	//
+	// Network may be nil as not all drivers or configurations create
+	// networks.
+	Network *cstructs.DriverNetwork
+}
 
 // Driver is used for execution of tasks. This allows Nomad
 // to support many pluggable implementations of task drivers.
@@ -51,60 +208,85 @@ type Driver interface {
 	// Drivers must support the fingerprint interface for detection
 	fingerprint.Fingerprint
 
-	// Start is used to being task execution
-	Start(ctx *ExecContext, task *structs.Task) (DriverHandle, error)
+	// Prestart prepares the task environment and performs expensive
+	// intialization steps like downloading images.
+	//
+	// CreatedResources may be non-nil even when an error occurs.
+	Prestart(*ExecContext, *structs.Task) (*PrestartResponse, error)
+
+	// Start is used to begin task execution. If error is nil,
+	// StartResponse.Handle will be the handle to the task's executor.
+	// StartResponse.Network may be nil if the task doesn't configure a
+	// network.
+	Start(ctx *ExecContext, task *structs.Task) (*StartResponse, error)
 
 	// Open is used to re-open a handle to a task
 	Open(ctx *ExecContext, handleID string) (DriverHandle, error)
+
+	// Cleanup is called to remove resources which were created for a task
+	// and no longer needed. Cleanup is not called if CreatedResources is
+	// nil.
+	//
+	// If Cleanup returns a recoverable error it may be retried. On retry
+	// it will be passed the same CreatedResources, so all successfully
+	// cleaned up resources should be removed or handled idempotently.
+	Cleanup(*ExecContext, *CreatedResources) error
 
 	// Drivers must validate their configuration
 	Validate(map[string]interface{}) error
 
 	// Abilities returns the abilities of the driver
 	Abilities() DriverAbilities
+
+	// FSIsolation returns the method of filesystem isolation used
+	FSIsolation() cstructs.FSIsolation
 }
 
 // DriverAbilities marks the abilities the driver has.
 type DriverAbilities struct {
 	// SendSignals marks the driver as being able to send signals
 	SendSignals bool
+
+	// Exec marks the driver as being able to execute arbitrary commands
+	// such as health checks. Used by the ScriptExecutor interface.
+	Exec bool
 }
+
+// LogEventFn is a callback which allows Drivers to emit task events.
+type LogEventFn func(message string, args ...interface{})
 
 // DriverContext is a means to inject dependencies such as loggers, configs, and
 // node attributes into a Driver without having to change the Driver interface
 // each time we do it. Used in conjection with Factory, above.
 type DriverContext struct {
 	taskName string
+	allocID  string
 	config   *config.Config
 	logger   *log.Logger
 	node     *structs.Node
-	taskEnv  *env.TaskEnvironment
+
+	emitEvent LogEventFn
 }
 
 // NewEmptyDriverContext returns a DriverContext with all fields set to their
 // zero value.
 func NewEmptyDriverContext() *DriverContext {
-	return &DriverContext{
-		taskName: "",
-		config:   nil,
-		node:     nil,
-		logger:   nil,
-		taskEnv:  nil,
-	}
+	return &DriverContext{}
 }
 
 // NewDriverContext initializes a new DriverContext with the specified fields.
 // This enables other packages to create DriverContexts but keeps the fields
 // private to the driver. If we want to change this later we can gorename all of
 // the fields in DriverContext.
-func NewDriverContext(taskName string, config *config.Config, node *structs.Node,
-	logger *log.Logger, taskEnv *env.TaskEnvironment) *DriverContext {
+func NewDriverContext(taskName, allocID string, config *config.Config, node *structs.Node,
+	logger *log.Logger, eventEmitter LogEventFn) *DriverContext {
 	return &DriverContext{
-		taskName: taskName,
-		config:   config,
-		node:     node,
-		logger:   logger,
-		taskEnv:  taskEnv,
+		taskName:  taskName,
+		allocID:   allocID,
+		config:    config,
+		node:      node,
+		logger:    logger,
+		emitEvent: eventEmitter,
 	}
 }
 
@@ -129,62 +311,33 @@ type DriverHandle interface {
 
 	// Signal is used to send a signal to the task
 	Signal(s os.Signal) error
+
+	// ScriptExecutor is an interface used to execute commands such as
+	// health check scripts in the a DriverHandle's context.
+	ScriptExecutor
 }
 
-// ExecContext is shared between drivers within an allocation
-type ExecContext struct {
-	// AllocDir contains information about the alloc directory structure.
-	AllocDir *allocdir.AllocDir
+// ScriptExecutor is an interface that supports Exec()ing commands in the
+// driver's context. Split out of DriverHandle to ease testing.
+type ScriptExecutor interface {
+	Exec(ctx context.Context, cmd string, args []string) ([]byte, int, error)
+}
 
-	// Alloc ID
-	AllocID string
+// ExecContext is a task's execution context
+type ExecContext struct {
+	// TaskDir contains information about the task directory structure.
+	TaskDir *allocdir.TaskDir
+
+	// TaskEnv contains the task's environment variables.
+	TaskEnv *env.TaskEnv
 }
 
 // NewExecContext is used to create a new execution context
-func NewExecContext(alloc *allocdir.AllocDir, allocID string) *ExecContext {
-	return &ExecContext{AllocDir: alloc, AllocID: allocID}
-}
-
-// GetTaskEnv converts the alloc dir, the node, task and alloc into a
-// TaskEnvironment.
-func GetTaskEnv(allocDir *allocdir.AllocDir, node *structs.Node,
-	task *structs.Task, alloc *structs.Allocation, vaultToken string) (*env.TaskEnvironment, error) {
-
-	tg := alloc.Job.LookupTaskGroup(alloc.TaskGroup)
-	env := env.NewTaskEnvironment(node).
-		SetTaskMeta(task.Meta).
-		SetTaskGroupMeta(tg.Meta).
-		SetJobMeta(alloc.Job.Meta).
-		SetJobName(alloc.Job.Name).
-		SetEnvvars(task.Env).
-		SetTaskName(task.Name)
-
-	if allocDir != nil {
-		env.SetAllocDir(allocDir.SharedDir)
-		taskdir, ok := allocDir.TaskDirs[task.Name]
-		if !ok {
-			return nil, fmt.Errorf("failed to get task directory for task %q", task.Name)
-		}
-
-		env.SetTaskLocalDir(filepath.Join(taskdir, allocdir.TaskLocal))
-		env.SetSecretsDir(filepath.Join(taskdir, allocdir.TaskSecrets))
+func NewExecContext(td *allocdir.TaskDir, te *env.TaskEnv) *ExecContext {
+	return &ExecContext{
+		TaskDir: td,
+		TaskEnv: te,
 	}
-
-	if task.Resources != nil {
-		env.SetMemLimit(task.Resources.MemoryMB).
-			SetCpuLimit(task.Resources.CPU).
-			SetNetworks(task.Resources.Networks)
-	}
-
-	if alloc != nil {
-		env.SetAlloc(alloc)
-	}
-
-	if task.Vault != nil {
-		env.SetVaultToken(vaultToken, task.Vault.Env)
-	}
-
-	return env.Build(), nil
 }
 
 func mapMergeStrInt(maps ...map[string]int) map[string]int {

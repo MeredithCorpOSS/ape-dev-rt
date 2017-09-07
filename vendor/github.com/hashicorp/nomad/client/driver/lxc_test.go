@@ -16,18 +16,21 @@ import (
 )
 
 func TestLxcDriver_Fingerprint(t *testing.T) {
+	t.Parallel()
 	if !lxcPresent(t) {
 		t.Skip("lxc not present")
 	}
 
 	task := &structs.Task{
 		Name:      "foo",
+		Driver:    "lxc",
 		Resources: structs.DefaultResources(),
 	}
 
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewLxcDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewLxcDriver(ctx.DriverCtx)
+
 	node := &structs.Node{
 		Attributes: map[string]string{},
 	}
@@ -52,12 +55,16 @@ func TestLxcDriver_Fingerprint(t *testing.T) {
 }
 
 func TestLxcDriver_Start_Wait(t *testing.T) {
+	if !testutil.IsTravis() {
+		t.Parallel()
+	}
 	if !lxcPresent(t) {
 		t.Skip("lxc not present")
 	}
 
 	task := &structs.Task{
-		Name: "foo",
+		Name:   "foo",
+		Driver: "lxc",
 		Config: map[string]interface{}{
 			"template": "/usr/share/lxc/templates/lxc-busybox",
 		},
@@ -65,19 +72,19 @@ func TestLxcDriver_Start_Wait(t *testing.T) {
 		Resources:   structs.DefaultResources(),
 	}
 
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewLxcDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewLxcDriver(ctx.DriverCtx)
 
-	handle, err := d.Start(execCtx, task)
+	if _, err := d.Prestart(ctx.ExecCtx, task); err != nil {
+		t.Fatalf("prestart err: %v", err)
+	}
+	sresp, err := d.Start(ctx.ExecCtx, task)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if handle == nil {
-		t.Fatalf("missing handle")
-	}
 
-	lxcHandle, _ := handle.(*lxcDriverHandle)
+	lxcHandle, _ := sresp.Handle.(*lxcDriverHandle)
 
 	// Destroy the container after the test
 	defer func() {
@@ -96,8 +103,8 @@ func TestLxcDriver_Start_Wait(t *testing.T) {
 	})
 
 	// Look for mounted directories in their proper location
-	containerName := fmt.Sprintf("%s-%s", task.Name, execCtx.AllocID)
-	for _, mnt := range []string{"alloc", "local", "secret"} {
+	containerName := fmt.Sprintf("%s-%s", task.Name, ctx.DriverCtx.allocID)
+	for _, mnt := range []string{"alloc", "local", "secrets"} {
 		fullpath := filepath.Join(lxcHandle.lxcPath, containerName, "rootfs", mnt)
 		stat, err := os.Stat(fullpath)
 		if err != nil {
@@ -109,12 +116,12 @@ func TestLxcDriver_Start_Wait(t *testing.T) {
 	}
 
 	// Desroy the container
-	if err := handle.Kill(); err != nil {
+	if err := sresp.Handle.Kill(); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
 	select {
-	case res := <-handle.WaitCh():
+	case res := <-sresp.Handle.WaitCh():
 		if !res.Successful() {
 			t.Fatalf("err: %v", res)
 		}
@@ -124,12 +131,16 @@ func TestLxcDriver_Start_Wait(t *testing.T) {
 }
 
 func TestLxcDriver_Open_Wait(t *testing.T) {
+	if !testutil.IsTravis() {
+		t.Parallel()
+	}
 	if !lxcPresent(t) {
 		t.Skip("lxc not present")
 	}
 
 	task := &structs.Task{
-		Name: "foo",
+		Name:   "foo",
+		Driver: "lxc",
 		Config: map[string]interface{}{
 			"template": "/usr/share/lxc/templates/lxc-busybox",
 		},
@@ -137,27 +148,26 @@ func TestLxcDriver_Open_Wait(t *testing.T) {
 		Resources:   structs.DefaultResources(),
 	}
 
-	driverCtx, execCtx := testDriverContexts(task)
-	defer execCtx.AllocDir.Destroy()
-	d := NewLxcDriver(driverCtx)
+	ctx := testDriverContexts(t, task)
+	defer ctx.AllocDir.Destroy()
+	d := NewLxcDriver(ctx.DriverCtx)
 
-	handle, err := d.Start(execCtx, task)
+	if _, err := d.Prestart(ctx.ExecCtx, task); err != nil {
+		t.Fatalf("prestart err: %v", err)
+	}
+	sresp, err := d.Start(ctx.ExecCtx, task)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if handle == nil {
-		t.Fatalf("missing handle")
-	}
 
 	// Destroy the container after the test
-	if lh, ok := handle.(*lxcDriverHandle); ok {
-		defer func() {
-			lh.container.Stop()
-			lh.container.Destroy()
-		}()
-	}
+	lh := sresp.Handle.(*lxcDriverHandle)
+	defer func() {
+		lh.container.Stop()
+		lh.container.Destroy()
+	}()
 
-	handle2, err := d.Open(execCtx, handle.ID())
+	handle2, err := d.Open(ctx.ExecCtx, lh.ID())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

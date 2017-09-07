@@ -5,23 +5,28 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/nomad/client/allocdir"
+	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/testutil"
 	"github.com/ugorji/go/codec"
 )
 
 func TestAllocDirFS_List_MissingParams(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		req, err := http.NewRequest("GET", "/v1/client/fs/ls/", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
@@ -36,7 +41,8 @@ func TestAllocDirFS_List_MissingParams(t *testing.T) {
 }
 
 func TestAllocDirFS_Stat_MissingParams(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		req, err := http.NewRequest("GET", "/v1/client/fs/stat/", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
@@ -63,7 +69,8 @@ func TestAllocDirFS_Stat_MissingParams(t *testing.T) {
 }
 
 func TestAllocDirFS_ReadAt_MissingParams(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		req, err := http.NewRequest("GET", "/v1/client/fs/readat/", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
@@ -116,11 +123,11 @@ func TestStreamFramer_Flush(t *testing.T) {
 	r, w := io.Pipe()
 	wrappedW := &WriteCloseChecker{WriteCloser: w}
 	hRate, bWindow := 100*time.Millisecond, 100*time.Millisecond
-	sf := NewStreamFramer(wrappedW, hRate, bWindow, 100)
+	sf := NewStreamFramer(wrappedW, false, hRate, bWindow, 100)
 	sf.Run()
 
 	// Create a decoder
-	dec := codec.NewDecoder(r, jsonHandle)
+	dec := codec.NewDecoder(r, structs.JsonHandle)
 
 	f := "foo"
 	fe := "bar"
@@ -184,11 +191,11 @@ func TestStreamFramer_Batch(t *testing.T) {
 	wrappedW := &WriteCloseChecker{WriteCloser: w}
 	// Ensure the batch window doesn't get hit
 	hRate, bWindow := 100*time.Millisecond, 500*time.Millisecond
-	sf := NewStreamFramer(wrappedW, hRate, bWindow, 3)
+	sf := NewStreamFramer(wrappedW, false, hRate, bWindow, 3)
 	sf.Run()
 
 	// Create a decoder
-	dec := codec.NewDecoder(r, jsonHandle)
+	dec := codec.NewDecoder(r, structs.JsonHandle)
 
 	f := "foo"
 	fe := "bar"
@@ -261,11 +268,11 @@ func TestStreamFramer_Heartbeat(t *testing.T) {
 	r, w := io.Pipe()
 	wrappedW := &WriteCloseChecker{WriteCloser: w}
 	hRate, bWindow := 100*time.Millisecond, 100*time.Millisecond
-	sf := NewStreamFramer(wrappedW, hRate, bWindow, 100)
+	sf := NewStreamFramer(wrappedW, false, hRate, bWindow, 100)
 	sf.Run()
 
 	// Create a decoder
-	dec := codec.NewDecoder(r, jsonHandle)
+	dec := codec.NewDecoder(r, structs.JsonHandle)
 
 	// Start the reader
 	resultCh := make(chan struct{})
@@ -313,11 +320,11 @@ func TestStreamFramer_Order(t *testing.T) {
 	wrappedW := &WriteCloseChecker{WriteCloser: w}
 	// Ensure the batch window doesn't get hit
 	hRate, bWindow := 100*time.Millisecond, 10*time.Millisecond
-	sf := NewStreamFramer(wrappedW, hRate, bWindow, 10)
+	sf := NewStreamFramer(wrappedW, false, hRate, bWindow, 10)
 	sf.Run()
 
 	// Create a decoder
-	dec := codec.NewDecoder(r, jsonHandle)
+	dec := codec.NewDecoder(r, structs.JsonHandle)
 
 	files := []string{"1", "2", "3", "4", "5"}
 	input := bytes.NewBuffer(make([]byte, 0, 100000))
@@ -399,8 +406,105 @@ func TestStreamFramer_Order(t *testing.T) {
 	}
 }
 
+// This test checks that frames are received in order
+func TestStreamFramer_Order_PlainText(t *testing.T) {
+	// Create the stream framer
+	r, w := io.Pipe()
+	wrappedW := &WriteCloseChecker{WriteCloser: w}
+	// Ensure the batch window doesn't get hit
+	hRate, bWindow := 100*time.Millisecond, 10*time.Millisecond
+	sf := NewStreamFramer(wrappedW, true, hRate, bWindow, 10)
+	sf.Run()
+
+	files := []string{"1", "2", "3", "4", "5"}
+	input := bytes.NewBuffer(make([]byte, 0, 100000))
+	for i := 0; i <= 1000; i++ {
+		str := strconv.Itoa(i) + ","
+		input.WriteString(str)
+	}
+
+	expected := bytes.NewBuffer(make([]byte, 0, 100000))
+	for _, _ = range files {
+		expected.Write(input.Bytes())
+	}
+	receivedBuf := bytes.NewBuffer(make([]byte, 0, 100000))
+
+	// Start the reader
+	resultCh := make(chan struct{})
+	go func() {
+	OUTER:
+		for {
+			if _, err := receivedBuf.ReadFrom(r); err != nil {
+				if strings.Contains(err.Error(), "closed pipe") {
+					resultCh <- struct{}{}
+					return
+				}
+				t.Fatalf("bad read: %v", err)
+			}
+
+			if expected.Len() != receivedBuf.Len() {
+				continue
+			}
+			expectedBytes := expected.Bytes()
+			actualBytes := receivedBuf.Bytes()
+			for i, e := range expectedBytes {
+				if a := actualBytes[i]; a != e {
+					continue OUTER
+				}
+			}
+			resultCh <- struct{}{}
+			return
+
+		}
+	}()
+
+	// Send the data
+	b := input.Bytes()
+	shards := 10
+	each := len(b) / shards
+	for _, f := range files {
+		for i := 0; i < shards; i++ {
+			l, r := each*i, each*(i+1)
+			if i == shards-1 {
+				r = len(b)
+			}
+
+			if err := sf.Send(f, "", b[l:r], 0); err != nil {
+				t.Fatalf("Send() failed %v", err)
+			}
+		}
+	}
+
+	// Ensure we get data
+	select {
+	case <-resultCh:
+	case <-time.After(10 * time.Duration(testutil.TestMultiplier()) * bWindow):
+		if expected.Len() != receivedBuf.Len() {
+			t.Fatalf("Got %v; want %v", expected.Len(), receivedBuf.Len())
+		}
+		expectedBytes := expected.Bytes()
+		actualBytes := receivedBuf.Bytes()
+		for i, e := range expectedBytes {
+			if a := actualBytes[i]; a != e {
+				t.Fatalf("Index %d; Got %q; want %q", i, a, e)
+			}
+		}
+	}
+
+	// Close the reader and wait. This should cause the runner to exit
+	if err := r.Close(); err != nil {
+		t.Fatalf("failed to close reader")
+	}
+
+	sf.Destroy()
+	if !wrappedW.Closed {
+		t.Fatalf("writer not closed")
+	}
+}
+
 func TestHTTP_Stream_MissingParams(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		req, err := http.NewRequest("GET", "/v1/client/fs/stream/", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
@@ -438,7 +542,7 @@ func TestHTTP_Stream_MissingParams(t *testing.T) {
 
 // tempAllocDir returns a new alloc dir that is rooted in a temp dir. The caller
 // should destroy the temp dir.
-func tempAllocDir(t *testing.T) *allocdir.AllocDir {
+func tempAllocDir(t testing.TB) *allocdir.AllocDir {
 	dir, err := ioutil.TempDir("", "")
 	if err != nil {
 		t.Fatalf("TempDir() failed: %v", err)
@@ -448,7 +552,7 @@ func tempAllocDir(t *testing.T) *allocdir.AllocDir {
 		t.Fatalf("failed to chmod dir: %v", err)
 	}
 
-	return allocdir.NewAllocDir(dir)
+	return allocdir.NewAllocDir(log.New(os.Stderr, "", log.LstdFlags), dir)
 }
 
 type nopWriteCloser struct {
@@ -460,12 +564,13 @@ func (n nopWriteCloser) Close() error {
 }
 
 func TestHTTP_Stream_NoFile(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
 
-		framer := NewStreamFramer(nopWriteCloser{ioutil.Discard}, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
+		framer := NewStreamFramer(nopWriteCloser{ioutil.Discard}, false, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
 		framer.Run()
 		defer framer.Destroy()
 
@@ -476,7 +581,8 @@ func TestHTTP_Stream_NoFile(t *testing.T) {
 }
 
 func TestHTTP_Stream_Modify(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
@@ -493,7 +599,7 @@ func TestHTTP_Stream_Modify(t *testing.T) {
 		r, w := io.Pipe()
 		defer r.Close()
 		defer w.Close()
-		dec := codec.NewDecoder(r, jsonHandle)
+		dec := codec.NewDecoder(r, structs.JsonHandle)
 
 		data := []byte("helloworld")
 
@@ -524,7 +630,7 @@ func TestHTTP_Stream_Modify(t *testing.T) {
 			t.Fatalf("write failed: %v", err)
 		}
 
-		framer := NewStreamFramer(w, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
+		framer := NewStreamFramer(w, false, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
 		framer.Run()
 		defer framer.Destroy()
 
@@ -551,7 +657,8 @@ func TestHTTP_Stream_Modify(t *testing.T) {
 }
 
 func TestHTTP_Stream_Truncate(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
@@ -569,7 +676,7 @@ func TestHTTP_Stream_Truncate(t *testing.T) {
 		r, w := io.Pipe()
 		defer r.Close()
 		defer w.Close()
-		dec := codec.NewDecoder(r, jsonHandle)
+		dec := codec.NewDecoder(r, structs.JsonHandle)
 
 		data := []byte("helloworld")
 
@@ -605,7 +712,7 @@ func TestHTTP_Stream_Truncate(t *testing.T) {
 			t.Fatalf("write failed: %v", err)
 		}
 
-		framer := NewStreamFramer(w, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
+		framer := NewStreamFramer(w, false, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
 		framer.Run()
 		defer framer.Destroy()
 
@@ -660,7 +767,8 @@ func TestHTTP_Stream_Truncate(t *testing.T) {
 }
 
 func TestHTTP_Stream_Delete(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
@@ -679,7 +787,7 @@ func TestHTTP_Stream_Delete(t *testing.T) {
 		wrappedW := &WriteCloseChecker{WriteCloser: w}
 		defer r.Close()
 		defer w.Close()
-		dec := codec.NewDecoder(r, jsonHandle)
+		dec := codec.NewDecoder(r, structs.JsonHandle)
 
 		data := []byte("helloworld")
 
@@ -708,7 +816,7 @@ func TestHTTP_Stream_Delete(t *testing.T) {
 			t.Fatalf("write failed: %v", err)
 		}
 
-		framer := NewStreamFramer(wrappedW, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
+		framer := NewStreamFramer(wrappedW, false, streamHeartbeatRate, streamBatchWindow, streamFrameSize)
 		framer.Run()
 
 		// Start streaming
@@ -742,7 +850,8 @@ func TestHTTP_Stream_Delete(t *testing.T) {
 }
 
 func TestHTTP_Logs_NoFollow(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir and create the log dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
@@ -770,7 +879,7 @@ func TestHTTP_Logs_NoFollow(t *testing.T) {
 		wrappedW := &WriteCloseChecker{WriteCloser: w}
 		defer r.Close()
 		defer w.Close()
-		dec := codec.NewDecoder(r, jsonHandle)
+		dec := codec.NewDecoder(r, structs.JsonHandle)
 
 		var received []byte
 
@@ -802,7 +911,7 @@ func TestHTTP_Logs_NoFollow(t *testing.T) {
 
 		// Start streaming logs
 		go func() {
-			if err := s.Server.logs(false, 0, OriginStart, task, logType, ad, wrappedW); err != nil {
+			if err := s.Server.logs(false, false, 0, OriginStart, task, logType, ad, wrappedW); err != nil {
 				t.Fatalf("logs() failed: %v", err)
 			}
 		}()
@@ -823,7 +932,8 @@ func TestHTTP_Logs_NoFollow(t *testing.T) {
 }
 
 func TestHTTP_Logs_Follow(t *testing.T) {
-	httpTest(t, nil, func(s *TestServer) {
+	t.Parallel()
+	httpTest(t, nil, func(s *TestAgent) {
 		// Get a temp alloc dir and create the log dir
 		ad := tempAllocDir(t)
 		defer os.RemoveAll(ad.AllocDir)
@@ -856,7 +966,7 @@ func TestHTTP_Logs_Follow(t *testing.T) {
 		wrappedW := &WriteCloseChecker{WriteCloser: w}
 		defer r.Close()
 		defer w.Close()
-		dec := codec.NewDecoder(r, jsonHandle)
+		dec := codec.NewDecoder(r, structs.JsonHandle)
 
 		var received []byte
 
@@ -891,7 +1001,7 @@ func TestHTTP_Logs_Follow(t *testing.T) {
 
 		// Start streaming logs
 		go func() {
-			if err := s.Server.logs(true, 0, OriginStart, task, logType, ad, wrappedW); err != nil {
+			if err := s.Server.logs(true, false, 0, OriginStart, task, logType, ad, wrappedW); err != nil {
 				t.Fatalf("logs() failed: %v", err)
 			}
 		}()
@@ -923,6 +1033,112 @@ func TestHTTP_Logs_Follow(t *testing.T) {
 			t.Fatalf("connection not closed")
 		})
 	})
+}
+
+func BenchmarkHTTP_Logs_Follow(t *testing.B) {
+	runtime.MemProfileRate = 1
+
+	s := makeHTTPServer(t, nil)
+	defer s.Shutdown()
+	testutil.WaitForLeader(t, s.Agent.RPC)
+
+	// Get a temp alloc dir and create the log dir
+	ad := tempAllocDir(t)
+	s.Agent.logger.Printf("ALEX: LOG DIR: %q", ad.SharedDir)
+	//defer os.RemoveAll(ad.AllocDir)
+
+	logDir := filepath.Join(ad.SharedDir, allocdir.LogDirName)
+	if err := os.MkdirAll(logDir, 0777); err != nil {
+		t.Fatalf("Failed to make log dir: %v", err)
+	}
+
+	// Create a series of log files in the temp dir
+	task := "foo"
+	logType := "stdout"
+	expected := make([]byte, 1024*1024*100)
+	initialWrites := 3
+
+	writeToFile := func(index int, data []byte) {
+		logFile := fmt.Sprintf("%s.%s.%d", task, logType, index)
+		logFilePath := filepath.Join(logDir, logFile)
+		err := ioutil.WriteFile(logFilePath, data, 777)
+		if err != nil {
+			t.Fatalf("Failed to create file: %v", err)
+		}
+	}
+
+	part := (len(expected) / 3) - 50
+	goodEnough := (8 * len(expected)) / 10
+	for i := 0; i < initialWrites; i++ {
+		writeToFile(i, expected[i*part:(i+1)*part])
+	}
+
+	t.ResetTimer()
+	for i := 0; i < t.N; i++ {
+		s.Agent.logger.Printf("BENCHMARK %d", i)
+
+		// Create a decoder
+		r, w := io.Pipe()
+		wrappedW := &WriteCloseChecker{WriteCloser: w}
+		defer r.Close()
+		defer w.Close()
+		dec := codec.NewDecoder(r, structs.JsonHandle)
+
+		var received []byte
+
+		// Start the reader
+		fullResultCh := make(chan struct{})
+		go func() {
+			for {
+				var frame StreamFrame
+				if err := dec.Decode(&frame); err != nil {
+					if err == io.EOF {
+						t.Logf("EOF")
+						return
+					}
+
+					t.Fatalf("failed to decode: %v", err)
+				}
+
+				if frame.IsHeartbeat() {
+					continue
+				}
+
+				received = append(received, frame.Data...)
+				if len(received) > goodEnough {
+					close(fullResultCh)
+					return
+				}
+			}
+		}()
+
+		// Start streaming logs
+		go func() {
+			if err := s.Server.logs(true, false, 0, OriginStart, task, logType, ad, wrappedW); err != nil {
+				t.Fatalf("logs() failed: %v", err)
+			}
+		}()
+
+		select {
+		case <-fullResultCh:
+		case <-time.After(time.Duration(60 * time.Second)):
+			t.Fatalf("did not receive data: %d < %d", len(received), goodEnough)
+		}
+
+		s.Agent.logger.Printf("ALEX: CLOSING")
+
+		// Close the reader
+		r.Close()
+		s.Agent.logger.Printf("ALEX: CLOSED")
+
+		s.Agent.logger.Printf("ALEX: WAITING FOR WRITER TO CLOSE")
+		testutil.WaitForResult(func() (bool, error) {
+			return wrappedW.Closed, nil
+		}, func(err error) {
+			t.Fatalf("connection not closed")
+		})
+		s.Agent.logger.Printf("ALEX: WRITER CLOSED")
+	}
 }
 
 func TestLogs_findClosest(t *testing.T) {
@@ -985,7 +1201,7 @@ func TestLogs_findClosest(t *testing.T) {
 			Error:      true,
 		},
 
-		// Test begining cases
+		// Test beginning cases
 		{
 			Entries:      entries,
 			DesiredIdx:   0,

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
@@ -58,7 +59,8 @@ func TestSystemSched_JobRegister(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -182,7 +184,8 @@ func TestSystemSched_JobRegister_EphemeralDiskConstraint(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -205,7 +208,7 @@ func TestSystemSched_JobRegister_EphemeralDiskConstraint(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err = h1.State.AllocsByJob(job1.ID)
+	out, err = h1.State.AllocsByJob(ws, job1.ID, false)
 	noErr(t, err)
 	if len(out) != 0 {
 		t.Fatalf("bad: %#v", out)
@@ -319,7 +322,8 @@ func TestSystemSched_JobRegister_Annotate(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -430,7 +434,8 @@ func TestSystemSched_JobRegister_AddNode(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -558,7 +563,8 @@ func TestSystemSched_JobModify(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -746,7 +752,8 @@ func TestSystemSched_JobModify_InPlace(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure all allocations placed
@@ -766,7 +773,7 @@ func TestSystemSched_JobModify_InPlace(t *testing.T) {
 	}
 }
 
-func TestSystemSched_JobDeregister(t *testing.T) {
+func TestSystemSched_JobDeregister_Purged(t *testing.T) {
 	h := NewHarness(t)
 
 	// Create some nodes
@@ -822,7 +829,79 @@ func TestSystemSched_JobDeregister(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
+	noErr(t, err)
+
+	// Ensure no remaining allocations
+	out, _ = structs.FilterTerminalAllocs(out)
+	if len(out) != 0 {
+		t.Fatalf("bad: %#v", out)
+	}
+
+	h.AssertEvalStatus(t, structs.EvalStatusComplete)
+}
+
+func TestSystemSched_JobDeregister_Stopped(t *testing.T) {
+	h := NewHarness(t)
+
+	// Create some nodes
+	var nodes []*structs.Node
+	for i := 0; i < 10; i++ {
+		node := mock.Node()
+		nodes = append(nodes, node)
+		noErr(t, h.State.UpsertNode(h.NextIndex(), node))
+	}
+
+	// Generate a fake job with allocations
+	job := mock.SystemJob()
+	job.Stop = true
+	noErr(t, h.State.UpsertJob(h.NextIndex(), job))
+
+	var allocs []*structs.Allocation
+	for _, node := range nodes {
+		alloc := mock.Alloc()
+		alloc.Job = job
+		alloc.JobID = job.ID
+		alloc.NodeID = node.ID
+		alloc.Name = "my-job.web[0]"
+		allocs = append(allocs, alloc)
+	}
+	for _, alloc := range allocs {
+		noErr(t, h.State.UpsertJobSummary(h.NextIndex(), mock.JobSummary(alloc.JobID)))
+	}
+	noErr(t, h.State.UpsertAllocs(h.NextIndex(), allocs))
+
+	// Create a mock evaluation to deregister the job
+	eval := &structs.Evaluation{
+		ID:          structs.GenerateUUID(),
+		Priority:    50,
+		TriggeredBy: structs.EvalTriggerJobDeregister,
+		JobID:       job.ID,
+	}
+
+	// Process the evaluation
+	err := h.Process(NewSystemScheduler, eval)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Ensure a single plan
+	if len(h.Plans) != 1 {
+		t.Fatalf("bad: %#v", h.Plans)
+	}
+	plan := h.Plans[0]
+
+	// Ensure the plan evicted the job from all nodes.
+	for _, node := range nodes {
+		if len(plan.NodeUpdate[node.ID]) != 1 {
+			t.Fatalf("bad: %#v", plan)
+		}
+	}
+
+	// Lookup the allocations by JobID
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure no remaining allocations
@@ -1094,7 +1173,8 @@ func TestSystemSched_RetryLimit(t *testing.T) {
 	}
 
 	// Lookup the allocations by JobID
-	out, err := h.State.AllocsByJob(job.ID)
+	ws := memdb.NewWatchSet()
+	out, err := h.State.AllocsByJob(ws, job.ID, false)
 	noErr(t, err)
 
 	// Ensure no allocations placed
@@ -1108,7 +1188,7 @@ func TestSystemSched_RetryLimit(t *testing.T) {
 
 // This test ensures that the scheduler doesn't increment the queued allocation
 // count for a task group when allocations can't be created on currently
-// availabe nodes because of constrain mismatches.
+// available nodes because of constrain mismatches.
 func TestSystemSched_Queued_With_Constraints(t *testing.T) {
 	h := NewHarness(t)
 
@@ -1179,6 +1259,7 @@ func TestSystemSched_ChainedAlloc(t *testing.T) {
 	h1 := NewHarnessWithState(t, h.State)
 	job1 := mock.SystemJob()
 	job1.ID = job.ID
+	job1.TaskGroups[0].Tasks[0].Env = make(map[string]string)
 	job1.TaskGroups[0].Tasks[0].Env["foo"] = "bar"
 	noErr(t, h1.State.UpsertJob(h1.NextIndex(), job1))
 

@@ -216,7 +216,7 @@ when retrieving metrics using the above described signals.
 # Client Metrics
 
 The Nomad client emits metrics related to the resource usage of the allocations
-and tasks running on it and the node itself.  Operators have to explicity turn
+and tasks running on it and the node itself.  Operators have to explicitly turn
 on publishing host and allocation metrics. Publishing allocation and host
 metrics can be turned on by setting the value of `publish_allocation_metrics`
 `publish_node_metrics` to `true`.
@@ -239,13 +239,75 @@ page for more details.
     <th>Type</th>
   </tr>
   <tr>
-    <td>`nomad.client.host.memmory.<HostID>.total`</td>
+    <td>`nomad.client.allocated.cpu.<HostID>`</td>
+    <td>Total amount of CPU shares the scheduler has allocated to tasks</td>
+    <td>MHz</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.unallocated.cpu.<HostID>`</td>
+    <td>Total amount of CPU shares free for the scheduler to allocate to tasks</td>
+    <td>MHz</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.allocated.memory.<HostID>`</td>
+    <td>Total amount of memory the scheduler has allocated to tasks</td>
+    <td>Megabytes</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.unallocated.memory.<HostID>`</td>
+    <td>Total amount of memory free for the scheduler to allocate to tasks</td>
+    <td>Megabytes</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.allocated.disk.<HostID>`</td>
+    <td>Total amount of disk space the scheduler has allocated to tasks</td>
+    <td>Megabytes</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.unallocated.disk.<HostID>`</td>
+    <td>Total amount of disk space free for the scheduler to allocate to tasks</td>
+    <td>Megabytes</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.allocated.iops.<HostID>`</td>
+    <td>Total amount of IOPS the scheduler has allocated to tasks</td>
+    <td>IOPS</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.unallocated.iops.<HostID>`</td>
+    <td>Total amount of IOPS free for the scheduler to allocate to tasks</td>
+    <td>IOPS</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.allocated.network.<Device-Name>.<HostID>`</td>
+    <td>Total amount of bandwidth the scheduler has allocated to tasks on the
+    given device</td>
+    <td>Megabits</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.unallocated.network.<Device-Name>.<HostID>`</td>
+    <td>Total amount of bandwidth free for the scheduler to allocate to tasks on
+    the given device</td>
+    <td>Megabits</td>
+    <td>Gauge</td>
+  </tr>
+  <tr>
+    <td>`nomad.client.host.memory.<HostID>.total`</td>
     <td>Total amount of physical memory on the node</td>
     <td>Bytes</td>
     <td>Gauge</td>
   </tr>
   <tr>
-    <td>`nomad.client.host.memmory.<HostID>.available`</td>
+    <td>`nomad.client.host.memory.<HostID>.available`</td>
     <td>Total amount of memory available to processes which includes free and
     cached memory</td>
     <td>Bytes</td>

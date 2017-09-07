@@ -12,9 +12,9 @@ type testData struct {
 }
 
 const expectJSON = `{
-    "Region": "global",
     "ID": "1",
-    "Name": "example"
+    "Name": "example",
+    "Region": "global"
 }`
 
 var (
@@ -24,6 +24,7 @@ var (
 )
 
 func TestDataFormat(t *testing.T) {
+	t.Parallel()
 	for k, v := range testFormat {
 		fm, err := DataFormat(k, v)
 		if err != nil {
@@ -36,12 +37,13 @@ func TestDataFormat(t *testing.T) {
 		}
 
 		if result != expectOutput[k] {
-			t.Fatalf("expected output: %s, actual: %s", expectOutput[k], result)
+			t.Fatalf("expected output:\n%s\nactual:\n%s", expectOutput[k], result)
 		}
 	}
 }
 
 func TestInvalidJSONTemplate(t *testing.T) {
+	t.Parallel()
 	// Invalid template {{.foo}}
 	fm, err := DataFormat("template", "{{.foo}}")
 	if err != nil {

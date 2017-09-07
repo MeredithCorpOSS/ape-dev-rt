@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/scheduler"
@@ -43,6 +44,7 @@ func init() {
 }
 
 func TestWorker_dequeueEvaluation(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -73,6 +75,7 @@ func TestWorker_dequeueEvaluation(t *testing.T) {
 }
 
 func TestWorker_dequeueEvaluation_paused(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -116,6 +119,7 @@ func TestWorker_dequeueEvaluation_paused(t *testing.T) {
 }
 
 func TestWorker_dequeueEvaluation_shutdown(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -144,6 +148,7 @@ func TestWorker_dequeueEvaluation_shutdown(t *testing.T) {
 }
 
 func TestWorker_sendAck(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -190,6 +195,7 @@ func TestWorker_sendAck(t *testing.T) {
 }
 
 func TestWorker_waitForIndex(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -224,6 +230,7 @@ func TestWorker_waitForIndex(t *testing.T) {
 }
 
 func TestWorker_invokeScheduler(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -241,6 +248,7 @@ func TestWorker_invokeScheduler(t *testing.T) {
 }
 
 func TestWorker_SubmitPlan(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -302,6 +310,7 @@ func TestWorker_SubmitPlan(t *testing.T) {
 }
 
 func TestWorker_SubmitPlan_MissingNodeRefresh(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -365,6 +374,7 @@ func TestWorker_SubmitPlan_MissingNodeRefresh(t *testing.T) {
 }
 
 func TestWorker_UpdateEval(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -397,7 +407,8 @@ func TestWorker_UpdateEval(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := s1.fsm.State().EvalByID(eval2.ID)
+	ws := memdb.NewWatchSet()
+	out, err := s1.fsm.State().EvalByID(ws, eval2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -410,6 +421,7 @@ func TestWorker_UpdateEval(t *testing.T) {
 }
 
 func TestWorker_CreateEval(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -443,7 +455,8 @@ func TestWorker_CreateEval(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	out, err := s1.fsm.State().EvalByID(eval2.ID)
+	ws := memdb.NewWatchSet()
+	out, err := s1.fsm.State().EvalByID(ws, eval2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -456,6 +469,7 @@ func TestWorker_CreateEval(t *testing.T) {
 }
 
 func TestWorker_ReblockEval(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0
 		c.EnabledSchedulers = []string{structs.JobTypeService}
@@ -512,7 +526,8 @@ func TestWorker_ReblockEval(t *testing.T) {
 	}
 
 	// Check that the eval was updated
-	eval, err := s1.fsm.State().EvalByID(eval2.ID)
+	ws := memdb.NewWatchSet()
+	eval, err := s1.fsm.State().EvalByID(ws, eval2.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

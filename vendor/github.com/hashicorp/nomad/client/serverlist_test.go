@@ -8,6 +8,7 @@ import (
 )
 
 func TestServerList(t *testing.T) {
+	t.Parallel()
 	s := newServerList()
 
 	// New lists should be empty
@@ -89,6 +90,7 @@ func TestServerList(t *testing.T) {
 // TestClient_ServerList tests client methods that interact with the internal
 // nomad server list.
 func TestClient_ServerList(t *testing.T) {
+	t.Parallel()
 	// manually create a mostly empty client to avoid spinning up a ton of
 	// goroutines that complicate testing
 	client := Client{servers: newServerList(), logger: log.New(os.Stderr, "", log.Ltime|log.Lshortfile)}
@@ -99,10 +101,10 @@ func TestClient_ServerList(t *testing.T) {
 	if err := client.SetServers(nil); err != noServersErr {
 		t.Fatalf("expected setting an empty list to return a 'no servers' error but received %v", err)
 	}
-	if err := client.SetServers([]string{"not-a-real-domain.fake"}); err == nil {
+	if err := client.SetServers([]string{"123.456.13123.123.13:80"}); err == nil {
 		t.Fatalf("expected setting a bad server to return an error")
 	}
-	if err := client.SetServers([]string{"bad.fake", "127.0.0.1:1234", "127.0.0.1"}); err != nil {
+	if err := client.SetServers([]string{"123.456.13123.123.13:80", "127.0.0.1:1234", "127.0.0.1"}); err != nil {
 		t.Fatalf("expected setting at least one good server to succeed but received: %v", err)
 	}
 	s := client.GetServers()

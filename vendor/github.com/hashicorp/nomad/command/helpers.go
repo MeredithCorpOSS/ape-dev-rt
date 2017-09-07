@@ -7,12 +7,13 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	gg "github.com/hashicorp/go-getter"
 	"github.com/hashicorp/nomad/api"
 	"github.com/hashicorp/nomad/jobspec"
-	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/posener/complete"
 
 	"github.com/ryanuber/columnize"
 )
@@ -54,6 +55,10 @@ func limit(s string, length int) string {
 
 // formatTime formats the time to string based on RFC822
 func formatTime(t time.Time) string {
+	if t.Unix() < 1 {
+		// It's more confusing to display the UNIX epoch or a zero value than nothing
+		return ""
+	}
 	return t.Format("01/02/06 15:04:05 MST")
 }
 
@@ -77,14 +82,12 @@ func getLocalNodeID(client *api.Client) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Error querying agent info: %s", err)
 	}
-	var stats map[string]interface{}
-	stats, _ = info["stats"]
-	clientStats, ok := stats["client"].(map[string]interface{})
+	clientStats, ok := info.Stats["client"]
 	if !ok {
 		return "", fmt.Errorf("Nomad not running in client mode")
 	}
 
-	nodeID, ok := clientStats["node_id"].(string)
+	nodeID, ok := clientStats["node_id"]
 	if !ok {
 		return "", fmt.Errorf("Failed to determine node ID")
 	}
@@ -235,7 +238,7 @@ type JobGetter struct {
 }
 
 // StructJob returns the Job struct from jobfile.
-func (j *JobGetter) StructJob(jpath string) (*structs.Job, error) {
+func (j *JobGetter) ApiJob(jpath string) (*api.Job, error) {
 	var jobfile io.Reader
 	switch jpath {
 	case "-":
@@ -286,9 +289,55 @@ func (j *JobGetter) StructJob(jpath string) (*structs.Job, error) {
 	// Parse the JobFile
 	jobStruct, err := jobspec.Parse(jobfile)
 	if err != nil {
-		fmt.Errorf("Error parsing job file from %s: %v", jpath, err)
-		return nil, err
+		return nil, fmt.Errorf("Error parsing job file from %s: %v", jpath, err)
 	}
 
 	return jobStruct, nil
+}
+
+// COMPAT: Remove in 0.7.0
+// Nomad 0.6.0 introduces the submit time field so CLI's interacting with
+// older versions of Nomad would SEGFAULT as reported here:
+// https://github.com/hashicorp/nomad/issues/2918
+// getSubmitTime returns a submit time of the job converting to time.Time
+func getSubmitTime(job *api.Job) time.Time {
+	if job.SubmitTime != nil {
+		return time.Unix(0, *job.SubmitTime)
+	}
+
+	return time.Time{}
+}
+
+// COMPAT: Remove in 0.7.0
+// Nomad 0.6.0 introduces job Versions so CLI's interacting with
+// older versions of Nomad would SEGFAULT as reported here:
+// https://github.com/hashicorp/nomad/issues/2918
+// getVersion returns a version of the job in safely.
+func getVersion(job *api.Job) uint64 {
+	if job.Version != nil {
+		return *job.Version
+	}
+
+	return 0
+}
+
+// mergeAutocompleteFlags is used to join multiple flag completion sets.
+func mergeAutocompleteFlags(flags ...complete.Flags) complete.Flags {
+	merged := make(map[string]complete.Predictor, len(flags))
+	for _, f := range flags {
+		for k, v := range f {
+			merged[k] = v
+		}
+	}
+	return merged
+}
+
+// sanatizeUUIDPrefix is used to sanatize a UUID prefix. The returned result
+// will be a truncated version of the prefix if the prefix would not be
+// queriable.
+func sanatizeUUIDPrefix(prefix string) string {
+	hyphens := strings.Count(prefix, "-")
+	length := len(prefix) - hyphens
+	remainder := length % 2
+	return prefix[:len(prefix)-remainder]
 }

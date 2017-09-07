@@ -52,14 +52,14 @@ job "docs" {
 
 ## `network` Parameters
 
-- `mbits` `(int: <required>)` - Specifies the bandwidth required in MBits.
+- `mbits` `(int: 10)` - Specifies the bandwidth required in MBits.
 
-- `port` <code>([Port](#port-parameters): nil)</code> - Specifies a port
+- `port` <code>([Port](#port-parameters): nil)</code> - Specifies a TCP/UDP port
   allocation and can be used to specify both dynamic ports and reserved ports.
 
 ### `port` Parameters
 
-- `static` `(int: nil)` - Specifies the static port to allocate. If omitted, a dynamic port is chosen. We **do not recommend**  using static ports, except
+- `static` `(int: nil)` - Specifies the static TCP/UDP port to allocate. If omitted, a dynamic port is chosen. We **do not recommend**  using static ports, except
   for `system` or specialized jobs like load balancers.
 
 The label assigned to the port is used to identify the port in service
@@ -85,7 +85,7 @@ The following examples only show the `network` stanzas. Remember that the
 
 ### Bandwidth
 
-This example specifies a resource requirement of 1BGits in bandwidth:
+This example specifies a resource requirement of 1 Gbit in bandwidth:
 
 ```hcl
 network {

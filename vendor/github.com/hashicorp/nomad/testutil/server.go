@@ -21,9 +21,10 @@ import (
 	"os"
 	"os/exec"
 	"sync/atomic"
-	"testing"
 
 	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/nomad/helper/discover"
+	"github.com/mitchellh/go-testing-interface"
 )
 
 // offset is used to atomically increment the port numbers.
@@ -41,6 +42,7 @@ type TestServerConfig struct {
 	Server            *ServerConfig `json:"server,omitempty"`
 	Client            *ClientConfig `json:"client,omitempty"`
 	Vault             *VaultConfig  `json:"vault,omitempty"`
+	ACL               *ACLConfig    `json:"acl,omitempty"`
 	DevMode           bool          `json:"-"`
 	Stdout, Stderr    io.Writer     `json:"-"`
 }
@@ -72,6 +74,11 @@ type ClientConfig struct {
 
 // VaultConfig is used to configure Vault
 type VaultConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ACLConfig is used to configure ACLs
+type ACLConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
@@ -109,6 +116,9 @@ func defaultServerConfig() *TestServerConfig {
 		Vault: &VaultConfig{
 			Enabled: false,
 		},
+		ACL: &ACLConfig{
+			Enabled: false,
+		},
 	}
 }
 
@@ -116,7 +126,7 @@ func defaultServerConfig() *TestServerConfig {
 type TestServer struct {
 	cmd    *exec.Cmd
 	Config *TestServerConfig
-	t      *testing.T
+	t      testing.T
 
 	HTTPAddr   string
 	SerfAddr   string
@@ -125,9 +135,18 @@ type TestServer struct {
 
 // NewTestServer creates a new TestServer, and makes a call to
 // an optional callback function to modify the configuration.
-func NewTestServer(t *testing.T, cb ServerConfigCallback) *TestServer {
-	if path, err := exec.LookPath("nomad"); err != nil || path == "" {
-		t.Skip("nomad not found on $PATH, skipping")
+func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
+	path, err := discover.NomadExecutable()
+	if err != nil {
+		t.Skipf("nomad not found, skipping: %v", err)
+	}
+
+	// Do a sanity check that we are actually running nomad
+	vcmd := exec.Command(path, "-version")
+	vcmd.Stdout = nil
+	vcmd.Stderr = nil
+	if err := vcmd.Run(); err != nil {
+		t.Skipf("nomad version failed. Did you run your test with -tags nomad_test (%v)", err)
 	}
 
 	dataDir, err := ioutil.TempDir("", "nomad")
@@ -175,7 +194,7 @@ func NewTestServer(t *testing.T, cb ServerConfigCallback) *TestServer {
 	}
 
 	// Start the server
-	cmd := exec.Command("nomad", args...)
+	cmd := exec.Command(path, args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {

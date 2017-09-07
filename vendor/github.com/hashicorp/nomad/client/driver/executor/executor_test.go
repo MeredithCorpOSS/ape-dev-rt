@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,7 +12,7 @@ import (
 
 	"github.com/hashicorp/nomad/client/allocdir"
 	"github.com/hashicorp/nomad/client/driver/env"
-	"github.com/hashicorp/nomad/client/testutil"
+	cstructs "github.com/hashicorp/nomad/client/structs"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
 	tu "github.com/hashicorp/nomad/testutil"
@@ -33,34 +32,42 @@ var (
 	}
 )
 
-func mockAllocDir(t *testing.T) (*structs.Task, *allocdir.AllocDir) {
-	alloc := mock.Alloc()
-	task := alloc.Job.TaskGroups[0].Tasks[0]
-
-	allocDir := allocdir.NewAllocDir(filepath.Join(os.TempDir(), alloc.ID))
-	if err := allocDir.Build([]*structs.Task{task}); err != nil {
-		log.Panicf("allocDir.Build() failed: %v", err)
-	}
-
-	return task, allocDir
+func testLogger() *log.Logger {
+	return log.New(os.Stderr, "", log.LstdFlags)
 }
 
-func testExecutorContext(t *testing.T) *ExecutorContext {
-	taskEnv := env.NewTaskEnvironment(mock.Node())
-	task, allocDir := mockAllocDir(t)
-	ctx := &ExecutorContext{
-		TaskEnv:  taskEnv,
-		Task:     task,
-		AllocDir: allocDir,
+// testExecutorContext returns an ExecutorContext and AllocDir.
+//
+// The caller is responsible for calling AllocDir.Destroy() to cleanup.
+func testExecutorContext(t *testing.T) (*ExecutorContext, *allocdir.AllocDir) {
+	alloc := mock.Alloc()
+	task := alloc.Job.TaskGroups[0].Tasks[0]
+	taskEnv := env.NewBuilder(mock.Node(), alloc, task, "global").Build()
+
+	allocDir := allocdir.NewAllocDir(testLogger(), filepath.Join(os.TempDir(), alloc.ID))
+	if err := allocDir.Build(); err != nil {
+		log.Fatalf("AllocDir.Build() failed: %v", err)
 	}
-	return ctx
+	if err := allocDir.NewTaskDir(task.Name).Build(false, nil, cstructs.FSIsolationNone); err != nil {
+		allocDir.Destroy()
+		log.Fatalf("allocDir.NewTaskDir(%q) failed: %v", task.Name, err)
+	}
+	td := allocDir.TaskDirs[task.Name]
+	ctx := &ExecutorContext{
+		TaskEnv: taskEnv,
+		Task:    task,
+		TaskDir: td.Dir,
+		LogDir:  td.LogDir,
+	}
+	return ctx, allocDir
 }
 
 func TestExecutor_Start_Invalid(t *testing.T) {
+	t.Parallel()
 	invalid := "/bin/foobar"
 	execCmd := ExecCommand{Cmd: invalid, Args: []string{"1"}}
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
+	ctx, allocDir := testExecutorContext(t)
+	defer allocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	if err := executor.SetContext(ctx); err != nil {
@@ -73,9 +80,10 @@ func TestExecutor_Start_Invalid(t *testing.T) {
 }
 
 func TestExecutor_Start_Wait_Failure_Code(t *testing.T) {
-	execCmd := ExecCommand{Cmd: "/bin/sleep", Args: []string{"fail"}}
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
+	t.Parallel()
+	execCmd := ExecCommand{Cmd: "/bin/date", Args: []string{"fail"}}
+	ctx, allocDir := testExecutorContext(t)
+	defer allocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	if err := executor.SetContext(ctx); err != nil {
@@ -100,9 +108,10 @@ func TestExecutor_Start_Wait_Failure_Code(t *testing.T) {
 }
 
 func TestExecutor_Start_Wait(t *testing.T) {
+	t.Parallel()
 	execCmd := ExecCommand{Cmd: "/bin/echo", Args: []string{"hello world"}}
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
+	ctx, allocDir := testExecutorContext(t)
+	defer allocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	if err := executor.SetContext(ctx); err != nil {
@@ -125,7 +134,7 @@ func TestExecutor_Start_Wait(t *testing.T) {
 	}
 
 	expected := "hello world"
-	file := filepath.Join(ctx.AllocDir.LogDir(), "web.stdout.0")
+	file := filepath.Join(ctx.LogDir, "web.stdout.0")
 	output, err := ioutil.ReadFile(file)
 	if err != nil {
 		t.Fatalf("Couldn't read file %v", file)
@@ -138,9 +147,10 @@ func TestExecutor_Start_Wait(t *testing.T) {
 }
 
 func TestExecutor_WaitExitSignal(t *testing.T) {
+	t.Parallel()
 	execCmd := ExecCommand{Cmd: "/bin/sleep", Args: []string{"10000"}}
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
+	ctx, allocDir := testExecutorContext(t)
+	defer allocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	if err := executor.SetContext(ctx); err != nil {
@@ -153,13 +163,13 @@ func TestExecutor_WaitExitSignal(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(3 * time.Second)
+		time.Sleep(2 * time.Second)
 		ru, err := executor.Stats()
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		if len(ru.Pids) != 2 {
-			t.Fatalf("expected number of pids: 2, actual: %v", len(ru.Pids))
+		if len(ru.Pids) == 0 {
+			t.Fatalf("expected pids")
 		}
 		proc, err := os.FindProcess(ps.Pid)
 		if err != nil {
@@ -179,56 +189,11 @@ func TestExecutor_WaitExitSignal(t *testing.T) {
 	}
 }
 
-func TestExecutor_ClientCleanup(t *testing.T) {
-	testutil.ExecCompatible(t)
-
-	execCmd := ExecCommand{Cmd: "/bin/bash", Args: []string{"-c", "/usr/bin/yes"}}
-	ctx := testExecutorContext(t)
-	ctx.Task.LogConfig.MaxFiles = 1
-	ctx.Task.LogConfig.MaxFileSizeMB = 300
-	defer ctx.AllocDir.Destroy()
-
-	execCmd.FSIsolation = true
-	execCmd.ResourceLimits = true
-	execCmd.User = "nobody"
-
-	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
-
-	if err := executor.SetContext(ctx); err != nil {
-		t.Fatalf("Unexpected error")
-	}
-
-	ps, err := executor.LaunchCmd(&execCmd)
-	if err != nil {
-		t.Fatalf("error in launching command: %v", err)
-	}
-	if ps.Pid == 0 {
-		t.Fatalf("expected process to start and have non zero pid")
-	}
-	time.Sleep(200 * time.Millisecond)
-	if err := executor.Exit(); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-
-	file := filepath.Join(ctx.AllocDir.LogDir(), "web.stdout.0")
-	finfo, err := os.Stat(file)
-	if err != nil {
-		t.Fatalf("error stating stdout file: %v", err)
-	}
-	time.Sleep(1 * time.Second)
-	finfo1, err := os.Stat(file)
-	if err != nil {
-		t.Fatalf("error stating stdout file: %v", err)
-	}
-	if finfo.Size() != finfo1.Size() {
-		t.Fatalf("Expected size: %v, actual: %v", finfo.Size(), finfo1.Size())
-	}
-}
-
 func TestExecutor_Start_Kill(t *testing.T) {
+	t.Parallel()
 	execCmd := ExecCommand{Cmd: "/bin/sleep", Args: []string{"10 && hello world"}}
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
+	ctx, allocDir := testExecutorContext(t)
+	defer allocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	if err := executor.SetContext(ctx); err != nil {
@@ -250,7 +215,7 @@ func TestExecutor_Start_Kill(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 
-	file := filepath.Join(ctx.AllocDir.LogDir(), "web.stdout.0")
+	file := filepath.Join(ctx.LogDir, "web.stdout.0")
 	time.Sleep(time.Duration(tu.TestMultiplier()*2) * time.Second)
 
 	output, err := ioutil.ReadFile(file)
@@ -266,6 +231,7 @@ func TestExecutor_Start_Kill(t *testing.T) {
 }
 
 func TestExecutor_MakeExecutable(t *testing.T) {
+	t.Parallel()
 	// Create a temp file
 	f, err := ioutil.TempFile("", "")
 	if err != nil {
@@ -278,8 +244,6 @@ func TestExecutor_MakeExecutable(t *testing.T) {
 	f.Chmod(os.FileMode(0610))
 
 	// Make a fake exececutor
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
 
 	err = executor.(*UniversalExecutor).makeExecutable(f.Name())
@@ -296,36 +260,12 @@ func TestExecutor_MakeExecutable(t *testing.T) {
 	act := stat.Mode().Perm()
 	exp := os.FileMode(0755)
 	if act != exp {
-		t.Fatalf("expected permissions %v; got %v", err)
-	}
-}
-
-func TestExecutorInterpolateServices(t *testing.T) {
-	task := mock.Job().TaskGroups[0].Tasks[0]
-	// Make a fake exececutor
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
-	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags))
-
-	executor.(*UniversalExecutor).ctx = ctx
-	executor.(*UniversalExecutor).interpolateServices(task)
-	expectedTags := []string{"pci:true", "datacenter:dc1"}
-	if !reflect.DeepEqual(task.Services[0].Tags, expectedTags) {
-		t.Fatalf("expected: %v, actual: %v", expectedTags, task.Services[0].Tags)
-	}
-
-	expectedCheckCmd := "/usr/local/check-table-mysql"
-	expectedCheckArgs := []string{"5.6"}
-	if !reflect.DeepEqual(task.Services[0].Checks[0].Command, expectedCheckCmd) {
-		t.Fatalf("expected: %v, actual: %v", expectedCheckCmd, task.Services[0].Checks[0].Command)
-	}
-
-	if !reflect.DeepEqual(task.Services[0].Checks[0].Args, expectedCheckArgs) {
-		t.Fatalf("expected: %v, actual: %v", expectedCheckArgs, task.Services[0].Checks[0].Args)
+		t.Fatalf("expected permissions %v; got %v", exp, act)
 	}
 }
 
 func TestScanPids(t *testing.T) {
+	t.Parallel()
 	p1 := NewFakeProcess(2, 5)
 	p2 := NewFakeProcess(10, 2)
 	p3 := NewFakeProcess(15, 6)
@@ -333,8 +273,6 @@ func TestScanPids(t *testing.T) {
 	p5 := NewFakeProcess(20, 18)
 
 	// Make a fake exececutor
-	ctx := testExecutorContext(t)
-	defer ctx.AllocDir.Destroy()
 	executor := NewExecutor(log.New(os.Stdout, "", log.LstdFlags)).(*UniversalExecutor)
 
 	nomadPids, err := executor.scanPids(5, []ps.Process{p1, p2, p3, p4, p5})

@@ -57,8 +57,8 @@ type templateData struct {
 // path for a total of 100.
 //
 type DedupManager struct {
-	// config is the consul-template configuration
-	config *config.Config
+	// config is the deduplicate configuration
+	config *config.DedupConfig
 
 	// clients is used to access the underlying clinets
 	clients *dep.ClientSet
@@ -89,7 +89,7 @@ type DedupManager struct {
 }
 
 // NewDedupManager creates a new Dedup manager
-func NewDedupManager(config *config.Config, clients *dep.ClientSet, brain *template.Brain, templates []*template.Template) (*DedupManager, error) {
+func NewDedupManager(config *config.DedupConfig, clients *dep.ClientSet, brain *template.Brain, templates []*template.Template) (*DedupManager, error) {
 	d := &DedupManager{
 		config:    config,
 		clients:   clients,
@@ -107,10 +107,7 @@ func NewDedupManager(config *config.Config, clients *dep.ClientSet, brain *templ
 func (d *DedupManager) Start() error {
 	log.Printf("[INFO] (dedup) starting de-duplication manager")
 
-	client, err := d.clients.Consul()
-	if err != nil {
-		return err
-	}
+	client := d.clients.Consul()
 	go d.createSession(client)
 
 	// Start to watch each template
@@ -141,7 +138,7 @@ START:
 	log.Printf("[INFO] (dedup) attempting to create session")
 	session := client.Session()
 	sessionCh := make(chan struct{})
-	ttl := fmt.Sprintf("%ds", d.config.Deduplicate.TTL/time.Second)
+	ttl := fmt.Sprintf("%.6fs", float64(*d.config.TTL)/float64(time.Second))
 	se := &consulapi.SessionEntry{
 		Name:     "Consul-Template de-duplication",
 		Behavior: "delete",
@@ -163,9 +160,9 @@ START:
 	// Renew our session periodically
 	if err := session.RenewPeriodic("15s", id, nil, d.stopCh); err != nil {
 		log.Printf("[ERR] (dedup) failed to renew session: %v", err)
-		d.wg.Wait()
 	}
 	close(sessionCh)
+	d.wg.Wait()
 
 WAIT:
 	select {
@@ -196,7 +193,7 @@ func (d *DedupManager) IsLeader(tmpl *template.Template) bool {
 // UpdateDeps is used to update the values of the dependencies for a template
 func (d *DedupManager) UpdateDeps(t *template.Template, deps []dep.Dependency) error {
 	// Calculate the path to write updates to
-	dataPath := path.Join(d.config.Deduplicate.Prefix, t.HexMD5, "data")
+	dataPath := path.Join(*d.config.Prefix, t.ID(), "data")
 
 	// Package up the dependency data
 	td := templateData{
@@ -211,7 +208,7 @@ func (d *DedupManager) UpdateDeps(t *template.Template, deps []dep.Dependency) e
 		// Pull the current value from the brain
 		val, ok := d.brain.Recall(dp)
 		if ok {
-			td.Data[dp.HashCode()] = val
+			td.Data[dp.String()] = val
 		}
 	}
 
@@ -241,10 +238,7 @@ func (d *DedupManager) UpdateDeps(t *template.Template, deps []dep.Dependency) e
 		Value: buf.Bytes(),
 		Flags: templateDataFlag,
 	}
-	client, err := d.clients.Consul()
-	if err != nil {
-		return fmt.Errorf("failed to get consul client: %v", err)
-	}
+	client := d.clients.Consul()
 	if _, err := client.KV().Put(&kvPair, nil); err != nil {
 		return fmt.Errorf("failed to write '%s': %v", dataPath, err)
 	}
@@ -286,12 +280,12 @@ func (d *DedupManager) setLeader(tmpl *template.Template, lockCh <-chan struct{}
 }
 
 func (d *DedupManager) watchTemplate(client *consulapi.Client, t *template.Template) {
-	log.Printf("[INFO] (dedup) starting watch for template hash %s", t.HexMD5)
-	path := path.Join(d.config.Deduplicate.Prefix, t.HexMD5, "data")
+	log.Printf("[INFO] (dedup) starting watch for template hash %s", t.ID())
+	path := path.Join(*d.config.Prefix, t.ID(), "data")
 
 	// Determine if stale queries are allowed
 	var allowStale bool
-	if d.config.MaxStale != 0 {
+	if *d.config.MaxStale != 0 {
 		allowStale = true
 	}
 
@@ -300,6 +294,9 @@ func (d *DedupManager) watchTemplate(client *consulapi.Client, t *template.Templ
 		AllowStale: allowStale,
 		WaitTime:   60 * time.Second,
 	}
+
+	var lastData []byte
+	var lastIndex uint64
 
 START:
 	// Stop listening if we're stopped
@@ -323,7 +320,7 @@ START:
 	}
 
 	// Block for updates on the data key
-	log.Printf("[INFO] (dedup) listing data for template hash %s", t.HexMD5)
+	log.Printf("[INFO] (dedup) listing data for template hash %s", t.ID())
 	pair, meta, err := client.KV().Get(path, opts)
 	if err != nil {
 		log.Printf("[ERR] (dedup) failed to get '%s': %v", path, err)
@@ -336,24 +333,46 @@ START:
 	}
 	opts.WaitIndex = meta.LastIndex
 
-	// If we've exceeded the maximum staleness, retry without stale
-	if allowStale && meta.LastContact > d.config.MaxStale {
-		allowStale = false
-		log.Printf("[DEBUG] (dedup) %s stale data (last contact exceeded max_stale)", path)
-		goto START
-	}
-
-	// Re-enable stale queries if allowed
-	if d.config.MaxStale != 0 {
-		allowStale = true
-	}
-
 	// Stop listening if we're stopped
 	select {
 	case <-d.stopCh:
 		return
 	default:
 	}
+
+	// If we've exceeded the maximum staleness, retry without stale
+	if allowStale && meta.LastContact > *d.config.MaxStale {
+		allowStale = false
+		log.Printf("[DEBUG] (dedup) %s stale data (last contact exceeded max_stale)", path)
+		goto START
+	}
+
+	// Re-enable stale queries if allowed
+	if *d.config.MaxStale > 0 {
+		allowStale = true
+	}
+
+	if meta.LastIndex == lastIndex {
+		log.Printf("[TRACE] (dedup) %s no new data (index was the same)", path)
+		goto START
+	}
+
+	if meta.LastIndex < lastIndex {
+		log.Printf("[TRACE] (dedup) %s had a lower index, resetting", path)
+		lastIndex = 0
+		goto START
+	}
+	lastIndex = meta.LastIndex
+
+	var data []byte
+	if pair != nil {
+		data = pair.Value
+	}
+	if bytes.Equal(lastData, data) {
+		log.Printf("[TRACE] (dedup) %s no new data (contents were the same)", path)
+		goto START
+	}
+	lastData = data
 
 	// If we are current the leader, wait for leadership lost
 	d.leaderLock.RLock()
@@ -407,47 +426,50 @@ func (d *DedupManager) parseData(path string, raw []byte) {
 
 func (d *DedupManager) attemptLock(client *consulapi.Client, session string, sessionCh chan struct{}, t *template.Template) {
 	defer d.wg.Done()
-START:
-	log.Printf("[INFO] (dedup) attempting lock for template hash %s", t.HexMD5)
-	basePath := path.Join(d.config.Deduplicate.Prefix, t.HexMD5)
-	lopts := &consulapi.LockOptions{
-		Key:              path.Join(basePath, "lock"),
-		Session:          session,
-		MonitorRetries:   3,
-		MonitorRetryTime: 3 * time.Second,
-	}
-	lock, err := client.LockOpts(lopts)
-	if err != nil {
-		log.Printf("[ERR] (dedup) failed to create lock '%s': %v",
-			lopts.Key, err)
-		return
-	}
+	for {
+		log.Printf("[INFO] (dedup) attempting lock for template hash %s", t.ID())
+		basePath := path.Join(*d.config.Prefix, t.ID())
+		lopts := &consulapi.LockOptions{
+			Key:              path.Join(basePath, "lock"),
+			Session:          session,
+			MonitorRetries:   3,
+			MonitorRetryTime: 3 * time.Second,
+		}
+		lock, err := client.LockOpts(lopts)
+		if err != nil {
+			log.Printf("[ERR] (dedup) failed to create lock '%s': %v",
+				lopts.Key, err)
+			return
+		}
 
-	var retryCh <-chan time.Time
-	leaderCh, err := lock.Lock(sessionCh)
-	if err != nil {
-		log.Printf("[ERR] (dedup) failed to acquire lock '%s': %v",
-			lopts.Key, err)
-		retryCh = time.After(lockRetry)
-	} else {
-		log.Printf("[INFO] (dedup) acquired lock '%s'", lopts.Key)
-		d.setLeader(t, leaderCh)
-	}
+		var retryCh <-chan time.Time
+		leaderCh, err := lock.Lock(sessionCh)
+		if err != nil {
+			log.Printf("[ERR] (dedup) failed to acquire lock '%s': %v",
+				lopts.Key, err)
+			retryCh = time.After(lockRetry)
+		} else {
+			log.Printf("[INFO] (dedup) acquired lock '%s'", lopts.Key)
+			d.setLeader(t, leaderCh)
+		}
 
-	select {
-	case <-retryCh:
-		retryCh = nil
-		goto START
-	case <-leaderCh:
-		log.Printf("[WARN] (dedup) lost lock ownership '%s'", lopts.Key)
-		d.setLeader(t, nil)
-		goto START
-	case <-sessionCh:
-		log.Printf("[INFO] (dedup) releasing lock '%s'", lopts.Key)
-		d.setLeader(t, nil)
-		lock.Unlock()
-	case <-d.stopCh:
-		log.Printf("[INFO] (dedup) releasing lock '%s'", lopts.Key)
-		lock.Unlock()
+		select {
+		case <-retryCh:
+			retryCh = nil
+			continue
+		case <-leaderCh:
+			log.Printf("[WARN] (dedup) lost lock ownership '%s'", lopts.Key)
+			d.setLeader(t, nil)
+			continue
+		case <-sessionCh:
+			log.Printf("[INFO] (dedup) releasing session '%s'", lopts.Key)
+			d.setLeader(t, nil)
+			lock.Unlock()
+			return
+		case <-d.stopCh:
+			log.Printf("[INFO] (dedup) releasing lock '%s'", lopts.Key)
+			lock.Unlock()
+			return
+		}
 	}
 }

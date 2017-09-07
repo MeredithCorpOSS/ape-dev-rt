@@ -24,9 +24,9 @@ description: |-
 </table>
 
 The `constraint` allows restricting the set of eligible nodes. Constraints may
-filter on [attributes][interpolation] or [metadata][meta]. Additionally
-constraints may be specified at the [job][job], [group][group], or [task][task]
-levels for ultimate flexibility.
+filter on [attributes][interpolation] or [client metadata][client-meta].
+Additionally constraints may be specified at the [job][job], [group][group], or
+[task][task] levels for ultimate flexibility.
 
 ```hcl
 job "docs" {
@@ -65,7 +65,7 @@ all groups (and tasks) in the job.
   to examine for the constraint. This can be any of the [Nomad interpolated
   values](/docs/runtime/interpolation.html#interpreted_node_vars).
 
-- `operator` `(string: "=")` - Specifies the comparison operator.The ordering is
+- `operator` `(string: "=")` - Specifies the comparison operator. The ordering is
   compared lexically. Possible values include:
 
     ```text
@@ -75,6 +75,8 @@ all groups (and tasks) in the job.
     >=
     <
     <=
+    distinct_hosts
+    distinct_property
     regexp
     set_contains
     version
@@ -104,13 +106,48 @@ constraint {
 - `"distinct_hosts"` - Instructs the scheduler to not co-locate any groups on
   the same machine. When specified as a job constraint, it applies to all groups
   in the job. When specified as a group constraint, the effect is constrained to
-  that group. Note that the `attribute` parameter should be omitted when using
-  this constraint.
+  that group. This constraint can not be specified at the task level. Note that
+  the `attribute` parameter should be omitted when using this constraint.
 
     ```hcl
     constraint {
       operator  = "distinct_hosts"
       value     = "true"
+    }
+    ```
+
+    The constraint may also be specified as follows for a more compact
+    representation:
+
+    ```hcl
+    constraint {
+        distinct_hosts = true
+    }
+    ```
+
+- `"distinct_property"` - Instructs the scheduler to select nodes that have a
+  distinct value of the specified property. The `value` parameter specifies how
+  many allocations are allowed to share the value of a property. The `value`
+  must be 1 or greater and if omitted, defaults to 1.  When specified as a job
+  constraint, it applies to all groups in the job. When specified as a group
+  constraint, the effect is constrained to that group. This constraint can not
+  be specified at the task level. 
+
+    ```hcl
+    constraint {
+      operator  = "distinct_property"
+      attribute = "${meta.rack}"
+      value     = "3"
+    }
+    ```
+
+    The constraint may also be specified as follows for a more compact
+    representation:
+
+    ```hcl
+    constraint {
+      distinct_property = "${meta.rack}"
+      value     = "3"
     }
     ```
 
@@ -172,6 +209,22 @@ constraint {
 }
 ```
 
+### Distinct Property
+
+A potential use case of the `distinct_property` constraint is to spread a
+service with `count > 1` across racks to minimize correlated failure. Nodes can
+be annotated with which rack they are on using [client
+metadata][client-metadata] with values such as "rack-12-1", "rack-12-2", etc.
+The following constraint would assure that an individual rack is not running
+more than 2 instances of the task group.
+
+```hcl
+constraint {
+  distinct_property = "${meta.rack}"
+  value = "2"
+}
+```
+
 ### Operating Systems
 
 This example restricts the task to running on nodes that are running Ubuntu
@@ -210,13 +263,13 @@ utilizing node [metadata][meta].
 
 ```hcl
 constraint {
-  attribute    = "${node.meta.cached_binaries}"
+  attribute    = "${meta.cached_binaries}"
   set_contains = "redis,cypress,nginx"
 }
 ```
 
 [job]: /docs/job-specification/job.html "Nomad job Job Specification"
 [group]: /docs/job-specification/group.html "Nomad group Job Specification"
-[meta]: /docs/job-specification/meta.html "Nomad meta Job Specification"
+[client-meta]: /docs/agent/configuration/client.html#meta "Nomad meta Job Specification"
 [task]: /docs/job-specification/task.html "Nomad task Job Specification"
 [interpolation]: /docs/runtime/interpolation.html "Nomad interpolation"

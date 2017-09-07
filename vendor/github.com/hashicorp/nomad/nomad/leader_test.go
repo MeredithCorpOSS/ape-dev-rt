@@ -3,12 +3,16 @@ package nomad
 import (
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/mock"
+	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/testutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLeader_LeftServer(t *testing.T) {
@@ -29,8 +33,8 @@ func TestLeader_LeftServer(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -48,8 +52,8 @@ func TestLeader_LeftServer(t *testing.T) {
 		}
 
 		for _, s := range servers[1:] {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 2, errors.New(fmt.Sprintf("%v", peers))
+			peers, _ := s.numPeers()
+			return peers == 2, errors.New(fmt.Sprintf("%v", peers))
 		}
 
 		return true, nil
@@ -76,8 +80,8 @@ func TestLeader_LeftLeader(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -102,8 +106,8 @@ func TestLeader_LeftLeader(t *testing.T) {
 			continue
 		}
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 2, errors.New(fmt.Sprintf("%v", peers))
+			peers, _ := s.numPeers()
+			return peers == 2, errors.New(fmt.Sprintf("%v", peers))
 		}, func(err error) {
 			t.Fatalf("should have 2 peers: %v", err)
 		})
@@ -130,8 +134,8 @@ func TestLeader_MultiBootstrap(t *testing.T) {
 
 	// Ensure we don't have multiple raft peers
 	for _, s := range servers {
-		peers, _ := s.raftPeers.Peers()
-		if len(peers) != 1 {
+		peers, _ := s.numPeers()
+		if peers != 1 {
 			t.Fatalf("should only have 1 raft peer!")
 		}
 	}
@@ -155,8 +159,8 @@ func TestLeader_PlanQueue_Reset(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -232,8 +236,8 @@ func TestLeader_EvalBroker_Reset(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -309,8 +313,8 @@ func TestLeader_PeriodicDispatcher_Restore_Adds(t *testing.T) {
 
 	for _, s := range servers {
 		testutil.WaitForResult(func() (bool, error) {
-			peers, _ := s.raftPeers.Peers()
-			return len(peers) == 3, nil
+			peers, _ := s.numPeers()
+			return peers == 3, nil
 		}, func(err error) {
 			t.Fatalf("should have 3 peers")
 		})
@@ -327,10 +331,12 @@ func TestLeader_PeriodicDispatcher_Restore_Adds(t *testing.T) {
 		t.Fatalf("Should have a leader")
 	}
 
-	// Inject a periodic job and non-periodic job
+	// Inject a periodic job, a parameterized periodic job and a non-periodic job
 	periodic := mock.PeriodicJob()
 	nonPeriodic := mock.Job()
-	for _, job := range []*structs.Job{nonPeriodic, periodic} {
+	parameterizedPeriodic := mock.PeriodicJob()
+	parameterizedPeriodic.ParameterizedJob = &structs.ParameterizedJobConfig{}
+	for _, job := range []*structs.Job{nonPeriodic, periodic, parameterizedPeriodic} {
 		req := structs.JobRegisterRequest{
 			Job: job,
 		}
@@ -358,12 +364,20 @@ func TestLeader_PeriodicDispatcher_Restore_Adds(t *testing.T) {
 		t.Fatalf("should have leader")
 	})
 
-	// Check that the new leader is tracking the periodic job.
+	// Check that the new leader is tracking the periodic job only
 	testutil.WaitForResult(func() (bool, error) {
-		_, tracked := leader.periodicDispatcher.tracked[periodic.ID]
-		return tracked, nil
+		if _, tracked := leader.periodicDispatcher.tracked[periodic.ID]; !tracked {
+			return false, fmt.Errorf("periodic job not tracked")
+		}
+		if _, tracked := leader.periodicDispatcher.tracked[nonPeriodic.ID]; tracked {
+			return false, fmt.Errorf("non periodic job tracked")
+		}
+		if _, tracked := leader.periodicDispatcher.tracked[parameterizedPeriodic.ID]; tracked {
+			return false, fmt.Errorf("parameterized periodic job tracked")
+		}
+		return true, nil
 	}, func(err error) {
-		t.Fatalf("periodic job not tracked")
+		t.Fatalf(err.Error())
 	})
 }
 
@@ -397,7 +411,6 @@ func TestLeader_PeriodicDispatcher_Restore_NoEvals(t *testing.T) {
 
 	// Restore the periodic dispatcher.
 	s1.periodicDispatcher.SetEnabled(true)
-	s1.periodicDispatcher.Start()
 	s1.restorePeriodicDispatcher()
 
 	// Ensure the job is tracked.
@@ -406,7 +419,8 @@ func TestLeader_PeriodicDispatcher_Restore_NoEvals(t *testing.T) {
 	}
 
 	// Check that an eval was made.
-	last, err := s1.fsm.State().PeriodicLaunchByID(job.ID)
+	ws := memdb.NewWatchSet()
+	last, err := s1.fsm.State().PeriodicLaunchByID(ws, job.ID)
 	if err != nil || last == nil {
 		t.Fatalf("failed to get periodic launch time: %v", err)
 	}
@@ -448,7 +462,6 @@ func TestLeader_PeriodicDispatcher_Restore_Evals(t *testing.T) {
 
 	// Restore the periodic dispatcher.
 	s1.periodicDispatcher.SetEnabled(true)
-	s1.periodicDispatcher.Start()
 	s1.restorePeriodicDispatcher()
 
 	// Ensure the job is tracked.
@@ -457,7 +470,8 @@ func TestLeader_PeriodicDispatcher_Restore_Evals(t *testing.T) {
 	}
 
 	// Check that an eval was made.
-	last, err := s1.fsm.State().PeriodicLaunchByID(job.ID)
+	ws := memdb.NewWatchSet()
+	last, err := s1.fsm.State().PeriodicLaunchByID(ws, job.ID)
 	if err != nil || last == nil {
 		t.Fatalf("failed to get periodic launch time: %v", err)
 	}
@@ -505,14 +519,53 @@ func TestLeader_ReapFailedEval(t *testing.T) {
 	}
 	s1.evalBroker.Nack(out.ID, token)
 
-	// Wait updated evaluation
+	// Wait for an updated and followup evaluation
 	state := s1.fsm.State()
 	testutil.WaitForResult(func() (bool, error) {
-		out, err := state.EvalByID(eval.ID)
+		ws := memdb.NewWatchSet()
+		out, err := state.EvalByID(ws, eval.ID)
 		if err != nil {
 			return false, err
 		}
-		return out != nil && out.Status == structs.EvalStatusFailed, nil
+		if out == nil {
+			return false, fmt.Errorf("expect original evaluation to exist")
+		}
+		if out.Status != structs.EvalStatusFailed {
+			return false, fmt.Errorf("got status %v; want %v", out.Status, structs.EvalStatusFailed)
+		}
+
+		// See if there is a followup
+		evals, err := state.EvalsByJob(ws, eval.JobID)
+		if err != nil {
+			return false, err
+		}
+
+		if l := len(evals); l != 2 {
+			return false, fmt.Errorf("got %d evals, want 2", l)
+		}
+
+		for _, e := range evals {
+			if e.ID == eval.ID {
+				continue
+			}
+
+			if e.Status != structs.EvalStatusPending {
+				return false, fmt.Errorf("follow up eval has status %v; want %v",
+					e.Status, structs.EvalStatusPending)
+			}
+
+			if e.Wait < s1.config.EvalFailedFollowupBaselineDelay ||
+				e.Wait > s1.config.EvalFailedFollowupBaselineDelay+s1.config.EvalFailedFollowupDelayRange {
+				return false, fmt.Errorf("bad wait: %v", e.Wait)
+			}
+
+			if e.TriggeredBy != structs.EvalTriggerFailedFollowUp {
+				return false, fmt.Errorf("follow up eval TriggeredBy %v; want %v",
+					e.TriggeredBy, structs.EvalTriggerFailedFollowUp)
+			}
+		}
+
+		return true, nil
 	}, func(err error) {
 		t.Fatalf("err: %v", err)
 	})
@@ -535,7 +588,8 @@ func TestLeader_ReapDuplicateEval(t *testing.T) {
 	// Wait for the evaluation to marked as cancelled
 	state := s1.fsm.State()
 	testutil.WaitForResult(func() (bool, error) {
-		out, err := state.EvalByID(eval2.ID)
+		ws := memdb.NewWatchSet()
+		out, err := state.EvalByID(ws, eval2.ID)
 		if err != nil {
 			return false, err
 		}
@@ -571,4 +625,155 @@ func TestLeader_RestoreVaultAccessors(t *testing.T) {
 	if len(tvc.RevokedTokens) != 1 && tvc.RevokedTokens[0].Accessor != va.Accessor {
 		t.Fatalf("Bad revoked accessors: %v", tvc.RevokedTokens)
 	}
+}
+
+func TestLeader_ReplicateACLPolicies(t *testing.T) {
+	t.Parallel()
+	s1, root := testACLServer(t, func(c *Config) {
+		c.Region = "region1"
+		c.AuthoritativeRegion = "region1"
+		c.ACLEnabled = true
+	})
+	defer s1.Shutdown()
+	s2, _ := testACLServer(t, func(c *Config) {
+		c.Region = "region2"
+		c.AuthoritativeRegion = "region1"
+		c.ACLEnabled = true
+		c.ReplicationBackoff = 20 * time.Millisecond
+		c.ReplicationToken = root.SecretID
+	})
+	defer s2.Shutdown()
+	testJoin(t, s1, s2)
+	testutil.WaitForLeader(t, s1.RPC)
+	testutil.WaitForLeader(t, s2.RPC)
+
+	// Write a policy to the authoritative region
+	p1 := mock.ACLPolicy()
+	if err := s1.State().UpsertACLPolicies(100, []*structs.ACLPolicy{p1}); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Wait for the policy to replicate
+	testutil.WaitForResult(func() (bool, error) {
+		state := s2.State()
+		out, err := state.ACLPolicyByName(nil, p1.Name)
+		return out != nil, err
+	}, func(err error) {
+		t.Fatalf("should replicate policy")
+	})
+}
+
+func TestLeader_DiffACLPolicies(t *testing.T) {
+	t.Parallel()
+
+	state, err := state.NewStateStore(os.Stderr)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Populate the local state
+	p1 := mock.ACLPolicy()
+	p2 := mock.ACLPolicy()
+	p3 := mock.ACLPolicy()
+	err = state.UpsertACLPolicies(100, []*structs.ACLPolicy{p1, p2, p3})
+	assert.Nil(t, err)
+
+	// Simulate a remote list
+	p2Stub := p2.Stub()
+	p2Stub.ModifyIndex = 50 // Ignored, same index
+	p3Stub := p3.Stub()
+	p3Stub.ModifyIndex = 100 // Updated, higher index
+	p3Stub.Hash = []byte{0, 1, 2, 3}
+	p4 := mock.ACLPolicy()
+	remoteList := []*structs.ACLPolicyListStub{
+		p2Stub,
+		p3Stub,
+		p4.Stub(),
+	}
+	delete, update := diffACLPolicies(state, 50, remoteList)
+
+	// P1 does not exist on the remote side, should delete
+	assert.Equal(t, []string{p1.Name}, delete)
+
+	// P2 is un-modified - ignore. P3 modified, P4 new.
+	assert.Equal(t, []string{p3.Name, p4.Name}, update)
+}
+
+func TestLeader_ReplicateACLTokens(t *testing.T) {
+	t.Parallel()
+	s1, root := testACLServer(t, func(c *Config) {
+		c.Region = "region1"
+		c.AuthoritativeRegion = "region1"
+		c.ACLEnabled = true
+	})
+	defer s1.Shutdown()
+	s2, _ := testACLServer(t, func(c *Config) {
+		c.Region = "region2"
+		c.AuthoritativeRegion = "region1"
+		c.ACLEnabled = true
+		c.ReplicationBackoff = 20 * time.Millisecond
+		c.ReplicationToken = root.SecretID
+	})
+	defer s2.Shutdown()
+	testJoin(t, s1, s2)
+	testutil.WaitForLeader(t, s1.RPC)
+	testutil.WaitForLeader(t, s2.RPC)
+
+	// Write a token to the authoritative region
+	p1 := mock.ACLToken()
+	p1.Global = true
+	if err := s1.State().UpsertACLTokens(100, []*structs.ACLToken{p1}); err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+
+	// Wait for the token to replicate
+	testutil.WaitForResult(func() (bool, error) {
+		state := s2.State()
+		out, err := state.ACLTokenByAccessorID(nil, p1.AccessorID)
+		return out != nil, err
+	}, func(err error) {
+		t.Fatalf("should replicate token")
+	})
+}
+
+func TestLeader_DiffACLTokens(t *testing.T) {
+	t.Parallel()
+
+	state, err := state.NewStateStore(os.Stderr)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Populate the local state
+	p0 := mock.ACLToken()
+	p1 := mock.ACLToken()
+	p1.Global = true
+	p2 := mock.ACLToken()
+	p2.Global = true
+	p3 := mock.ACLToken()
+	p3.Global = true
+	err = state.UpsertACLTokens(100, []*structs.ACLToken{p0, p1, p2, p3})
+	assert.Nil(t, err)
+
+	// Simulate a remote list
+	p2Stub := p2.Stub()
+	p2Stub.ModifyIndex = 50 // Ignored, same index
+	p3Stub := p3.Stub()
+	p3Stub.ModifyIndex = 100 // Updated, higher index
+	p3Stub.Hash = []byte{0, 1, 2, 3}
+	p4 := mock.ACLToken()
+	p4.Global = true
+	remoteList := []*structs.ACLTokenListStub{
+		p2Stub,
+		p3Stub,
+		p4.Stub(),
+	}
+	delete, update := diffACLTokens(state, 50, remoteList)
+
+	// P0 is local and should be ignored
+	// P1 does not exist on the remote side, should delete
+	assert.Equal(t, []string{p1.AccessorID}, delete)
+
+	// P2 is un-modified - ignore. P3 modified, P4 new.
+	assert.Equal(t, []string{p3.AccessorID, p4.AccessorID}, update)
 }

@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/scheduler"
@@ -43,6 +44,8 @@ func (c *CoreScheduler) Process(eval *structs.Evaluation) error {
 		return c.nodeGC(eval)
 	case structs.CoreJobJobGC:
 		return c.jobGC(eval)
+	case structs.CoreJobDeploymentGC:
+		return c.deploymentGC(eval)
 	case structs.CoreJobForceGC:
 		return c.forceGC(eval)
 	default:
@@ -58,6 +61,9 @@ func (c *CoreScheduler) forceGC(eval *structs.Evaluation) error {
 	if err := c.evalGC(eval); err != nil {
 		return err
 	}
+	if err := c.deploymentGC(eval); err != nil {
+		return err
+	}
 
 	// Node GC must occur after the others to ensure the allocations are
 	// cleared.
@@ -67,7 +73,8 @@ func (c *CoreScheduler) forceGC(eval *structs.Evaluation) error {
 // jobGC is used to garbage collect eligible jobs.
 func (c *CoreScheduler) jobGC(eval *structs.Evaluation) error {
 	// Get all the jobs eligible for garbage collection.
-	iter, err := c.snap.JobsByGC(true)
+	ws := memdb.NewWatchSet()
+	iter, err := c.snap.JobsByGC(ws, true)
 	if err != nil {
 		return err
 	}
@@ -99,7 +106,8 @@ OUTER:
 			continue
 		}
 
-		evals, err := c.snap.EvalsByJob(job.ID)
+		ws := memdb.NewWatchSet()
+		evals, err := c.snap.EvalsByJob(ws, job.ID)
 		if err != nil {
 			c.srv.logger.Printf("[ERR] sched.core: failed to get evals for job %s: %v", job.ID, err)
 			continue
@@ -146,6 +154,7 @@ OUTER:
 	for _, job := range gcJob {
 		req := structs.JobDeregisterRequest{
 			JobID: job,
+			Purge: true,
 			WriteRequest: structs.WriteRequest{
 				Region: c.srv.config.Region,
 			},
@@ -163,7 +172,8 @@ OUTER:
 // evalGC is used to garbage collect old evaluations
 func (c *CoreScheduler) evalGC(eval *structs.Evaluation) error {
 	// Iterate over the evaluations
-	iter, err := c.snap.Evals()
+	ws := memdb.NewWatchSet()
+	iter, err := c.snap.Evals(ws)
 	if err != nil {
 		return err
 	}
@@ -225,29 +235,44 @@ func (c *CoreScheduler) gcEval(eval *structs.Evaluation, thresholdIndex uint64, 
 		return false, nil, nil
 	}
 
+	// Create a watchset
+	ws := memdb.NewWatchSet()
+
 	// If the eval is from a running "batch" job we don't want to garbage
 	// collect its allocations. If there is a long running batch job and its
 	// terminal allocations get GC'd the scheduler would re-run the
 	// allocations.
 	if eval.Type == structs.JobTypeBatch {
-		if !allowBatch {
-			return false, nil, nil
-		}
-
 		// Check if the job is running
-		job, err := c.snap.JobByID(eval.JobID)
+		job, err := c.snap.JobByID(ws, eval.JobID)
 		if err != nil {
 			return false, nil, err
 		}
 
+		// Can collect if:
+		// Job doesn't exist
+		// Job is Stopped and dead
+		// allowBatch and the job is dead
+		collect := false
+		if job == nil {
+			collect = true
+		} else if job.Status != structs.JobStatusDead {
+			collect = false
+		} else if job.Stop {
+			collect = true
+		} else if allowBatch {
+			collect = true
+		}
+
 		// We don't want to gc anything related to a job which is not dead
-		if job != nil && job.Status != structs.JobStatusDead {
+		// If the batch job doesn't exist we can GC it regardless of allowBatch
+		if !collect {
 			return false, nil, nil
 		}
 	}
 
 	// Get the allocations by eval
-	allocs, err := c.snap.AllocsByEval(eval.ID)
+	allocs, err := c.snap.AllocsByEval(ws, eval.ID)
 	if err != nil {
 		c.srv.logger.Printf("[ERR] sched.core: failed to get allocs for eval %s: %v",
 			eval.ID, err)
@@ -275,7 +300,7 @@ func (c *CoreScheduler) gcEval(eval *structs.Evaluation, thresholdIndex uint64, 
 // allocs.
 func (c *CoreScheduler) evalReap(evals, allocs []string) error {
 	// Call to the leader to issue the reap
-	for _, req := range c.partitionReap(evals, allocs) {
+	for _, req := range c.partitionEvalReap(evals, allocs) {
 		var resp structs.GenericResponse
 		if err := c.srv.RPC("Eval.Reap", req, &resp); err != nil {
 			c.srv.logger.Printf("[ERR] sched.core: eval reap failed: %v", err)
@@ -286,10 +311,10 @@ func (c *CoreScheduler) evalReap(evals, allocs []string) error {
 	return nil
 }
 
-// partitionReap returns a list of EvalDeleteRequest to make, ensuring a single
+// partitionEvalReap returns a list of EvalDeleteRequest to make, ensuring a single
 // request does not contain too many allocations and evaluations. This is
 // necessary to ensure that the Raft transaction does not become too large.
-func (c *CoreScheduler) partitionReap(evals, allocs []string) []*structs.EvalDeleteRequest {
+func (c *CoreScheduler) partitionEvalReap(evals, allocs []string) []*structs.EvalDeleteRequest {
 	var requests []*structs.EvalDeleteRequest
 	submittedEvals, submittedAllocs := 0, 0
 	for submittedEvals != len(evals) || submittedAllocs != len(allocs) {
@@ -334,7 +359,8 @@ func (c *CoreScheduler) partitionReap(evals, allocs []string) []*structs.EvalDel
 // nodeGC is used to garbage collect old nodes
 func (c *CoreScheduler) nodeGC(eval *structs.Evaluation) error {
 	// Iterate over the evaluations
-	iter, err := c.snap.Nodes()
+	ws := memdb.NewWatchSet()
+	iter, err := c.snap.Nodes(ws)
 	if err != nil {
 		return err
 	}
@@ -372,7 +398,8 @@ OUTER:
 		}
 
 		// Get the allocations by node
-		allocs, err := c.snap.AllocsByNode(node.ID)
+		ws := memdb.NewWatchSet()
+		allocs, err := c.snap.AllocsByNode(ws, node.ID)
 		if err != nil {
 			c.srv.logger.Printf("[ERR] sched.core: failed to get allocs for node %s: %v",
 				eval.ID, err)
@@ -414,4 +441,117 @@ OUTER:
 		}
 	}
 	return nil
+}
+
+// deploymentGC is used to garbage collect old deployments
+func (c *CoreScheduler) deploymentGC(eval *structs.Evaluation) error {
+	// Iterate over the deployments
+	ws := memdb.NewWatchSet()
+	iter, err := c.snap.Deployments(ws)
+	if err != nil {
+		return err
+	}
+
+	var oldThreshold uint64
+	if eval.JobID == structs.CoreJobForceGC {
+		// The GC was forced, so set the threshold to its maximum so everything
+		// will GC.
+		oldThreshold = math.MaxUint64
+		c.srv.logger.Println("[DEBUG] sched.core: forced deployment GC")
+	} else {
+		// Compute the old threshold limit for GC using the FSM
+		// time table.  This is a rough mapping of a time to the
+		// Raft index it belongs to.
+		tt := c.srv.fsm.TimeTable()
+		cutoff := time.Now().UTC().Add(-1 * c.srv.config.DeploymentGCThreshold)
+		oldThreshold = tt.NearestIndex(cutoff)
+		c.srv.logger.Printf("[DEBUG] sched.core: deployment GC: scanning before index %d (%v)",
+			oldThreshold, c.srv.config.DeploymentGCThreshold)
+	}
+
+	// Collect the deployments to GC
+	var gcDeployment []string
+
+OUTER:
+	for {
+		raw := iter.Next()
+		if raw == nil {
+			break
+		}
+		deploy := raw.(*structs.Deployment)
+
+		// Ignore non-terminal and new deployments
+		if deploy.Active() || deploy.ModifyIndex > oldThreshold {
+			continue
+		}
+
+		// Ensure there are no allocs referencing this deployment.
+		allocs, err := c.snap.AllocsByDeployment(ws, deploy.ID)
+		if err != nil {
+			c.srv.logger.Printf("[ERR] sched.core: failed to get allocs for deployment %s: %v",
+				deploy.ID, err)
+			continue
+		}
+
+		// Ensure there is no allocation referencing the deployment.
+		for _, alloc := range allocs {
+			if !alloc.TerminalStatus() {
+				continue OUTER
+			}
+		}
+
+		// Deployment is eligible for garbage collection
+		gcDeployment = append(gcDeployment, deploy.ID)
+	}
+
+	// Fast-path the nothing case
+	if len(gcDeployment) == 0 {
+		return nil
+	}
+	c.srv.logger.Printf("[DEBUG] sched.core: deployment GC: %d deployments eligible", len(gcDeployment))
+	return c.deploymentReap(gcDeployment)
+}
+
+// deploymentReap contacts the leader and issues a reap on the passed
+// deployments.
+func (c *CoreScheduler) deploymentReap(deployments []string) error {
+	// Call to the leader to issue the reap
+	for _, req := range c.partitionDeploymentReap(deployments) {
+		var resp structs.GenericResponse
+		if err := c.srv.RPC("Deployment.Reap", req, &resp); err != nil {
+			c.srv.logger.Printf("[ERR] sched.core: deployment reap failed: %v", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+// partitionDeploymentReap returns a list of DeploymentDeleteRequest to make,
+// ensuring a single request does not contain too many deployments. This is
+// necessary to ensure that the Raft transaction does not become too large.
+func (c *CoreScheduler) partitionDeploymentReap(deployments []string) []*structs.DeploymentDeleteRequest {
+	var requests []*structs.DeploymentDeleteRequest
+	submittedDeployments := 0
+	for submittedDeployments != len(deployments) {
+		req := &structs.DeploymentDeleteRequest{
+			WriteRequest: structs.WriteRequest{
+				Region: c.srv.config.Region,
+			},
+		}
+		requests = append(requests, req)
+		available := maxIdsPerReap
+
+		if remaining := len(deployments) - submittedDeployments; remaining > 0 {
+			if remaining <= available {
+				req.Deployments = deployments[submittedDeployments:]
+				submittedDeployments += remaining
+			} else {
+				req.Deployments = deployments[submittedDeployments : submittedDeployments+available]
+				submittedDeployments += available
+			}
+		}
+	}
+
+	return requests
 }

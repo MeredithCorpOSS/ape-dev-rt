@@ -1,3 +1,350 @@
+## 0.7 (Unreleased)
+
+IMPROVEMENTS:
+ * telemetry: Add support for tagged metrics for Nomad clients [GH-3147]
+
+## 0.6.3 (Unreleased)
+
+BUG FIXES:
+ * api: Search handles prefix longer than allowed UUIDs [GH-3138]
+ * api: Search endpoint handles even UUID prefixes with hyphens [GH-3120]
+ * cli: Sort task groups when displaying a deployment [GH-3137]
+ * cli: Handle reading files that are in a symlinked directory [GH-3164]
+ * api: Don't merge empty update stanza from job into task groups [GH-3139]
+ * cli: All status commands handle even UUID prefixes with hyphens [GH-3122]
+ * cli: Fix autocompletion of paths that include directories on zsh [GH-3129] 
+ * cli: Fix job deployment -latest handling of jobs without deployments
+   [GH-3166]
+ * cli: Status command honors exact job match even when it is the prefix of
+   another job [GH-3120]
+ * cli: Fix setting of TLSServerName for node API Client. This fixes an issue of
+   contacting nodes that are using TLS [GH-3127]
+ * client/template: Fix issue in which the template block could cause high load
+   on Vault when secret lease duration was less than the Vault grace [GH-3153]
+ * driver/docker: Always purge stopped containers [GH-3148]
+ * driver/docker: Fix issue in which mounts could parse incorrectly [GH-3163]
+ * driver/docker: Fix issue where potentially incorrect syslog server address is
+   used [GH-3135]
+ * driver/docker: Fix server url passed to credential helpers and properly
+   capture error output [GH-3165]
+ * jobspec: Allow distinct_host constraint to have L/RTarget set [GH-3136]
+
+## 0.6.2 (August 28, 2017)
+
+BUG FIXES:
+ * api/cli: Fix logs and fs api and command [GH-3116]
+
+## 0.6.1 (August 28, 2017)
+
+__BACKWARDS INCOMPATIBILITIES:__
+ * deployment: Specifying an update stanza with a max_parallel of zero is now
+   a validation error. Please update the stanza to be greater than zero or
+   remove the stanza as a zero parallelism update is not valid.
+
+IMPROVEMENTS:
+ * core: Lost allocations replaced even if part of failed deployment [GH-2961]
+ * core: Add autocomplete functionality for resources: allocations, evaluations,
+   jobs, deployments and nodes [GH-2964]
+ * core: `distinct_property` constraint can set the number of allocations that
+   are allowed to share a property value [GH-2942]
+ * core: Placing allocation counts towards placement limit fixing issue where
+   rolling update could remove an unnecessary amount of allocations [GH-3070]
+ * api: Redact Vault.Token from AgentSelf response [GH-2988]
+ * cli: node-status displays node version [GH-3002]
+ * cli: Disable color output when STDOUT is not a TTY [GH-3057]
+ * cli: Add autocomplete functionality for flags for all CLI command [GH 3087]
+ * cli: Add status command which takes any identifier and routes to the
+   appropriate status command.
+ * client: Unmount task directories when alloc is terminal [GH-3006]
+ * client/template: Allow template to set Vault grace [GH-2947]
+ * client/template: Template emits events explaining why it is blocked [GH-3001]
+ * deployment: Disallow max_parallel of zero [GH-3081]
+ * deployment: Emit task events explaining unhealthy allocations [GH-3025]
+ * deployment: Better description when a deployment should auto-revert but there
+   is no target [GH-3024]
+ * discovery: Add HTTP header and method support to checks [GH-3031]
+ * driver/docker: Added DNS options [GH-2992]
+ * driver/docker: Add mount options for volumes [GH-3021]
+ * driver/docker: Allow retry of 500 API errors to be handled by restart
+   policies when starting a container [GH-3073]
+ * driver/rkt: support read-only volume mounts [GH-2883]
+ * jobspec: Add `shutdown_delay` so tasks can delay shutdown after deregistering
+   from Consul [GH-3043]
+
+BUG FIXES:
+ * core: Fix purging of job versions [GH-3056]
+ * core: Fix race creating EvalFuture [GH-3051]
+ * core: Fix panic occuring from improper bitmap size [GH-3023]
+ * core: Fix restoration of parameterized, periodic jobs [GH-2959]
+ * core: Fix incorrect destructive update with `distinct_property` constraint
+   [GH-2939]
+ * cli: Fix autocmpleting global flags [GH-2928]
+ * cli: Fix panic when using 0.6.0 cli with an older cluster [GH-2929]
+ * cli: Fix TLS handling for alloc stats API calls [GH-3108]
+ * client: Fix `LC_ALL=C` being set on subprocesses [GH-3041]
+ * client/networking: Handle interfaces that only have link-local addresses
+   while prefering globally routable addresses [GH-3089]
+ * deployment: Fix alloc health with services/checks using interpolation
+   [GH-2984]
+ * discovery: Fix timeout validation for script checks [GH-3022]
+ * driver/docker: Fix leaking plugin file used by syslog server [GH-2937]
+
+## 0.6.0 (July 26, 2017)
+
+__BACKWARDS INCOMPATIBILITIES:__
+ * cli: When given a prefix that does not resolve to a particular object,
+   commands now return exit code 1 rather than 0.
+
+IMPROVEMENTS:
+ * core: Rolling updates based on allocation health [GH-2621, GH-2634, GH-2799]
+ * core: New deployment object to track job updates [GH-2621, GH-2634, GH-2799]
+ * core: Default advertise to private IP address if bind is 0.0.0.0 [GH-2399]
+ * core: Track multiple job versions and add a stopped state for jobs [GH-2566]
+ * core: Job updates can create canaries before beginning rolling update
+   [GH-2621, GH-2634, GH-2799]
+ * core: Back-pressure when evaluations are nacked and ensure scheduling
+   progress on evaluation failures [GH-2555]
+ * agent/config: Late binding to IP addresses using go-sockaddr/template syntax
+   [GH-2399]
+ * api: Add `verify_https_client` to require certificates from HTTP clients
+   [GH-2587]
+ * api/job: Ability to revert job to older versions [GH-2575]
+ * cli: Autocomplete for CLI commands [GH-2848]
+ * client: Use a random host UUID by default [GH-2735]
+ * client: Add `NOMAD_GROUP_NAME` environment variable [GH-2877]
+ * client: Environment variables for client DC and Region [GH-2507]
+ * client: Hash host ID so its stable and well distributed [GH-2541]
+ * client: GC dead allocs if total allocs > `gc_max_allocs` tunable [GH-2636]
+ * client: Persist state using bolt-db and more efficient write patterns
+   [GH-2610]
+ * client: Fingerprint all routable addresses on an interface including IPv6
+   addresses [GH-2536]
+ * client/artifact: Support .xz archives [GH-2836]
+ * client/artifact: Allow specifying a go-getter mode [GH-2781]
+ * client/artifact: Support non-Amazon S3-compatible sources [GH-2781]
+ * client/template: Support reading env vars from templates [GH-2654]
+ * config: Support Unix socket addresses for Consul [GH-2622]
+ * discovery: Advertise driver-specified IP address and port [GH-2709]
+ * discovery: Support `tls_skip_verify` for Consul HTTPS checks [GH-2467]
+ * driver/docker: Allow specifying extra hosts [GH-2547]
+ * driver/docker: Allow setting seccomp profiles [GH-2658]
+ * driver/docker: Support Docker credential helpers [GH-2651]
+ * driver/docker: Auth failures can optionally be ignored [GH-2786]
+ * driver/docker: Add `driver.docker.bridge_ip` node attribute [GH-2797]
+ * driver/docker: Allow setting container IP with user defined networks
+   [GH-2535]
+ * driver/rkt: Support `no_overlay` [GH-2702]
+ * driver/rkt: Support `insecure_options` list [GH-2695]
+ * server: Allow tuning of node heartbeat TTLs [GH-2859]
+ * server/networking: Shrink dynamic port range to not overlap with majority of
+   operating system's ephemeral port ranges to avoid port conflicts [GH-2856]
+
+BUG FIXES:
+ * core: Protect against nil job in new allocation, avoiding panic [GH-2592]
+ * core: System jobs should be running until explicitly stopped [GH-2750]
+ * core: Prevent invalid job updates (eg service -> batch) [GH-2746]
+ * client: Lookup `ip` utility on `$PATH` [GH-2729]
+ * client: Add sticky bit to temp directory [GH-2519]
+ * client: Shutdown task group leader before other tasks [GH-2753]
+ * client: Include symlinks in snapshots when migrating disks [GH-2687]
+ * client: Regression for allocation directory unix perms introduced in v0.5.6
+   fixed [GH-2675]
+ * client: Client syncs allocation state with server before waiting for
+   allocation destroy fixing a corner case in which an allocation may be blocked
+   till destroy [GH-2563]
+ * client: Improved state file handling and reduced write volume [GH-2878]
+ * client/artifact: Honor netrc [GH-2524]
+ * client/artifact: Handle tars where file in directory is listed before
+   directory [GH-2524]
+ * client/config: Use `cpu_total_compute` whenever it is set [GH-2745]
+ * client/config: Respect `vault.tls_server_name` setting in consul-template
+   [GH-2793]
+ * driver/exec: Properly set file/dir ownership in chroots [GH-2552]
+ * driver/docker: Fix panic in Docker driver on Windows [GH-2614]
+ * driver/rkt: Fix env var interpolation [GH-2777]
+ * jobspec/validation: Prevent static port conflicts [GH-2807]
+ * server: Reject non-TLS clients when TLS enabled [GH-2525]
+ * server: Fix a panic in plan evaluation with partial failures and all_at_once
+   set [GH-2544]
+ * server/periodic: Restoring periodic jobs takes launch time zone into
+   consideration [GH-2808]
+ * server/vault: Fix Vault Client panic when given nonexistant role [GH-2648]
+ * telemetry: Fix merging of use node name [GH-2762]
+
+## 0.5.6 (March 31, 2017)
+
+IMPROVEMENTS:
+  * api: Improve log API error when task doesn't exist or hasn't started
+    [GH-2512]
+  * client: Improve error message when artifact downloading fails [GH-2289]
+  * client: Track task start/finish time [GH-2512]
+  * client/template: Access Node meta and attributes in template [GH-2488]
+
+BUG FIXES:
+  * core: Fix periodic job state switching to dead incorrectly [GH-2486]
+  * core: Fix dispatch of periodic job launching allocations immediately
+    [GH-2489]
+  * api: Fix TLS in logs and fs commands/APIs [GH-2290]
+  * cli/plan: Fix diff alignment and remove no change DC output [GH-2465]
+  * client: Fix panic when restarting non-running tasks [GH-2480]
+  * client: Fix env vars when multiple tasks and ports present [GH-2491]
+  * client: Fix `user` attribute disregarding membership of non-main group
+    [GH-2461]
+  * client/vault: Stop Vault token renewal on task exit [GH-2495]
+  * driver/docker: Proper reference counting through task restarts [GH-2484]
+
+## 0.5.5 (March 14, 2017)
+
+__BACKWARDS INCOMPATIBILITIES:__
+  * api: The api package definition of a Job has changed from exposing
+    primitives to pointers to primitives to allow defaulting of unset fields.
+  * driver/docker: The `load` configuration took an array of paths to images
+    prior to this release. A single image is expected by the driver so this
+    behavior has been changed to take a single path as a string. Jobs using the
+    `load` command should update the syntax to a single string.  [GH-2361]
+
+IMPROVEMENTS:
+  * core: Handle Serf Reap event [GH-2310]
+  * core: Update Serf and Memberlist for more reliable gossip [GH-2255]
+  * api: API defaults missing values [GH-2300]
+  * api: Validate the restart policy interval [GH-2311]
+  * api: New task event for task environment setup [GH-2302]
+  * api/cli: Add nomad operator command and API for interacting with Raft
+    configuration [GH-2305]
+  * cli: node-status displays enabled drivers on the node [GH-2349]
+  * client: Apply GC related configurations properly [GH-2273]
+  * client: Don't force uppercase meta keys in env vars [GH-2338]
+  * client: Limit parallelism during garbage collection [GH-2427]
+  * client: Don't exec `uname -r` for node attribute kernel.version [GH-2380]
+  * client: Artifact support for git and hg as well as netrc support [GH-2386]
+  * client: Add metrics to show number of allocations on in each state [GH-2425]
+  * client: Add `NOMAD_{IP,PORT}_<task>_<label>` environment variables [GH-2426]
+  * client: Allow specification of `cpu_total_compute` to override fingerprinter
+    [GH-2447]
+  * client: Reproducible Node ID on OSes that provide system-level UUID
+    [GH-2277]
+  * driver/docker: Add support for volume drivers [GH-2351]
+  * driver/docker: Docker image coordinator and caching [GH-2361]
+  * jobspec: Add leader task to allow graceful shutdown of other tasks within
+    the task group [GH-2308]
+  * periodic: Allow specification of timezones in Periodic Jobs [GH-2321]
+  * scheduler: New `distinct_property` constraint [GH-2418]
+  * server: Allow specification of eval/job gc threshold [GH-2370]
+  * server/vault: Vault Client on Server handles SIGHUP to reload configs
+    [GH-2270]
+  * telemetry: Clients report allocated/unallocated resources [GH-2327]
+  * template: Allow specification of template delimiters [GH-2315]
+  * template: Permissions can be set on template destination file [GH-2262]
+  * vault: Server side Vault telemetry [GH-2318]
+  * vault: Disallow root policy from being specified [GH-2309]
+
+BUG FIXES:
+  * core: Handle periodic paramaterized jobs [GH-2385]
+  * core: Improve garbage collection of stopped batch jobs [GH-2432]
+  * api: Fix escaping of HTML characters [GH-2322]
+  * cli: Display disk resources in alloc-status [GH-2404]
+  * client: Drivers log during fingerprinting [GH-2337]
+  * client: Fix race condition with deriving vault tokens [GH-2275]
+  * client: Fix remounting alloc dirs after reboots [GH-2391] [GH-2394]
+  * client: Replace `-` with `_` in environment variable names [GH-2406]
+  * client: Fix panic and deadlock during client restore state when prestart
+    fails [GH-2376]
+  * config: Fix Consul Config Merging/Copying [GH-2278]
+  * config: Fix Client reserved resource merging panic [GH-2281]
+  * server: Fix panic when forwarding Vault derivation requests from non-leader
+    servers [GH-2267]
+
+## 0.5.4 (January 31, 2017)
+
+IMPROVEMENTS:
+  * client: Made the GC related tunables configurable via client configuration
+    [GH-2261]
+
+BUG FIXES:
+  * client: Fix panic when upgrading to 0.5.3 [GH-2256]
+
+## 0.5.3 (January 30, 2017)
+
+IMPROVEMENTS:
+  * core: Introduce parameterized jobs and dispatch command/API [GH-2128]
+  * core: Cancel blocked evals upon successful one for job [GH-2155]
+  * api: Added APIs for requesting GC of allocations [GH-2192]
+  * api: Job summary endpoint includes summary status for child jobs [GH-2128]
+  * api/client: Plain text log streaming suitable for viewing logs in a browser
+    [GH-2235]
+  * cli: Defaulting to showing allocations which belong to currently registered
+    job [GH-2032]
+  * client: Garbage collect Allocation Runners to free up disk resouces
+    [GH-2081]
+  * client: Don't retrieve Driver Stats if unsupported [GH-2173]
+  * client: Filter log lines in the executor based on client's log level
+    [GH-2172]
+  * client: Added environment variables to discover addresses of sibling tasks
+    in an allocation [GH-2223]
+  * discovery: Register service with duplicate names on different ports [GH-2208]
+  * driver/docker: Add support for network aliases [GH-1980]
+  * driver/docker: Add `force_pull` option to force downloading an image [GH-2147]
+  * driver/docker: Retry when image is not found while creating a container
+    [GH-2222]
+  * driver/java: Support setting class_path and class name. [GH-2199]
+  * telemetry: Prefix gauge values with node name instead of hostname [GH-2098]
+  * template: The template block supports keyOrDefault [GH-2209]
+  * template: The template block can now interpolate Nomad environment variables
+    [GH-2209]
+  * vault: Improve validation of the Vault token given to Nomad servers
+    [GH-2226]
+  * vault: Support setting the Vault role to derive tokens from with
+    `create_from_role` setting [GH-2226]
+
+BUG FIXES:
+  * client: Fixed namespacing for the cpu arch attribute [GH-2161]
+  * client: Fix issue where allocations weren't pulled for several minutes. This
+    manifested as slow starts, delayed kills, etc [GH-2177]
+  * client: Fix a panic that would occur with a racy alloc migration
+    cancellation [GH-2231]
+  * config: Fix merging of Consul options which caused auto_adverise to be
+    ignored [GH-2159]
+  * driver: Fix image based drivers (eg docker) having host env vars set [GH-2211]
+  * driver/docker: Fix Docker auth/logging interprelation [GH-2063, GH-2130]
+  * driver/docker: Fix parsing of Docker Auth Configurations. New parsing is
+    in-line with Docker itself. Also log debug message if auth lookup failed
+    [GH-2190]
+  * template: Fix splay being used as a wait and instead randomize the delay
+    from 0 seconds to splay duration [GH-2227]
+
+## 0.5.2 (December 23, 2016)
+
+BUG FIXES:
+  * client: Fixed a race condition and remove panic when handling duplicate
+    allocations [GH-2096]
+  * client: Cancel wait for remote allocation if migration is no longer required
+    [GH-2097]
+  * client: Failure to stat a single mountpoint does not cause all of host
+    resource usage collection to fail [GH-2090]
+
+## 0.5.1 (December 12, 2016)
+
+IMPROVEMENTS:
+  * driver/rkt: Support rkt's `--dns=host` and `--dns=none` options [GH-2028]
+
+BUG FIXES:
+  * agent/config: Fix use of IPv6 addresses [GH-2036]
+  * api: Fix file descriptor leak and high CPU usage when using the logs
+    endpoint [GH-2079]
+  * cli: Improve parsing error when a job without a name is specified [GH-2030]
+  * client: Fixed permissions of migrated allocation directory [GH-2061]
+  * client: Ensuring allocations are not blocked more than once [GH-2040]
+  * client: Fix race on StreamFramer Destroy which would cause a panic [GH-2007]
+  * client: Not migrating allocation directories on the same client if sticky is
+    turned off [GH-2017]
+  * client/vault: Fix issue in which deriving a Vault token would fail with
+    allocation does not exist due to stale queries [GH-2050]
+  * driver/docker: Make container exist errors non-retriable by task runner
+    [GH-2033]
+  * driver/docker: Fixed an issue related to purging containers with same name
+    as Nomad is trying to start [GH-2037]
+  * driver/rkt: Fix validation of rkt volumes [GH-2027]
+
 ## 0.5.0 (November 16, 2016)
 
 __BACKWARDS INCOMPATIBILITIES:__
@@ -17,7 +364,7 @@ IMPROVEMENTS:
   * core: Scheduler version enforcement disallows different scheduler version
     from making decisions simultaneously [GH-1872]
   * core: Introduce node SecretID which can be used to minimize the available
-    surface area of RPCs to malicious Nomad Clients [GH-1597] 
+    surface area of RPCs to malicious Nomad Clients [GH-1597]
   * core: Add `sticky` volumes which inform the scheduler to prefer placing
     updated allocations on the same node and to reuse the `local/` and
     `alloc/data` directory from previous allocation allowing semi-persistent
@@ -81,7 +428,7 @@ BUG FIXES:
     logger [GH-1886]
   * client/fingerprint: Fix inconsistent CPU MHz fingerprinting [GH-1366]
   * env/aws: Fix an issue with reserved ports causing placement failures
-    [GH-1617] 
+    [GH-1617]
   * discovery: Interpolate all service and check fields [GH-1966]
   * discovery: Fix old services not getting removed from Consul on update
     [GH-1668]

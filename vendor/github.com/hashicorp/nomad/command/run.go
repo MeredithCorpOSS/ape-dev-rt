@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/hashicorp/nomad/api"
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/posener/complete"
 )
 
 var (
@@ -95,6 +97,21 @@ func (c *RunCommand) Synopsis() string {
 	return "Run a new job or update an existing job"
 }
 
+func (c *RunCommand) AutocompleteFlags() complete.Flags {
+	return mergeAutocompleteFlags(c.Meta.AutocompleteFlags(FlagSetClient),
+		complete.Flags{
+			"-check-index": complete.PredictNothing,
+			"-detach":      complete.PredictNothing,
+			"-verbose":     complete.PredictNothing,
+			"-vault-token": complete.PredictAnything,
+			"-output":      complete.PredictNothing,
+		})
+}
+
+func (c *RunCommand) AutocompleteArgs() complete.Predictor {
+	return complete.PredictOr(complete.PredictFiles("*.nomad"), complete.PredictFiles("*.hcl"))
+}
+
 func (c *RunCommand) Run(args []string) int {
 	var detach, verbose, output bool
 	var checkIndexStr, vaultToken string
@@ -132,68 +149,10 @@ func (c *RunCommand) Run(args []string) int {
 	}
 
 	// Get Job struct from Jobfile
-	job, err := c.JobGetter.StructJob(args[0])
+	job, err := c.JobGetter.ApiJob(args[0])
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Error getting job struct: %s", err))
 		return 1
-	}
-
-	// Initialize any fields that need to be.
-	job.Canonicalize()
-
-	// Check that the job is valid
-	if err := job.Validate(); err != nil {
-		c.Ui.Error(fmt.Sprintf("Error validating job: %v", err))
-		return 1
-	}
-
-	// Check if the job is periodic.
-	periodic := job.IsPeriodic()
-
-	// Parse the Vault token
-	if vaultToken == "" {
-		// Check the environment variable
-		vaultToken = os.Getenv("VAULT_TOKEN")
-	}
-
-	if vaultToken != "" {
-		job.VaultToken = vaultToken
-	}
-
-	// Convert it to something we can use
-	apiJob, err := convertStructJob(job)
-	if err != nil {
-		c.Ui.Error(fmt.Sprintf("Error converting job: %s", err))
-		return 1
-	}
-
-	// COMPAT 0.4.1 -> 0.5 Remove in 0.6
-	if apiJob.TaskGroups != nil {
-	OUTSIDE:
-		for _, tg := range apiJob.TaskGroups {
-			if tg.Tasks != nil {
-				for _, task := range tg.Tasks {
-					if task.Resources != nil {
-						if task.Resources.DiskMB > 0 {
-							c.Ui.Error("WARNING: disk attribute is deprecated in the resources block. See https://www.nomadproject.io/docs/job-specification/ephemeral_disk.html")
-							break OUTSIDE
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if output {
-		req := api.RegisterJobRequest{Job: apiJob}
-		buf, err := json.MarshalIndent(req, "", "    ")
-		if err != nil {
-			c.Ui.Error(fmt.Sprintf("Error converting job: %s", err))
-			return 1
-		}
-
-		c.Ui.Output(string(buf))
-		return 0
 	}
 
 	// Get the HTTP client
@@ -204,8 +163,34 @@ func (c *RunCommand) Run(args []string) int {
 	}
 
 	// Force the region to be that of the job.
-	if r := job.Region; r != "" {
-		client.SetRegion(r)
+	if r := job.Region; r != nil {
+		client.SetRegion(*r)
+	}
+
+	// Check if the job is periodic or is a parameterized job
+	periodic := job.IsPeriodic()
+	paramjob := job.IsParameterized()
+
+	// Parse the Vault token
+	if vaultToken == "" {
+		// Check the environment variable
+		vaultToken = os.Getenv("VAULT_TOKEN")
+	}
+
+	if vaultToken != "" {
+		job.VaultToken = helper.StringToPtr(vaultToken)
+	}
+
+	if output {
+		req := api.RegisterJobRequest{Job: job}
+		buf, err := json.MarshalIndent(req, "", "    ")
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Error converting job: %s", err))
+			return 1
+		}
+
+		c.Ui.Output(string(buf))
+		return 0
 	}
 
 	// Parse the check-index
@@ -216,11 +201,11 @@ func (c *RunCommand) Run(args []string) int {
 	}
 
 	// Submit the job
-	var evalID string
+	var resp *api.JobRegisterResponse
 	if enforce {
-		evalID, _, err = client.Jobs().EnforceRegister(apiJob, checkIndex, nil)
+		resp, _, err = client.Jobs().EnforceRegister(job, checkIndex, nil)
 	} else {
-		evalID, _, err = client.Jobs().Register(apiJob, nil)
+		resp, _, err = client.Jobs().Register(job, nil)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), api.RegisterEnforceIndexErrPrefix) {
@@ -238,15 +223,26 @@ func (c *RunCommand) Run(args []string) int {
 		return 1
 	}
 
+	// Print any warnings if there are any
+	if resp.Warnings != "" {
+		c.Ui.Output(
+			c.Colorize().Color(fmt.Sprintf("[bold][yellow]Job Warnings:\n%s[reset]\n", resp.Warnings)))
+	}
+
+	evalID := resp.EvalID
+
 	// Check if we should enter monitor mode
-	if detach || periodic {
+	if detach || periodic || paramjob {
 		c.Ui.Output("Job registration successful")
-		if periodic {
-			now := time.Now().UTC()
-			next := job.Periodic.Next(now)
-			c.Ui.Output(fmt.Sprintf("Approximate next launch time: %s (%s from now)",
-				formatTime(next), formatTimeDifference(now, next, time.Second)))
-		} else {
+		if periodic && !paramjob {
+			loc, err := job.Periodic.GetLocation()
+			if err == nil {
+				now := time.Now().In(loc)
+				next := job.Periodic.Next(now)
+				c.Ui.Output(fmt.Sprintf("Approximate next launch time: %s (%s from now)",
+					formatTime(next), formatTimeDifference(now, next, time.Second)))
+			}
+		} else if !paramjob {
 			c.Ui.Output("Evaluation ID: " + evalID)
 		}
 

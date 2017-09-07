@@ -30,7 +30,7 @@ job "docs" {
     task "server" {
       artifact {
         source      = "https://example.com/file.tar.gz"
-        destination = "/tmp/file"
+        destination = "/tmp/directory"
         options {
           checksum = "md5:df6a4178aec9fbdc1d6d7e3634d1bc33"
         }
@@ -40,23 +40,29 @@ job "docs" {
 }
 ```
 
-Nomad supports downloading `http`, `https`, and `S3` artifacts. If these
-artifacts are archived (`zip`, `tgz`, `bz2`), they are automatically unarchived
-before the starting the task.
+Nomad supports downloading `http`, `https`, `git`, `hg` and `S3` artifacts. If
+these artifacts are archived (`zip`, `tgz`, `bz2`, `xz`), they are
+automatically unarchived before the starting the task.
 
 ## `artifact` Parameters
 
-- `destination` `(string: "local/$1")` - Specifies the path to download the
-  artifact, relative to the root of the task's directory. If omitted, the
-  default value is to place the binary in `local/`.
+- `destination` `(string: "local/")` - Specifies the directory path to download
+  the artifact, relative to the root of the task's directory. If omitted, the
+  default value is to place the artifact in `local/`. The destination is treated
+  as a directory unless `mode` is set to `file`. Source files will be downloaded
+  into that directory path.
 
-- `source` `(string: <required>)` - Specifies the URL of the artifact to download.
- The can be any URL as defined by the [`go-getter`][go-getter] library.
+- `mode` `(string: "any")` - One of `any`, `file`, or `dir`. If set to `file`
+  the `destination` must be a file, not a directory. By default the
+  `destination` will be `local/<filename>`.
 
 - `options` `(map<string|string>: nil)` - Specifies configuration parameters to
   fetch the artifact. The key-value pairs map directly to parameters appended to
   the supplied `source` URL. Please see the [`go-getter`
   documentation][go-getter] for a complete list of options and examples
+
+- `source` `(string: <required>)` - Specifies the URL of the artifact to download.
+  See [`go-getter`][go-getter] for details.
 
 ## `artifact` Examples
 
@@ -77,12 +83,37 @@ artifact {
 ### Download with Custom Destination
 
 This example downloads the artifact from the provided URL and places it at
-`/tmp/example.txt`, as specified by the optional `destination` parameter.
+`/tmp/example/file.txt`, as specified by the optional `destination` parameter.
 
 ```hcl
 artifact {
   source      = "https://example.com/file.txt"
-  destination = "/tmp/example.txt"
+  destination = "/tmp/example"
+}
+```
+
+### Download using git
+
+This example downloads the artifact from the provided GitHub URL and places it at
+`local/repo`, as specified by the optional `destination` parameter.
+
+```hcl
+artifact {
+  source      = "git::https://github.com/example/nomad-examples"
+  destination = "local/repo"
+}
+```
+
+To download from private repo, sshkey need to be set. The key must be
+base64-encoded string. Run `base64 -w0 <file>`
+
+```hcl
+artifact {
+  source      = "git@github.com:example/nomad-examples"
+  destination = "local/repo"
+  options {
+    sshkey = "<string>"
+  }
 }
 ```
 
@@ -124,11 +155,13 @@ artifact {
 }
 ```
 
-### Download from an S3 Bucket
+### Download from an S3-compatible Bucket
 
 These examples download artifacts from Amazon S3. There are several different
 types of [S3 bucket addressing][s3-bucket-addr] and [S3 region-specific
-endpoints][s3-region-endpoints].
+endpoints][s3-region-endpoints]. As of Nomad 0.6 non-Amazon S3-compatible
+endpoints like [Minio] are supported, but you must explicitly set the "s3::"
+prefix.
 
 This example uses path-based notation on a publicly-accessible bucket:
 
@@ -168,5 +201,6 @@ artifact {
 ```
 
 [go-getter]: https://github.com/hashicorp/go-getter "HashiCorp go-getter Library"
+[Minio]: https://www.minio.io/
 [s3-bucket-addr]: http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html#access-bucket-intro "Amazon S3 Bucket Addressing"
 [s3-region-endpoints]: http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region "Amazon S3 Region Endpoints"

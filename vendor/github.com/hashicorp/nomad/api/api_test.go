@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/testutil"
+	"github.com/stretchr/testify/assert"
 )
 
 type configCallback func(c *Config)
@@ -19,6 +22,24 @@ var seen map[*testing.T]struct{}
 
 func init() {
 	seen = make(map[*testing.T]struct{})
+}
+
+func makeACLClient(t *testing.T, cb1 configCallback,
+	cb2 testutil.ServerConfigCallback) (*Client, *testutil.TestServer, *ACLToken) {
+	client, server := makeClient(t, cb1, func(c *testutil.TestServerConfig) {
+		c.ACL.Enabled = true
+		if cb2 != nil {
+			cb2(c)
+		}
+	})
+
+	// Get the root token
+	root, _, err := client.ACLTokens().Bootstrap(nil)
+	if err != nil {
+		t.Fatalf("failed to bootstrap ACLs: %v", err)
+	}
+	client.SetSecretID(root.SecretID)
+	return client, server, root
 }
 
 func makeClient(t *testing.T, cb1 configCallback,
@@ -43,6 +64,7 @@ func makeClient(t *testing.T, cb1 configCallback,
 }
 
 func TestRequestTime(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		d, err := json.Marshal(struct{ Done bool }{true})
@@ -90,14 +112,19 @@ func TestRequestTime(t *testing.T) {
 }
 
 func TestDefaultConfig_env(t *testing.T) {
+	t.Parallel()
 	url := "http://1.2.3.4:5678"
 	auth := []string{"nomaduser", "12345"}
+	token := "foobar"
 
 	os.Setenv("NOMAD_ADDR", url)
 	defer os.Setenv("NOMAD_ADDR", "")
 
 	os.Setenv("NOMAD_HTTP_AUTH", strings.Join(auth, ":"))
 	defer os.Setenv("NOMAD_HTTP_AUTH", "")
+
+	os.Setenv("NOMAD_TOKEN", token)
+	defer os.Setenv("NOMAD_TOKEN", "")
 
 	config := DefaultConfig()
 
@@ -112,18 +139,24 @@ func TestDefaultConfig_env(t *testing.T) {
 	if config.HttpAuth.Password != auth[1] {
 		t.Errorf("expected %q to be %q", config.HttpAuth.Password, auth[1])
 	}
+
+	if config.SecretID != token {
+		t.Errorf("Expected %q to be %q", config.SecretID, token)
+	}
 }
 
 func TestSetQueryOptions(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 
-	r := c.newRequest("GET", "/v1/jobs")
+	r, _ := c.newRequest("GET", "/v1/jobs")
 	q := &QueryOptions{
 		Region:     "foo",
 		AllowStale: true,
 		WaitIndex:  1000,
 		WaitTime:   100 * time.Second,
+		SecretID:   "foobar",
 	}
 	r.setQueryOptions(q)
 
@@ -139,30 +172,40 @@ func TestSetQueryOptions(t *testing.T) {
 	if r.params.Get("wait") != "100000ms" {
 		t.Fatalf("bad: %v", r.params)
 	}
+	if r.token != "foobar" {
+		t.Fatalf("bad: %v", r.token)
+	}
 }
 
 func TestSetWriteOptions(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 
-	r := c.newRequest("GET", "/v1/jobs")
+	r, _ := c.newRequest("GET", "/v1/jobs")
 	q := &WriteOptions{
-		Region: "foo",
+		Region:   "foo",
+		SecretID: "foobar",
 	}
 	r.setWriteOptions(q)
 
 	if r.params.Get("region") != "foo" {
 		t.Fatalf("bad: %v", r.params)
 	}
+	if r.token != "foobar" {
+		t.Fatalf("bad: %v", r.token)
+	}
 }
 
 func TestRequestToHTTP(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 
-	r := c.newRequest("DELETE", "/v1/jobs/foo")
+	r, _ := c.newRequest("DELETE", "/v1/jobs/foo")
 	q := &QueryOptions{
-		Region: "foo",
+		Region:   "foo",
+		SecretID: "foobar",
 	}
 	r.setQueryOptions(q)
 	req, err := r.toHTTP()
@@ -176,9 +219,13 @@ func TestRequestToHTTP(t *testing.T) {
 	if req.URL.RequestURI() != "/v1/jobs/foo?region=foo" {
 		t.Fatalf("bad: %v", req)
 	}
+	if req.Header.Get("X-Nomad-Token") != "foobar" {
+		t.Fatalf("bad: %v", req)
+	}
 }
 
 func TestParseQueryMeta(t *testing.T) {
+	t.Parallel()
 	resp := &http.Response{
 		Header: make(map[string][]string),
 	}
@@ -203,6 +250,7 @@ func TestParseQueryMeta(t *testing.T) {
 }
 
 func TestParseWriteMeta(t *testing.T) {
+	t.Parallel()
 	resp := &http.Response{
 		Header: make(map[string][]string),
 	}
@@ -219,10 +267,11 @@ func TestParseWriteMeta(t *testing.T) {
 }
 
 func TestQueryString(t *testing.T) {
+	t.Parallel()
 	c, s := makeClient(t, nil, nil)
 	defer s.Stop()
 
-	r := c.newRequest("PUT", "/v1/abc?foo=bar&baz=zip")
+	r, _ := c.newRequest("PUT", "/v1/abc?foo=bar&baz=zip")
 	q := &WriteOptions{Region: "foo"}
 	r.setWriteOptions(q)
 
@@ -233,5 +282,128 @@ func TestQueryString(t *testing.T) {
 
 	if uri := req.URL.RequestURI(); uri != "/v1/abc?baz=zip&foo=bar&region=foo" {
 		t.Fatalf("bad uri: %q", uri)
+	}
+}
+
+func TestClient_NodeClient(t *testing.T) {
+	http := "testdomain:4646"
+	tlsNode := func(string, *QueryOptions) (*Node, *QueryMeta, error) {
+		return &Node{
+			ID:         structs.GenerateUUID(),
+			Status:     "ready",
+			HTTPAddr:   http,
+			TLSEnabled: true,
+		}, nil, nil
+	}
+	noTlsNode := func(string, *QueryOptions) (*Node, *QueryMeta, error) {
+		return &Node{
+			ID:         structs.GenerateUUID(),
+			Status:     "ready",
+			HTTPAddr:   http,
+			TLSEnabled: false,
+		}, nil, nil
+	}
+
+	optionNoRegion := &QueryOptions{}
+	optionRegion := &QueryOptions{
+		Region: "foo",
+	}
+
+	clientNoRegion, err := NewClient(DefaultConfig())
+	assert.Nil(t, err)
+
+	regionConfig := DefaultConfig()
+	regionConfig.Region = "bar"
+	clientRegion, err := NewClient(regionConfig)
+	assert.Nil(t, err)
+
+	expectedTLSAddr := fmt.Sprintf("https://%s", http)
+	expectedNoTLSAddr := fmt.Sprintf("http://%s", http)
+
+	cases := []struct {
+		Node                  nodeLookup
+		QueryOptions          *QueryOptions
+		Client                *Client
+		ExpectedAddr          string
+		ExpectedRegion        string
+		ExpectedTLSServerName string
+	}{
+		{
+			Node:                  tlsNode,
+			QueryOptions:          optionNoRegion,
+			Client:                clientNoRegion,
+			ExpectedAddr:          expectedTLSAddr,
+			ExpectedRegion:        "global",
+			ExpectedTLSServerName: "client.global.nomad",
+		},
+		{
+			Node:                  tlsNode,
+			QueryOptions:          optionRegion,
+			Client:                clientNoRegion,
+			ExpectedAddr:          expectedTLSAddr,
+			ExpectedRegion:        "foo",
+			ExpectedTLSServerName: "client.foo.nomad",
+		},
+		{
+			Node:                  tlsNode,
+			QueryOptions:          optionRegion,
+			Client:                clientRegion,
+			ExpectedAddr:          expectedTLSAddr,
+			ExpectedRegion:        "foo",
+			ExpectedTLSServerName: "client.foo.nomad",
+		},
+		{
+			Node:                  tlsNode,
+			QueryOptions:          optionNoRegion,
+			Client:                clientRegion,
+			ExpectedAddr:          expectedTLSAddr,
+			ExpectedRegion:        "bar",
+			ExpectedTLSServerName: "client.bar.nomad",
+		},
+		{
+			Node:                  noTlsNode,
+			QueryOptions:          optionNoRegion,
+			Client:                clientNoRegion,
+			ExpectedAddr:          expectedNoTLSAddr,
+			ExpectedRegion:        "global",
+			ExpectedTLSServerName: "",
+		},
+		{
+			Node:                  noTlsNode,
+			QueryOptions:          optionRegion,
+			Client:                clientNoRegion,
+			ExpectedAddr:          expectedNoTLSAddr,
+			ExpectedRegion:        "foo",
+			ExpectedTLSServerName: "",
+		},
+		{
+			Node:                  noTlsNode,
+			QueryOptions:          optionRegion,
+			Client:                clientRegion,
+			ExpectedAddr:          expectedNoTLSAddr,
+			ExpectedRegion:        "foo",
+			ExpectedTLSServerName: "",
+		},
+		{
+			Node:                  noTlsNode,
+			QueryOptions:          optionNoRegion,
+			Client:                clientRegion,
+			ExpectedAddr:          expectedNoTLSAddr,
+			ExpectedRegion:        "bar",
+			ExpectedTLSServerName: "",
+		},
+	}
+
+	for _, c := range cases {
+		name := fmt.Sprintf("%s__%s__%s", c.ExpectedAddr, c.ExpectedRegion, c.ExpectedTLSServerName)
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			nodeClient, err := c.Client.getNodeClientImpl("testID", c.QueryOptions, c.Node)
+			assert.Nil(err)
+			assert.Equal(c.ExpectedRegion, nodeClient.config.Region)
+			assert.Equal(c.ExpectedAddr, nodeClient.config.Address)
+			assert.NotNil(nodeClient.config.TLSConfig)
+			assert.Equal(c.ExpectedTLSServerName, nodeClient.config.TLSConfig.TLSServerName)
+		})
 	}
 }

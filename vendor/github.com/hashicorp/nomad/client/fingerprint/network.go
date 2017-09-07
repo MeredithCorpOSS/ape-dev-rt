@@ -1,7 +1,6 @@
 package fingerprint
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -14,6 +13,12 @@ const (
 	// defaultNetworkSpeed is the speed set if the network link speed could not
 	// be detected.
 	defaultNetworkSpeed = 1000
+
+	// networkDisallowLinkLocalOption/Default are used to allow the operator to
+	// decide how the fingerprinter handles an interface that only contains link
+	// local addresses.
+	networkDisallowLinkLocalOption  = "fingerprint.network.disallow_link_local"
+	networkDisallowLinkLocalDefault = false
 )
 
 // NetworkFingerprint is used to fingerprint the Network capabilities of a node
@@ -56,10 +61,11 @@ func NewNetworkFingerprint(logger *log.Logger) Fingerprint {
 }
 
 func (f *NetworkFingerprint) Fingerprint(cfg *config.Config, node *structs.Node) (bool, error) {
-	// newNetwork is populated and addded to the Nodes resources
-	newNetwork := &structs.NetworkResource{}
-	var ip string
+	if node.Resources == nil {
+		node.Resources = &structs.Resources{}
+	}
 
+	// Find the named interface
 	intf, err := f.findInterface(cfg.NetworkInterface)
 	switch {
 	case err != nil:
@@ -69,52 +75,61 @@ func (f *NetworkFingerprint) Fingerprint(cfg *config.Config, node *structs.Node)
 		return false, nil
 	}
 
-	if ip, err = f.ipAddress(intf); err != nil {
-		return false, fmt.Errorf("Unable to find IP address of interface: %s, err: %v", intf.Name, err)
-	}
-
-	newNetwork.Device = intf.Name
-	node.Attributes["unique.network.ip-address"] = ip
-	newNetwork.IP = ip
-	newNetwork.CIDR = newNetwork.IP + "/32"
-
-	f.logger.Printf("[DEBUG] fingerprint.network: Detected interface %v with IP %v during fingerprinting", intf.Name, ip)
-
+	// Record the throughput of the interface
+	var mbits int
 	throughput := f.linkSpeed(intf.Name)
 	if cfg.NetworkSpeed != 0 {
-		newNetwork.MBits = cfg.NetworkSpeed
-		f.logger.Printf("[DEBUG] fingerprint.network: setting link speed to user configured speed: %d", newNetwork.MBits)
+		mbits = cfg.NetworkSpeed
+		f.logger.Printf("[DEBUG] fingerprint.network: setting link speed to user configured speed: %d", mbits)
 	} else if throughput != 0 {
-		newNetwork.MBits = throughput
-		f.logger.Printf("[DEBUG] fingerprint.network: link speed for %v set to %v", intf.Name, newNetwork.MBits)
+		mbits = throughput
+		f.logger.Printf("[DEBUG] fingerprint.network: link speed for %v set to %v", intf.Name, mbits)
 	} else {
-		newNetwork.MBits = defaultNetworkSpeed
+		mbits = defaultNetworkSpeed
 		f.logger.Printf("[DEBUG] fingerprint.network: link speed could not be detected and no speed specified by user. Defaulting to %d", defaultNetworkSpeed)
 	}
 
-	if node.Resources == nil {
-		node.Resources = &structs.Resources{}
+	// Create the network resources from the interface
+	disallowLinkLocal := cfg.ReadBoolDefault(networkDisallowLinkLocalOption, networkDisallowLinkLocalDefault)
+	nwResources, err := f.createNetworkResources(mbits, intf, disallowLinkLocal)
+	if err != nil {
+		return false, err
 	}
 
-	node.Resources.Networks = append(node.Resources.Networks, newNetwork)
+	// Add the network resources to the node
+	node.Resources.Networks = nwResources
+	for _, nwResource := range nwResources {
+		f.logger.Printf("[DEBUG] fingerprint.network: Detected interface %v with IP: %v", intf.Name, nwResource.IP)
+	}
+
+	// Deprecated, setting the first IP as unique IP for the node
+	if len(nwResources) > 0 {
+		node.Attributes["unique.network.ip-address"] = nwResources[0].IP
+	}
 
 	// return true, because we have a network connection
 	return true, nil
 }
 
-// Gets the ipv4 addr for a network interface
-func (f *NetworkFingerprint) ipAddress(intf *net.Interface) (string, error) {
-	var addrs []net.Addr
-	var err error
-
-	if addrs, err = f.interfaceDetector.Addrs(intf); err != nil {
-		return "", err
+// createNetworkResources creates network resources for every IP
+func (f *NetworkFingerprint) createNetworkResources(throughput int, intf *net.Interface, disallowLinkLocal bool) ([]*structs.NetworkResource, error) {
+	// Find the interface with the name
+	addrs, err := f.interfaceDetector.Addrs(intf)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(addrs) == 0 {
-		return "", errors.New(fmt.Sprintf("Interface %s has no IP address", intf.Name))
-	}
+	nwResources := make([]*structs.NetworkResource, 0)
+	linkLocals := make([]*structs.NetworkResource, 0)
+
 	for _, addr := range addrs {
+		// Create a new network resource
+		newNetwork := &structs.NetworkResource{
+			Device: intf.Name,
+			MBits:  throughput,
+		}
+
+		// Find the IP Addr and the CIDR from the Address
 		var ip net.IP
 		switch v := (addr).(type) {
 		case *net.IPNet:
@@ -122,13 +137,34 @@ func (f *NetworkFingerprint) ipAddress(intf *net.Interface) (string, error) {
 		case *net.IPAddr:
 			ip = v.IP
 		}
+
+		newNetwork.IP = ip.String()
 		if ip.To4() != nil {
-			return ip.String(), nil
+			newNetwork.CIDR = newNetwork.IP + "/32"
+		} else {
+			newNetwork.CIDR = newNetwork.IP + "/128"
 		}
+
+		// If the ip is link-local then we ignore it unless the user allows it
+		// and we detect nothing else
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			linkLocals = append(linkLocals, newNetwork)
+			continue
+		}
+
+		nwResources = append(nwResources, newNetwork)
 	}
 
-	return "", fmt.Errorf("Couldn't parse IP address for interface %s", intf.Name)
+	if len(nwResources) == 0 && len(linkLocals) != 0 {
+		if disallowLinkLocal {
+			f.logger.Printf("[DEBUG] fingerprint.network: ignoring detected link-local address on interface %v", intf.Name)
+			return nwResources, nil
+		}
 
+		return linkLocals, nil
+	}
+
+	return nwResources, nil
 }
 
 // Checks if the device is marked UP by the operator
@@ -138,8 +174,8 @@ func (f *NetworkFingerprint) isDeviceEnabled(intf *net.Interface) bool {
 
 // Checks if the device has any IP address configured
 func (f *NetworkFingerprint) deviceHasIpAddress(intf *net.Interface) bool {
-	_, err := f.ipAddress(intf)
-	return err == nil
+	addrs, err := f.interfaceDetector.Addrs(intf)
+	return err == nil && len(addrs) != 0
 }
 
 func (n *NetworkFingerprint) isDeviceLoopBackOrPointToPoint(intf *net.Interface) bool {

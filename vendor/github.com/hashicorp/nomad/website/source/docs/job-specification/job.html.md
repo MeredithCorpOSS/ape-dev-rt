@@ -26,8 +26,6 @@ of one or many tasks.
 
 ```hcl
 job "docs" {
-  all_at_once = true
-
   constraint {
     # ...
   }
@@ -40,6 +38,10 @@ job "docs" {
 
   meta {
     "my-key" = "my-value"
+  }
+
+  parameterized {
+    # ...
   }
 
   periodic {
@@ -66,6 +68,12 @@ job "docs" {
   must be placed atomically or if they can be scheduled incrementally. This
   should only be used for special circumstances.
 
+- `all_at_once` `(bool: false)` - Controls whether the scheduler can make
+  partial placements if optimistic scheduling resulted in an oversubscribed
+  node. This does not control whether all allocations for the job, where all
+  would be the desired count for each task group, must be placed atomically.
+  This should only be used for special circumstances.
+
 - `constraint` <code>([Constraint][constraint]: nil)</code> -
   This can be provided multiple times to define additional constraints. See the
   [Nomad constraint reference](/docs/job-specification/constraint.html) for more
@@ -74,12 +82,15 @@ job "docs" {
 - `datacenters` `(array<string>: <required>)` - A list of datacenters in the region which are eligible
   for task placement. This must be provided, and does not have a default.
 
-- `group` <code>([Group][group]: <required>)</code> - Specifies the start of a
+- `group` <code>([Group][group]: \<required\>)</code> - Specifies the start of a
   group of tasks. This can be provided multiple times to define additional
   groups. Group names must be unique within the job file.
 
 - `meta` <code>([Meta][]: nil)</code> - Specifies a key-value map that annotates
   with user-defined metadata.
+
+- `parameterized` <code>([Parameterized][parameterized]: nil)</code> - Specifies
+  the job as a parameterized job such that it can be dispatched against.
 
 - `periodic` <code>([Periodic][]: nil)</code> - Allows the job to be scheduled
   at fixed times, dates or intervals.
@@ -141,8 +152,8 @@ job "docs" {
 
 ### Batch Job
 
-This example job executes the `uptime` command across all Nomad clients in the
-fleet, as long as those machines are running Linux.
+This example job executes the `uptime` command on 10 Nomad clients in the fleet,
+restricting the eligble nodes to Linux machines.
 
 ```hcl
 job "docs" {
@@ -156,14 +167,11 @@ job "docs" {
   }
 
   group "example" {
+    count = 10
     task "uptime" {
       driver = "exec"
       config {
         command = "uptime"
-      }
-
-      resources {
-        cpu = 20
       }
     }
   }
@@ -197,10 +205,6 @@ job "docs" {
       vault {
         policies = ["secret-readonly"]
       }
-
-      resources {
-        cpu = 20
-      }
     }
   }
 }
@@ -215,9 +219,9 @@ $ VAULT_TOKEN="..." nomad run example.nomad
 [constraint]: /docs/job-specification/constraint.html "Nomad constraint Job Specification"
 [group]: /docs/job-specification/group.html "Nomad group Job Specification"
 [meta]: /docs/job-specification/meta.html "Nomad meta Job Specification"
+[parameterized]: /docs/job-specification/parameterized.html "Nomad parameterized Job Specification"
 [periodic]: /docs/job-specification/periodic.html "Nomad periodic Job Specification"
 [task]: /docs/job-specification/task.html "Nomad task Job Specification"
 [update]: /docs/job-specification/update.html "Nomad update Job Specification"
 [vault]: /docs/job-specification/vault.html "Nomad vault Job Specification"
-[meta]: /docs/job-specification/meta.html "Nomad meta Job Specification"
 [scheduler]: /docs/runtime/schedulers.html "Nomad Scheduler Types"

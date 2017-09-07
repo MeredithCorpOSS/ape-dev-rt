@@ -6,11 +6,22 @@ VAGRANTFILE_API_VERSION = "2"
 
 DEFAULT_CPU_COUNT = 2
 $script = <<SCRIPT
-GO_VERSION="1.7.3"
+GO_VERSION="1.9"
 
-# Install Prereq Packages
+export DEBIAN_FRONTEND=noninteractive
+
+sudo dpkg --add-architecture i386
 sudo apt-get update
-sudo apt-get install -y build-essential curl git-core mercurial bzr libpcre3-dev pkg-config zip default-jre qemu libc6-dev-i386 silversearcher-ag jq htop vim unzip liblxc1 lxc-dev
+
+# Install base dependencies
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl git-core mercurial bzr \
+     libpcre3-dev pkg-config zip default-jre qemu silversearcher-ag \
+     jq htop vim unzip tree                             \
+     liblxc1 lxc-dev lxc-templates                      \
+     gcc-5-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+     libc6-dev-i386 linux-libc-dev:i386                 \
+     gcc-5-arm-linux-gnueabihf gcc-5-multilib-arm-linux-gnueabihf binutils-arm-linux-gnueabihf \
+     gcc-mingw-w64 binutils-mingw-w64
 
 # Setup go, for development of Nomad
 SRCROOT="/opt/go"
@@ -20,12 +31,17 @@ SRCPATH="/opt/gopath"
 ARCH=`uname -m | sed 's|i686|386|' | sed 's|x86_64|amd64|'`
 
 # Install Go
-cd /tmp
-wget -q https://storage.googleapis.com/golang/go${GO_VERSION}.linux-${ARCH}.tar.gz
-tar -xf go${GO_VERSION}.linux-${ARCH}.tar.gz
-sudo mv go $SRCROOT
-sudo chmod 775 $SRCROOT
-sudo chown vagrant:vagrant $SRCROOT
+if [[ $(go version) == "go version go${GO_VERSION} linux/${ARCH}" ]]; then
+    echo "Go ${GO_VERSION} ${ARCH} already installed; Skipping"
+else
+    cd /tmp
+    wget -q https://storage.googleapis.com/golang/go${GO_VERSION}.linux-${ARCH}.tar.gz
+    tar -xf go${GO_VERSION}.linux-${ARCH}.tar.gz
+    sudo rm -rf $SRCROOT
+    sudo mv go $SRCROOT
+    sudo chmod 775 $SRCROOT
+    sudo chown vagrant:vagrant $SRCROOT
+fi
 
 # Setup the GOPATH; even though the shared folder spec gives the working
 # directory the right user/group, we need to set it properly on the
@@ -44,10 +60,14 @@ sudo chmod 0755 /etc/profile.d/gopath.sh
 source /etc/profile.d/gopath.sh
 
 # Install Docker
-echo deb https://apt.dockerproject.org/repo ubuntu-`lsb_release -c | awk '{print $2}'` main | sudo tee /etc/apt/sources.list.d/docker.list
-sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
-sudo apt-get update
-sudo apt-get install -y docker-engine
+if [[ -f /etc/apt/sources.list.d/docker.list ]]; then
+    echo "Docker repository already installed; Skipping"
+else
+    echo deb https://apt.dockerproject.org/repo ubuntu-`lsb_release -c | awk '{print $2}'` main | sudo tee /etc/apt/sources.list.d/docker.list
+    sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
+    sudo apt-get update
+fi
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker-engine
 
 # Restart docker to make sure we get the latest version of the daemon if there is an upgrade
 sudo service docker restart
@@ -64,6 +84,9 @@ bash scripts/install_rkt_vagrant.sh
 bash scripts/install_consul.sh
 bash scripts/install_vault.sh
 
+# Set hostname's IP to made advertisement Just Work
+sudo sed -i -e "s/.*nomad.*/$(ip route get 1 | awk '{print $NF;exit}') $(hostname)/" /etc/hosts
+
 # CD into the nomad working directory when we login to the VM
 grep "cd /opt/gopath/src/github.com/hashicorp/nomad" ~/.profile || echo "cd /opt/gopath/src/github.com/hashicorp/nomad" >> ~/.profile
 SCRIPT
@@ -72,7 +95,8 @@ def configureVM(vmCfg, vmParams={
                   numCPUs: DEFAULT_CPU_COUNT,
                 }
                )
-  vmCfg.vm.box = "cbednarski/ubuntu-1404"
+  # When updating make sure to use a box that supports VMWare and VirtualBox
+  vmCfg.vm.box = "bento/ubuntu-16.04" # 16.04 LTS
 
   vmCfg.vm.provision "shell", inline: $script, privileged: false
   vmCfg.vm.synced_folder '.', '/opt/gopath/src/github.com/hashicorp/nomad'
@@ -84,7 +108,6 @@ def configureVM(vmCfg, vmParams={
   memory = 2048
 
   vmCfg.vm.provider "parallels" do |p, o|
-    o.vm.box = "parallels/ubuntu-14.04"
     p.memory = memory
     p.cpus = cpus
   end
@@ -96,6 +119,7 @@ def configureVM(vmCfg, vmParams={
 
   ["vmware_fusion", "vmware_workstation"].each do |p|
     vmCfg.vm.provider p do |v|
+      v.enable_vmrun_ip_lookup = false
       v.gui = false
       v.memory = memory
       v.cpus = cpus

@@ -39,6 +39,7 @@ client {
 	}
 	network_interface = "eth0"
 	network_speed = 100
+	cpu_total_compute = 4444
 	reserved {
 		cpu = 10
 		memory = 10
@@ -53,22 +54,42 @@ client {
         data_points = 35
         collection_interval = "5s"
     }
+    gc_interval = "6s"
+    gc_parallel_destroys = 6
+    gc_disk_usage_threshold = 82
+    gc_inode_usage_threshold = 91
+    gc_max_allocs = 50
+    no_host_uuid = false
+    disable_tagged_metrics = true
+    backwards_compatible_metrics = true
 }
 server {
 	enabled = true
+	authoritative_region = "foobar"
 	bootstrap_expect = 5
 	data_dir = "/tmp/data"
 	protocol_version = 3
 	num_schedulers = 2
 	enabled_schedulers = ["test"]
 	node_gc_threshold = "12h"
+	job_gc_threshold = "12h"
+	eval_gc_threshold = "12h"
+	deployment_gc_threshold = "12h"
 	heartbeat_grace   = "30s"
+	min_heartbeat_ttl = "33s"
+	max_heartbeats_per_second = 11.0
 	retry_join = [ "1.1.1.1", "2.2.2.2" ]
 	start_join = [ "1.1.1.1", "2.2.2.2" ]
 	retry_max = 3
 	retry_interval = "15s"
 	rejoin_after_leave = true
     encrypt = "abc"
+}
+acl {
+    enabled = true
+    token_ttl = "60s"
+    policy_ttl = "60s"
+    replication_token = "foobar"
 }
 telemetry {
 	statsite_address = "127.0.0.1:1234"
@@ -121,6 +142,7 @@ vault {
     key_file = "/path/to/key/file"
     tls_server_name = "foobar"
     tls_skip_verify = true
+    create_from_role = "test_role"
 }
 tls {
     http = true
@@ -129,4 +151,5 @@ tls {
     ca_file = "foo"
     cert_file = "bar"
     key_file = "pipe"
+    verify_https_client = true
 }

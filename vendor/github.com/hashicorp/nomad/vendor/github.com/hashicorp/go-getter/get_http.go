@@ -32,12 +32,30 @@ import (
 // The source URL, whether from the header or meta tag, must be a fully
 // formed URL. The shorthand syntax of "github.com/foo/bar" or relative
 // paths are not allowed.
-type HttpGetter struct{}
+type HttpGetter struct {
+	// Netrc, if true, will lookup and use auth information found
+	// in the user's netrc file if available.
+	Netrc bool
+}
+
+func (g *HttpGetter) ClientMode(u *url.URL) (ClientMode, error) {
+	if strings.HasSuffix(u.Path, "/") {
+		return ClientModeDir, nil
+	}
+	return ClientModeFile, nil
+}
 
 func (g *HttpGetter) Get(dst string, u *url.URL) error {
 	// Copy the URL so we can modify it
 	var newU url.URL = *u
 	u = &newU
+
+	if g.Netrc {
+		// Add auth from netrc if we can
+		if err := addAuthFromNetrc(u); err != nil {
+			return err
+		}
+	}
 
 	// Add terraform-get to the parameter.
 	q := u.Query()
@@ -80,6 +98,13 @@ func (g *HttpGetter) Get(dst string, u *url.URL) error {
 }
 
 func (g *HttpGetter) GetFile(dst string, u *url.URL) error {
+	if g.Netrc {
+		// Add auth from netrc if we can
+		if err := addAuthFromNetrc(u); err != nil {
+			return err
+		}
+	}
+
 	resp, err := http.Get(u.String())
 	if err != nil {
 		return err
@@ -114,13 +139,22 @@ func (g *HttpGetter) getSubdir(dst, source, subDir string) error {
 	}
 	defer os.RemoveAll(td)
 
+	// We have to create a subdirectory that doesn't exist for the file
+	// getter to work.
+	td = filepath.Join(td, "data")
+
 	// Download that into the given directory
 	if err := Get(td, source); err != nil {
 		return err
 	}
 
+	// Process any globbing
+	sourcePath, err := SubdirGlob(td, subDir)
+	if err != nil {
+		return err
+	}
+
 	// Make sure the subdir path actually exists
-	sourcePath := filepath.Join(td, subDir)
 	if _, err := os.Stat(sourcePath); err != nil {
 		return fmt.Errorf(
 			"Error downloading %s: %s", source, err)

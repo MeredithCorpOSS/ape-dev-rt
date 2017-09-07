@@ -46,7 +46,6 @@ $ nomad agent -dev
 ==> Starting Nomad agent...
 ==> Nomad agent configuration:
 
-                 Atlas: (Infrastructure: 'hashicorp/example' Join: false)
                 Client: true
              Log Level: INFO
                 Region: global (DC: dc1)
@@ -60,11 +59,6 @@ $ nomad agent -dev
 ```
 
 There are several important messages that `nomad agent` outputs:
-
-- **Atlas**: This shows the [Atlas infrastructure](https://atlas.hashicorp.com)
-  with which the node is registered, if any. It also indicates if auto-join is
-  enabled. The Atlas infrastructure is set using `-atlas` and auto-join is
-  enabled by setting `-atlas-join`.
 
 - **Client**: This indicates whether the agent has enabled client mode.
   Client nodes fingerprint their host environment, register with servers,
@@ -116,7 +110,7 @@ DNS for resolution. Using [Consul](https://www.consul.io) provides a way to avoi
 coding addresses and resolving them on demand.
 
 While a client is running, it is performing heartbeating with servers to
-maintain liveness. If the hearbeats fail, the servers assume the client node
+maintain liveness. If the heartbeats fail, the servers assume the client node
 has failed, and stop assigning new tasks while migrating existing tasks.
 It is impossible to distinguish between a network failure and an agent crash,
 so both cases are handled the same. Once the network recovers or a crashed agent
@@ -139,3 +133,10 @@ When a server _leaves_, it specifies its intent to do so, and the cluster marks 
 node as having _left_. If the server has _left_, replication to it will stop and it
 is removed from the consensus peer set. If the server has _failed_, replication
 will attempt to make progress to recover from a software or network failure.
+
+## Permissions
+
+Nomad servers should be run with the lowest possible permissions. Nomad clients
+must be run as root due to the OS isolation mechanisms that require root
+privileges. In all cases, it is recommended you create a `nomad` user with the
+minimal set of required privileges.

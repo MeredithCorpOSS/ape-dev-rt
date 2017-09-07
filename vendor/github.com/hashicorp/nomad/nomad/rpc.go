@@ -1,6 +1,7 @@
 package nomad
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -12,10 +13,10 @@ import (
 
 	"github.com/armon/go-metrics"
 	"github.com/hashicorp/consul/lib"
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
-	"github.com/hashicorp/nomad/nomad/watch"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/yamux"
 )
@@ -97,8 +98,8 @@ func (s *Server) handleConn(conn net.Conn, isTLS bool) {
 		return
 	}
 
-	// Enforce TLS if VerifyIncoming is set
-	if s.config.RequireTLS && !isTLS && RPCType(buf[0]) != rpcTLS {
+	// Enforce TLS if EnableRPC is set
+	if s.config.TLSConfig.EnableRPC && !isTLS && RPCType(buf[0]) != rpcTLS {
 		s.logger.Printf("[WARN] nomad.rpc: Non-TLS connection attempted with RequireTLS set")
 		conn.Close()
 		return
@@ -297,6 +298,9 @@ func (s *Server) raftApplyFuture(t structs.MessageType, msg interface{}) (raft.A
 	return future, nil
 }
 
+// raftApplyFn is the function signature for applying a msg to Raft
+type raftApplyFn func(t structs.MessageType, msg interface{}) (interface{}, uint64, error)
+
 // raftApply is used to encode a message, run it through raft, and return
 // the FSM response along with any errors
 func (s *Server) raftApply(t structs.MessageType, msg interface{}) (interface{}, uint64, error) {
@@ -321,19 +325,26 @@ func (s *Server) setQueryMeta(m *structs.QueryMeta) {
 	}
 }
 
+// queryFn is used to perform a query operation. If a re-query is needed, the
+// passed-in watch set will be used to block for changes. The passed-in state
+// store should be used (vs. calling fsm.State()) since the given state store
+// will be correctly watched for changes if the state store is restored from
+// a snapshot.
+type queryFn func(memdb.WatchSet, *state.StateStore) error
+
 // blockingOptions is used to parameterize blockingRPC
 type blockingOptions struct {
 	queryOpts *structs.QueryOptions
 	queryMeta *structs.QueryMeta
-	watch     watch.Items
-	run       func() error
+	run       queryFn
 }
 
 // blockingRPC is used for queries that need to wait for a
 // minimum index. This is used to block and wait for changes.
 func (s *Server) blockingRPC(opts *blockingOptions) error {
-	var timeout *time.Timer
-	var notifyCh chan struct{}
+	var deadline time.Time
+	ctx := context.Background()
+	var cancel context.CancelFunc
 	var state *state.StateStore
 
 	// Fast path non-blocking
@@ -352,37 +363,42 @@ func (s *Server) blockingRPC(opts *blockingOptions) error {
 	opts.queryOpts.MaxQueryTime += lib.RandomStagger(opts.queryOpts.MaxQueryTime / jitterFraction)
 
 	// Setup a query timeout
-	timeout = time.NewTimer(opts.queryOpts.MaxQueryTime)
-
-	// Setup the notify channel
-	notifyCh = make(chan struct{}, 1)
-
-	// Ensure we tear down any watchers on return
-	state = s.fsm.State()
-	defer func() {
-		timeout.Stop()
-		state.StopWatch(opts.watch, notifyCh)
-	}()
-
-REGISTER_NOTIFY:
-	// Register the notification channel. This may be done
-	// multiple times if we have not reached the target wait index.
-	state.Watch(opts.watch, notifyCh)
+	deadline = time.Now().Add(opts.queryOpts.MaxQueryTime)
+	ctx, cancel = context.WithDeadline(context.Background(), deadline)
+	defer cancel()
 
 RUN_QUERY:
 	// Update the query meta data
 	s.setQueryMeta(opts.queryMeta)
 
-	// Run the query function
+	// Increment the rpc query counter
 	metrics.IncrCounter([]string{"nomad", "rpc", "query"}, 1)
-	err := opts.run()
+
+	// We capture the state store and its abandon channel but pass a snapshot to
+	// the blocking query function. We operate on the snapshot to allow separate
+	// calls to the state store not all wrapped within the same transaction.
+	state = s.fsm.State()
+	abandonCh := state.AbandonCh()
+	snap, _ := state.Snapshot()
+	stateSnap := &snap.StateStore
+
+	// We can skip all watch tracking if this isn't a blocking query.
+	var ws memdb.WatchSet
+	if opts.queryOpts.MinQueryIndex > 0 {
+		ws = memdb.NewWatchSet()
+
+		// This channel will be closed if a snapshot is restored and the
+		// whole state store is abandoned.
+		ws.Add(abandonCh)
+	}
+
+	// Block up to the timeout if we didn't see anything fresh.
+	err := opts.run(ws, stateSnap)
 
 	// Check for minimum query time
 	if err == nil && opts.queryOpts.MinQueryIndex > 0 && opts.queryMeta.Index <= opts.queryOpts.MinQueryIndex {
-		select {
-		case <-notifyCh:
-			goto REGISTER_NOTIFY
-		case <-timeout.C:
+		if err := ws.WatchCtx(ctx); err == nil {
+			goto RUN_QUERY
 		}
 	}
 	return err

@@ -32,6 +32,8 @@ To configure a job to register with service discovery, please see the
 
 ## Assumptions
 
+- Consul 0.7.2 or later is needed for `tls_skip_verify` in HTTP checks.
+
 - Consul 0.6.4 or later is needed for using the Script checks.
 
 - Consul 0.6.0 or later is needed for using the TCP checks.
@@ -43,7 +45,7 @@ To configure a job to register with service discovery, please see the
   they want to use any of the Consul APIs. Ex: A task running inside a docker
   container in the bridge mode won't be able to talk to a Consul Agent running
   on the loopback interface of the host since the container in the bridge mode
-  has it's own network interface and doesn't see interfaces on the global
+  has its own network interface and doesn't see interfaces on the global
   network namespace of the host. There are a couple of ways to solve this, one
   way is to run the container in the host networking mode, or make the Consul
   agent listen on an interface in the network namespace of the container.

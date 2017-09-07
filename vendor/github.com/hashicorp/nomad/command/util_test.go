@@ -4,38 +4,22 @@ import (
 	"testing"
 
 	"github.com/hashicorp/nomad/api"
-	"github.com/hashicorp/nomad/testutil"
+	"github.com/hashicorp/nomad/command/agent"
+	"github.com/hashicorp/nomad/helper"
 )
 
-// seen is used to track which tests we have already
-// marked as parallel. Marking twice causes panic.
-var seen map[*testing.T]struct{}
-
-func init() {
-	seen = make(map[*testing.T]struct{})
-}
-
-func testServer(
-	t *testing.T,
-	cb testutil.ServerConfigCallback) (*testutil.TestServer, *api.Client, string) {
-
-	// Always run these tests in parallel.
-	if _, ok := seen[t]; !ok {
-		seen[t] = struct{}{}
-		t.Parallel()
-	}
-
+func testServer(t *testing.T, runClient bool, cb func(*agent.Config)) (*agent.TestAgent, *api.Client, string) {
 	// Make a new test server
-	srv := testutil.NewTestServer(t, cb)
+	a := agent.NewTestAgent(t.Name(), func(config *agent.Config) {
+		config.Client.Enabled = runClient
 
-	// Make a client
-	clientConf := api.DefaultConfig()
-	clientConf.Address = "http://" + srv.HTTPAddr
-	client, err := api.NewClient(clientConf)
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
-	return srv, client, clientConf.Address
+		if cb != nil {
+			cb(config)
+		}
+	})
+
+	c := a.Client()
+	return a, c, a.HTTPAddr()
 }
 
 func testJob(jobID string) *api.Job {
@@ -44,18 +28,18 @@ func testJob(jobID string) *api.Job {
 		SetConfig("run_for", "5s").
 		SetConfig("exit_code", 0).
 		Require(&api.Resources{
-			MemoryMB: 256,
-			CPU:      100,
+			MemoryMB: helper.IntToPtr(256),
+			CPU:      helper.IntToPtr(100),
 		}).
 		SetLogConfig(&api.LogConfig{
-			MaxFiles:      1,
-			MaxFileSizeMB: 2,
+			MaxFiles:      helper.IntToPtr(1),
+			MaxFileSizeMB: helper.IntToPtr(2),
 		})
 
 	group := api.NewTaskGroup("group1", 1).
 		AddTask(task).
 		RequireDisk(&api.EphemeralDisk{
-			SizeMB: 20,
+			SizeMB: helper.IntToPtr(20),
 		})
 
 	job := api.NewBatchJob(jobID, jobID, "region1", 1).

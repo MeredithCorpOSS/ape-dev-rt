@@ -92,9 +92,6 @@ type Config struct {
 	// RaftTimeout is applied to any network traffic for raft. Defaults to 10s.
 	RaftTimeout time.Duration
 
-	// RequireTLS ensures that all RPC traffic is protected with TLS
-	RequireTLS bool
-
 	// SerfConfig is the configuration for the serf cluster
 	SerfConfig *serf.Config
 
@@ -103,6 +100,10 @@ type Config struct {
 
 	// Region is the region this Nomad server belongs to.
 	Region string
+
+	// AuthoritativeRegion is the region which is treated as the authoritative source
+	// for ACLs and Policies. This provides a single source of truth to resolve conflicts.
+	AuthoritativeRegion string
 
 	// Datacenter is the datacenter this Nomad server belongs to.
 	Datacenter string
@@ -145,9 +146,17 @@ type Config struct {
 	// NodeGCInterval is how often we dispatch a job to GC failed nodes.
 	NodeGCInterval time.Duration
 
-	// NodeGCThreshold is how "old" a nodemust be to be eligible
+	// NodeGCThreshold is how "old" a node must be to be eligible
 	// for GC. This gives users some time to view and debug a failed nodes.
 	NodeGCThreshold time.Duration
+
+	// DeploymentGCInterval is how often we dispatch a job to GC terminal
+	// deployments.
+	DeploymentGCInterval time.Duration
+
+	// DeploymentGCThreshold is how "old" a deployment must be to be eligible
+	// for GC. This gives users some time to view terminal deployments.
+	DeploymentGCThreshold time.Duration
 
 	// EvalNackTimeout controls how long we allow a sub-scheduler to
 	// work on an evaluation before we consider it failed and Nack it.
@@ -160,6 +169,30 @@ type Config struct {
 	// process an evaluation. This is used so that an eval that will never
 	// complete eventually fails out of the system.
 	EvalDeliveryLimit int
+
+	// EvalNackInitialReenqueueDelay is the delay applied before reenqueuing a
+	// Nacked evaluation for the first time. This value should be small as the
+	// initial Nack can be due to a down machine and the eval should be retried
+	// quickly for liveliness.
+	EvalNackInitialReenqueueDelay time.Duration
+
+	// EvalNackSubsequentReenqueueDelay is the delay applied before reenqueuing
+	// an evaluation that has been Nacked more than once. This delay is
+	// compounding after the first Nack. This value should be significantly
+	// longer than the initial delay as the purpose it severs is to apply
+	// back-pressure as evaluatiions are being Nacked either due to scheduler
+	// failures or because they are hitting their Nack timeout, both of which
+	// are signs of high server resource usage.
+	EvalNackSubsequentReenqueueDelay time.Duration
+
+	// EvalFailedFollowupBaselineDelay is the minimum time waited before
+	// retrying a failed evaluation.
+	EvalFailedFollowupBaselineDelay time.Duration
+
+	// EvalFailedFollowupDelayRange defines the range of additional time from
+	// the baseline in which to wait before retrying a failed evaluation. The
+	// additional delay is selected from this range randomly.
+	EvalFailedFollowupDelayRange time.Duration
 
 	// MinHeartbeatTTL is the minimum time between heartbeats.
 	// This is used as a floor to prevent excessive updates.
@@ -195,6 +228,17 @@ type Config struct {
 
 	// TLSConfig holds various TLS related configurations
 	TLSConfig *config.TLSConfig
+
+	// ACLEnabled controls if ACL enforcement and management is enabled.
+	ACLEnabled bool
+
+	// ReplicationBackoff is how much we backoff when replication errors.
+	// This is a tunable knob for testing primarily.
+	ReplicationBackoff time.Duration
+
+	// ReplicationToken is the ACL Token Secret ID used to fetch from
+	// the Authoritative Region.
+	ReplicationToken string
 }
 
 // CheckVersion is used to check if the ProtocolVersion is valid
@@ -217,33 +261,41 @@ func DefaultConfig() *Config {
 	}
 
 	c := &Config{
-		Region:                 DefaultRegion,
-		Datacenter:             DefaultDC,
-		NodeName:               hostname,
-		ProtocolVersion:        ProtocolVersionMax,
-		RaftConfig:             raft.DefaultConfig(),
-		RaftTimeout:            10 * time.Second,
-		LogOutput:              os.Stderr,
-		RPCAddr:                DefaultRPCAddr,
-		SerfConfig:             serf.DefaultConfig(),
-		NumSchedulers:          1,
-		ReconcileInterval:      60 * time.Second,
-		EvalGCInterval:         5 * time.Minute,
-		EvalGCThreshold:        1 * time.Hour,
-		JobGCInterval:          5 * time.Minute,
-		JobGCThreshold:         4 * time.Hour,
-		NodeGCInterval:         5 * time.Minute,
-		NodeGCThreshold:        24 * time.Hour,
-		EvalNackTimeout:        60 * time.Second,
-		EvalDeliveryLimit:      3,
-		MinHeartbeatTTL:        10 * time.Second,
-		MaxHeartbeatsPerSecond: 50.0,
-		HeartbeatGrace:         10 * time.Second,
-		FailoverHeartbeatTTL:   300 * time.Second,
-		ConsulConfig:           config.DefaultConsulConfig(),
-		VaultConfig:            config.DefaultVaultConfig(),
-		RPCHoldTimeout:         5 * time.Second,
-		TLSConfig:              &config.TLSConfig{},
+		Region:                           DefaultRegion,
+		AuthoritativeRegion:              DefaultRegion,
+		Datacenter:                       DefaultDC,
+		NodeName:                         hostname,
+		ProtocolVersion:                  ProtocolVersionMax,
+		RaftConfig:                       raft.DefaultConfig(),
+		RaftTimeout:                      10 * time.Second,
+		LogOutput:                        os.Stderr,
+		RPCAddr:                          DefaultRPCAddr,
+		SerfConfig:                       serf.DefaultConfig(),
+		NumSchedulers:                    1,
+		ReconcileInterval:                60 * time.Second,
+		EvalGCInterval:                   5 * time.Minute,
+		EvalGCThreshold:                  1 * time.Hour,
+		JobGCInterval:                    5 * time.Minute,
+		JobGCThreshold:                   4 * time.Hour,
+		NodeGCInterval:                   5 * time.Minute,
+		NodeGCThreshold:                  24 * time.Hour,
+		DeploymentGCInterval:             5 * time.Minute,
+		DeploymentGCThreshold:            1 * time.Hour,
+		EvalNackTimeout:                  60 * time.Second,
+		EvalDeliveryLimit:                3,
+		EvalNackInitialReenqueueDelay:    1 * time.Second,
+		EvalNackSubsequentReenqueueDelay: 20 * time.Second,
+		EvalFailedFollowupBaselineDelay:  1 * time.Minute,
+		EvalFailedFollowupDelayRange:     5 * time.Minute,
+		MinHeartbeatTTL:                  10 * time.Second,
+		MaxHeartbeatsPerSecond:           50.0,
+		HeartbeatGrace:                   10 * time.Second,
+		FailoverHeartbeatTTL:             300 * time.Second,
+		ConsulConfig:                     config.DefaultConsulConfig(),
+		VaultConfig:                      config.DefaultVaultConfig(),
+		RPCHoldTimeout:                   5 * time.Second,
+		TLSConfig:                        &config.TLSConfig{},
+		ReplicationBackoff:               30 * time.Second,
 	}
 
 	// Enable all known schedulers by default
@@ -266,6 +318,11 @@ func DefaultConfig() *Config {
 
 	// Disable shutdown on removal
 	c.RaftConfig.ShutdownOnRemove = false
+
+	// Enable interoperability with unversioned Raft library, and don't
+	// start using new ID-based features yet.
+	c.RaftConfig.ProtocolVersion = 1
+
 	return c
 }
 

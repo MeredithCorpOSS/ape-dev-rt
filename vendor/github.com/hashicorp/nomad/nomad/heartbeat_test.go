@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestInitializeHeartbeatTimers(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -37,6 +39,7 @@ func TestInitializeHeartbeatTimers(t *testing.T) {
 }
 
 func TestResetHeartbeatTimer(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -58,6 +61,7 @@ func TestResetHeartbeatTimer(t *testing.T) {
 }
 
 func TestResetHeartbeatTimerLocked(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -70,7 +74,7 @@ func TestResetHeartbeatTimerLocked(t *testing.T) {
 		t.Fatalf("missing timer")
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(time.Duration(testutil.TestMultiplier()*10) * time.Millisecond)
 
 	if _, ok := s1.heartbeatTimers["foo"]; ok {
 		t.Fatalf("timer should be gone")
@@ -78,6 +82,7 @@ func TestResetHeartbeatTimerLocked(t *testing.T) {
 }
 
 func TestResetHeartbeatTimerLocked_Renew(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -99,7 +104,7 @@ func TestResetHeartbeatTimerLocked_Renew(t *testing.T) {
 	renew := time.Now()
 
 	// Watch for invalidation
-	for time.Now().Sub(renew) < 20*time.Millisecond {
+	for time.Now().Sub(renew) < time.Duration(testutil.TestMultiplier()*20)*time.Millisecond {
 		s1.heartbeatTimersLock.Lock()
 		_, ok := s1.heartbeatTimers["foo"]
 		s1.heartbeatTimersLock.Unlock()
@@ -116,6 +121,7 @@ func TestResetHeartbeatTimerLocked_Renew(t *testing.T) {
 }
 
 func TestInvalidateHeartbeat(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -132,7 +138,8 @@ func TestInvalidateHeartbeat(t *testing.T) {
 	s1.invalidateHeartbeat(node.ID)
 
 	// Check it is updated
-	out, err := state.NodeByID(node.ID)
+	ws := memdb.NewWatchSet()
+	out, err := state.NodeByID(ws, node.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -142,6 +149,7 @@ func TestInvalidateHeartbeat(t *testing.T) {
 }
 
 func TestClearHeartbeatTimer(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -161,6 +169,7 @@ func TestClearHeartbeatTimer(t *testing.T) {
 }
 
 func TestClearAllHeartbeatTimers(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	testutil.WaitForLeader(t, s1.RPC)
@@ -182,6 +191,7 @@ func TestClearAllHeartbeatTimers(t *testing.T) {
 }
 
 func TestServer_HeartbeatTTL_Failover(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 
@@ -198,8 +208,8 @@ func TestServer_HeartbeatTTL_Failover(t *testing.T) {
 	testJoin(t, s1, s2, s3)
 
 	testutil.WaitForResult(func() (bool, error) {
-		peers, _ := s1.raftPeers.Peers()
-		return len(peers) == 3, nil
+		peers, _ := s1.numPeers()
+		return peers == 3, nil
 	}, func(err error) {
 		t.Fatalf("should have 3 peers")
 	})

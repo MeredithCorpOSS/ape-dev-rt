@@ -1,11 +1,13 @@
 package nomad
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/net-rpc-msgpackrpc"
 	"github.com/hashicorp/nomad/nomad/mock"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -14,6 +16,7 @@ import (
 )
 
 func TestEvalEndpoint_GetEval(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -54,6 +57,7 @@ func TestEvalEndpoint_GetEval(t *testing.T) {
 }
 
 func TestEvalEndpoint_GetEval_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -85,7 +89,7 @@ func TestEvalEndpoint_GetEval_Blocking(t *testing.T) {
 		EvalID: eval2.ID,
 		QueryOptions: structs.QueryOptions{
 			Region:        "global",
-			MinQueryIndex: 50,
+			MinQueryIndex: 150,
 		},
 	}
 	var resp structs.SingleEvalResponse
@@ -131,6 +135,7 @@ func TestEvalEndpoint_GetEval_Blocking(t *testing.T) {
 }
 
 func TestEvalEndpoint_Dequeue(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -168,6 +173,7 @@ func TestEvalEndpoint_Dequeue(t *testing.T) {
 }
 
 func TestEvalEndpoint_Dequeue_Version_Mismatch(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -193,6 +199,7 @@ func TestEvalEndpoint_Dequeue_Version_Mismatch(t *testing.T) {
 }
 
 func TestEvalEndpoint_Ack(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -232,6 +239,7 @@ func TestEvalEndpoint_Ack(t *testing.T) {
 }
 
 func TestEvalEndpoint_Nack(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		// Disable all of the schedulers so we can manually dequeue
 		// evals and check the queue status
@@ -271,13 +279,20 @@ func TestEvalEndpoint_Nack(t *testing.T) {
 	}
 
 	// Should get it back
-	out2, _, _ := s1.evalBroker.Dequeue(defaultSched, time.Second)
-	if out2 != out {
-		t.Fatalf("nack failed")
-	}
+	testutil.WaitForResult(func() (bool, error) {
+		out2, _, _ := s1.evalBroker.Dequeue(defaultSched, time.Second)
+		if out2 != out {
+			return false, fmt.Errorf("nack failed")
+		}
+
+		return true, nil
+	}, func(err error) {
+		t.Fatal(err)
+	})
 }
 
 func TestEvalEndpoint_Update(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -314,7 +329,8 @@ func TestEvalEndpoint_Update(t *testing.T) {
 	}
 
 	// Ensure updated
-	outE, err := s1.fsm.State().EvalByID(eval2.ID)
+	ws := memdb.NewWatchSet()
+	outE, err := s1.fsm.State().EvalByID(ws, eval2.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -324,6 +340,7 @@ func TestEvalEndpoint_Update(t *testing.T) {
 }
 
 func TestEvalEndpoint_Create(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -361,7 +378,8 @@ func TestEvalEndpoint_Create(t *testing.T) {
 	}
 
 	// Ensure created
-	outE, err := s1.fsm.State().EvalByID(eval1.ID)
+	ws := memdb.NewWatchSet()
+	outE, err := s1.fsm.State().EvalByID(ws, eval1.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -374,6 +392,7 @@ func TestEvalEndpoint_Create(t *testing.T) {
 }
 
 func TestEvalEndpoint_Reap(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -397,7 +416,8 @@ func TestEvalEndpoint_Reap(t *testing.T) {
 	}
 
 	// Ensure deleted
-	outE, err := s1.fsm.State().EvalByID(eval1.ID)
+	ws := memdb.NewWatchSet()
+	outE, err := s1.fsm.State().EvalByID(ws, eval1.ID)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -407,6 +427,7 @@ func TestEvalEndpoint_Reap(t *testing.T) {
 }
 
 func TestEvalEndpoint_List(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -454,6 +475,7 @@ func TestEvalEndpoint_List(t *testing.T) {
 }
 
 func TestEvalEndpoint_List_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -518,6 +540,7 @@ func TestEvalEndpoint_List_Blocking(t *testing.T) {
 }
 
 func TestEvalEndpoint_Allocations(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	codec := rpcClient(t, s1)
@@ -555,6 +578,7 @@ func TestEvalEndpoint_Allocations(t *testing.T) {
 }
 
 func TestEvalEndpoint_Allocations_Blocking(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, nil)
 	defer s1.Shutdown()
 	state := s1.fsm.State()
@@ -588,7 +612,7 @@ func TestEvalEndpoint_Allocations_Blocking(t *testing.T) {
 		EvalID: alloc2.EvalID,
 		QueryOptions: structs.QueryOptions{
 			Region:        "global",
-			MinQueryIndex: 50,
+			MinQueryIndex: 150,
 		},
 	}
 	var resp structs.EvalAllocationsResponse
@@ -609,6 +633,7 @@ func TestEvalEndpoint_Allocations_Blocking(t *testing.T) {
 }
 
 func TestEvalEndpoint_Reblock_NonExistent(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -644,6 +669,7 @@ func TestEvalEndpoint_Reblock_NonExistent(t *testing.T) {
 }
 
 func TestEvalEndpoint_Reblock_NonBlocked(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})
@@ -680,11 +706,12 @@ func TestEvalEndpoint_Reblock_NonBlocked(t *testing.T) {
 	}
 	var resp structs.GenericResponse
 	if err := msgpackrpc.CallWithCodec(codec, "Eval.Reblock", get, &resp); err == nil {
-		t.Fatalf("should error since eval was not in blocked state", err)
+		t.Fatalf("should error since eval was not in blocked state: %v", err)
 	}
 }
 
 func TestEvalEndpoint_Reblock(t *testing.T) {
+	t.Parallel()
 	s1 := testServer(t, func(c *Config) {
 		c.NumSchedulers = 0 // Prevent automatic dequeue
 	})

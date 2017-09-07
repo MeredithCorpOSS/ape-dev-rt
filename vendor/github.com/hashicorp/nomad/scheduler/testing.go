@@ -5,10 +5,12 @@ import (
 	"log"
 	"os"
 	"sync"
-	"testing"
+	"time"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/mitchellh/go-testing-interface"
 )
 
 // RejectPlan is used to always reject the entire plan and force a state refresh
@@ -53,7 +55,7 @@ type Harness struct {
 }
 
 // NewHarness is used to make a new testing harness
-func NewHarness(t *testing.T) *Harness {
+func NewHarness(t testing.T) *Harness {
 	state, err := state.NewStateStore(os.Stderr)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -68,7 +70,7 @@ func NewHarness(t *testing.T) *Harness {
 
 // NewHarnessWithState creates a new harness with the given state for testing
 // purposes.
-func NewHarnessWithState(t *testing.T, state *state.StateStore) *Harness {
+func NewHarnessWithState(t testing.T, state *state.StateStore) *Harness {
 	return &Harness{
 		State:     state,
 		nextIndex: 1,
@@ -107,19 +109,27 @@ func (h *Harness) SubmitPlan(plan *structs.Plan) (*structs.PlanResult, State, er
 		allocs = append(allocs, allocList...)
 	}
 
-	// Attach the plan to all the allocations. It is pulled out in the
-	// payload to avoid the redundancy of encoding, but should be denormalized
-	// prior to being inserted into MemDB.
-	if j := plan.Job; j != nil {
-		for _, alloc := range allocs {
-			if alloc.Job == nil {
-				alloc.Job = j
-			}
+	// Set the time the alloc was applied for the first time. This can be used
+	// to approximate the scheduling time.
+	now := time.Now().UTC().UnixNano()
+	for _, alloc := range allocs {
+		if alloc.CreateTime == 0 {
+			alloc.CreateTime = now
 		}
 	}
 
+	// Setup the update request
+	req := structs.ApplyPlanResultsRequest{
+		AllocUpdateRequest: structs.AllocUpdateRequest{
+			Job:   plan.Job,
+			Alloc: allocs,
+		},
+		Deployment:        plan.Deployment,
+		DeploymentUpdates: plan.DeploymentUpdates,
+	}
+
 	// Apply the full plan
-	err := h.State.UpsertAllocs(index, allocs)
+	err := h.State.UpsertPlanResults(index, &req)
 	return result, nil, err
 }
 
@@ -159,7 +169,8 @@ func (h *Harness) ReblockEval(eval *structs.Evaluation) error {
 	defer h.planLock.Unlock()
 
 	// Check that the evaluation was already blocked.
-	old, err := h.State.EvalByID(eval.ID)
+	ws := memdb.NewWatchSet()
+	old, err := h.State.EvalByID(ws, eval.ID)
 	if err != nil {
 		return err
 	}
@@ -204,7 +215,7 @@ func (h *Harness) Process(factory Factory, eval *structs.Evaluation) error {
 	return sched.Process(eval)
 }
 
-func (h *Harness) AssertEvalStatus(t *testing.T, state string) {
+func (h *Harness) AssertEvalStatus(t testing.T, state string) {
 	if len(h.Evals) != 1 {
 		t.Fatalf("bad: %#v", h.Evals)
 	}

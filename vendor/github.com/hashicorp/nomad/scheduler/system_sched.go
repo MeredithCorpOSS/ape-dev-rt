@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	memdb "github.com/hashicorp/go-memdb"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
 
@@ -15,7 +16,7 @@ const (
 
 	// allocNodeTainted is the status used when stopping an alloc because it's
 	// node is tainted.
-	allocNodeTainted = "system alloc not needed as node is tainted"
+	allocNodeTainted = "alloc not needed as node is tainted"
 )
 
 // SystemScheduler is used for 'system' jobs. This scheduler is
@@ -59,12 +60,13 @@ func (s *SystemScheduler) Process(eval *structs.Evaluation) error {
 	// Verify the evaluation trigger reason is understood
 	switch eval.TriggeredBy {
 	case structs.EvalTriggerJobRegister, structs.EvalTriggerNodeUpdate,
-		structs.EvalTriggerJobDeregister, structs.EvalTriggerRollingUpdate:
+		structs.EvalTriggerJobDeregister, structs.EvalTriggerRollingUpdate,
+		structs.EvalTriggerDeploymentWatcher:
 	default:
 		desc := fmt.Sprintf("scheduler cannot handle '%s' evaluation reason",
 			eval.TriggeredBy)
 		return setStatus(s.logger, s.planner, s.eval, s.nextEval, nil, s.failedTGAllocs, structs.EvalStatusFailed, desc,
-			s.queuedAllocs)
+			s.queuedAllocs, "")
 	}
 
 	// Retry up to the maxSystemScheduleAttempts and reset if progress is made.
@@ -72,14 +74,14 @@ func (s *SystemScheduler) Process(eval *structs.Evaluation) error {
 	if err := retryMax(maxSystemScheduleAttempts, s.process, progress); err != nil {
 		if statusErr, ok := err.(*SetStatusError); ok {
 			return setStatus(s.logger, s.planner, s.eval, s.nextEval, nil, s.failedTGAllocs, statusErr.EvalStatus, err.Error(),
-				s.queuedAllocs)
+				s.queuedAllocs, "")
 		}
 		return err
 	}
 
 	// Update the status to complete
 	return setStatus(s.logger, s.planner, s.eval, s.nextEval, nil, s.failedTGAllocs, structs.EvalStatusComplete, "",
-		s.queuedAllocs)
+		s.queuedAllocs, "")
 }
 
 // process is wrapped in retryMax to iteratively run the handler until we have no
@@ -87,19 +89,20 @@ func (s *SystemScheduler) Process(eval *structs.Evaluation) error {
 func (s *SystemScheduler) process() (bool, error) {
 	// Lookup the Job by ID
 	var err error
-	s.job, err = s.state.JobByID(s.eval.JobID)
+	ws := memdb.NewWatchSet()
+	s.job, err = s.state.JobByID(ws, s.eval.JobID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get job '%s': %v",
 			s.eval.JobID, err)
 	}
 	numTaskGroups := 0
-	if s.job != nil {
+	if !s.job.Stopped() {
 		numTaskGroups = len(s.job.TaskGroups)
 	}
 	s.queuedAllocs = make(map[string]int, numTaskGroups)
 
 	// Get the ready nodes in the required datacenters
-	if s.job != nil {
+	if !s.job.Stopped() {
 		s.nodes, s.nodesByDC, err = readyNodesInDCs(s.state, s.job.Datacenters)
 		if err != nil {
 			return false, fmt.Errorf("failed to get ready nodes: %v", err)
@@ -117,7 +120,7 @@ func (s *SystemScheduler) process() (bool, error) {
 
 	// Construct the placement stack
 	s.stack = NewSystemStack(s.ctx)
-	if s.job != nil {
+	if !s.job.Stopped() {
 		s.stack.SetJob(s.job)
 	}
 
@@ -178,7 +181,8 @@ func (s *SystemScheduler) process() (bool, error) {
 // existing allocations and node status to update the allocations.
 func (s *SystemScheduler) computeJobAllocs() error {
 	// Lookup the allocations by JobID
-	allocs, err := s.state.AllocsByJob(s.eval.JobID)
+	ws := memdb.NewWatchSet()
+	allocs, err := s.state.AllocsByJob(ws, s.eval.JobID, true)
 	if err != nil {
 		return fmt.Errorf("failed to get allocs for job '%s': %v",
 			s.eval.JobID, err)
@@ -225,7 +229,7 @@ func (s *SystemScheduler) computeJobAllocs() error {
 
 	// Check if a rolling upgrade strategy is being used
 	limit := len(diff.update)
-	if s.job != nil && s.job.Update.Rolling() {
+	if !s.job.Stopped() && s.job.Update.Rolling() {
 		limit = s.job.Update.MaxParallel
 	}
 
@@ -234,7 +238,7 @@ func (s *SystemScheduler) computeJobAllocs() error {
 
 	// Nothing remaining to do if placement is not required
 	if len(diff.place) == 0 {
-		if s.job != nil {
+		if !s.job.Stopped() {
 			for _, tg := range s.job.TaskGroups {
 				s.queuedAllocs[tg.Name] = 0
 			}

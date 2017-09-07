@@ -224,6 +224,13 @@ func (c *vaultClient) Stop() {
 	close(c.stopCh)
 }
 
+// unlockAndUnset is used to unset the vault token on the client and release the
+// lock. Helper method for deferring a call that does both.
+func (c *vaultClient) unlockAndUnset() {
+	c.client.SetToken("")
+	c.lock.Unlock()
+}
+
 // DeriveToken takes in an allocation and a set of tasks and for each of the
 // task, it derives a vault token from nomad server and unwraps it using vault.
 // The return value is a map containing all the unwrapped tokens indexed by the
@@ -236,7 +243,19 @@ func (c *vaultClient) DeriveToken(alloc *structs.Allocation, taskNames []string)
 		return nil, fmt.Errorf("vault client is not running")
 	}
 
-	return c.tokenDeriver(alloc, taskNames, c.client)
+	c.lock.Lock()
+	defer c.unlockAndUnset()
+
+	// Use the token supplied to interact with vault
+	c.client.SetToken("")
+
+	tokens, err := c.tokenDeriver(alloc, taskNames, c.client)
+	if err != nil {
+		c.logger.Printf("[ERR] client.vault: failed to derive token for allocation %q and tasks %v: %v", alloc.ID, taskNames, err)
+		return nil, err
+	}
+
+	return tokens, nil
 }
 
 // GetConsulACL creates a vault API client and reads from vault a consul ACL
@@ -253,13 +272,10 @@ func (c *vaultClient) GetConsulACL(token, path string) (*vaultapi.Secret, error)
 	}
 
 	c.lock.Lock()
-	defer c.lock.Unlock()
+	defer c.unlockAndUnset()
 
 	// Use the token supplied to interact with vault
 	c.client.SetToken(token)
-
-	// Reset the token before returning
-	defer c.client.SetToken("")
 
 	// Read the consul ACL token and return the secret directly
 	return c.client.Logical().Read(path)
@@ -377,9 +393,6 @@ func (c *vaultClient) renew(req *vaultClientRenewalRequest) error {
 	var renewalErr error
 	leaseDuration := req.increment
 	if req.isToken {
-		// Reset the token in the API client before returning
-		defer c.client.SetToken("")
-
 		// Set the token in the API client to the one that needs
 		// renewal
 		c.client.SetToken(req.id)
@@ -394,6 +407,9 @@ func (c *vaultClient) renew(req *vaultClientRenewalRequest) error {
 			// Don't set this if renewal fails
 			leaseDuration = renewResp.Auth.LeaseDuration
 		}
+
+		// Reset the token in the API client before returning
+		c.client.SetToken("")
 	} else {
 		// Renew the secret
 		renewResp, err := c.client.Sys().Renew(req.id, req.increment)
@@ -441,9 +457,8 @@ func (c *vaultClient) renew(req *vaultClientRenewalRequest) error {
 			// item is tracked by the renewal loop, stop renewing
 			// it by removing the corresponding heap entry.
 			if err := c.heap.Remove(req.id); err != nil {
-				return fmt.Errorf("failed to remove heap entry. err: %v", err)
+				return fmt.Errorf("failed to remove heap entry: %v", err)
 			}
-			delete(c.heap.heapMap, req.id)
 
 			// Report the fatal error to the client
 			req.errCh <- renewalErr
@@ -562,14 +577,9 @@ func (c *vaultClient) stopRenew(id string) error {
 		return nil
 	}
 
-	// Remove the identifier from the heap
 	if err := c.heap.Remove(id); err != nil {
 		return fmt.Errorf("failed to remove heap entry: %v", err)
 	}
-
-	// Delete the identifier from the map only after the it is removed from
-	// the heap. Heap's remove method relies on the heap map.
-	delete(c.heap.heapMap, id)
 
 	// Signal an update to the renewal loop.
 	if c.running {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -20,7 +21,22 @@ var (
 )
 
 func TestConfig_Merge(t *testing.T) {
+	c0 := &Config{}
+
 	c1 := &Config{
+		Telemetry:      &Telemetry{},
+		Client:         &ClientConfig{},
+		Server:         &ServerConfig{},
+		ACL:            &ACLConfig{},
+		Ports:          &Ports{},
+		Addresses:      &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{},
+		Atlas:          &AtlasConfig{},
+		Vault:          &config.VaultConfig{},
+		Consul:         &config.ConsulConfig{},
+	}
+
+	c2 := &Config{
 		Region:                    "global",
 		Datacenter:                "dc1",
 		NodeName:                  "node1",
@@ -62,6 +78,7 @@ func TestConfig_Merge(t *testing.T) {
 				"foo": "bar",
 			},
 			NetworkSpeed:   100,
+			CpuCompute:     100,
 			MaxKillTimeout: "20s",
 			ClientMaxPort:  19996,
 			Reserved: &Resources{
@@ -72,15 +89,26 @@ func TestConfig_Merge(t *testing.T) {
 				ReservedPorts:       "1,10-30,55",
 				ParsedReservedPorts: []int{1, 2, 4},
 			},
+			DisableTaggedMetrics:       true,
+			BackwardsCompatibleMetrics: true,
 		},
 		Server: &ServerConfig{
-			Enabled:         false,
-			BootstrapExpect: 1,
-			DataDir:         "/tmp/data1",
-			ProtocolVersion: 1,
-			NumSchedulers:   1,
-			NodeGCThreshold: "1h",
-			HeartbeatGrace:  "30s",
+			Enabled:                false,
+			AuthoritativeRegion:    "global",
+			BootstrapExpect:        1,
+			DataDir:                "/tmp/data1",
+			ProtocolVersion:        1,
+			NumSchedulers:          1,
+			NodeGCThreshold:        "1h",
+			HeartbeatGrace:         30 * time.Second,
+			MinHeartbeatTTL:        30 * time.Second,
+			MaxHeartbeatsPerSecond: 30.0,
+		},
+		ACL: &ACLConfig{
+			Enabled:          true,
+			TokenTTL:         60 * time.Second,
+			PolicyTTL:        60 * time.Second,
+			ReplicationToken: "foo",
 		},
 		Ports: &Ports{
 			HTTP: 4646,
@@ -118,24 +146,25 @@ func TestConfig_Merge(t *testing.T) {
 			TLSServerName:        "1",
 		},
 		Consul: &config.ConsulConfig{
-			ServerServiceName: "1",
-			ClientServiceName: "1",
-			AutoAdvertise:     false,
-			Addr:              "1",
-			Timeout:           1 * time.Second,
-			Token:             "1",
-			Auth:              "1",
-			EnableSSL:         false,
-			VerifySSL:         false,
-			CAFile:            "1",
-			CertFile:          "1",
-			KeyFile:           "1",
-			ServerAutoJoin:    false,
-			ClientAutoJoin:    false,
+			ServerServiceName:  "1",
+			ClientServiceName:  "1",
+			AutoAdvertise:      &falseValue,
+			Addr:               "1",
+			Timeout:            1 * time.Second,
+			Token:              "1",
+			Auth:               "1",
+			EnableSSL:          &falseValue,
+			VerifySSL:          &falseValue,
+			CAFile:             "1",
+			CertFile:           "1",
+			KeyFile:            "1",
+			ServerAutoJoin:     &falseValue,
+			ClientAutoJoin:     &falseValue,
+			ChecksUseAdvertise: &falseValue,
 		},
 	}
 
-	c2 := &Config{
+	c3 := &Config{
 		Region:                    "region2",
 		Datacenter:                "dc2",
 		NodeName:                  "node2",
@@ -187,6 +216,7 @@ func TestConfig_Merge(t *testing.T) {
 			ClientMaxPort:  20000,
 			ClientMinPort:  22000,
 			NetworkSpeed:   105,
+			CpuCompute:     105,
 			MaxKillTimeout: "50s",
 			Reserved: &Resources{
 				CPU:                 15,
@@ -196,21 +226,36 @@ func TestConfig_Merge(t *testing.T) {
 				ReservedPorts:       "2,10-30,55",
 				ParsedReservedPorts: []int{1, 2, 3},
 			},
+			GCInterval:                 6 * time.Second,
+			GCParallelDestroys:         6,
+			GCDiskUsageThreshold:       71,
+			GCInodeUsageThreshold:      86,
+			DisableTaggedMetrics:       true,
+			BackwardsCompatibleMetrics: true,
 		},
 		Server: &ServerConfig{
-			Enabled:           true,
-			BootstrapExpect:   2,
-			DataDir:           "/tmp/data2",
-			ProtocolVersion:   2,
-			NumSchedulers:     2,
-			EnabledSchedulers: []string{structs.JobTypeBatch},
-			NodeGCThreshold:   "12h",
-			HeartbeatGrace:    "2m",
-			RejoinAfterLeave:  true,
-			StartJoin:         []string{"1.1.1.1"},
-			RetryJoin:         []string{"1.1.1.1"},
-			RetryInterval:     "10s",
-			retryInterval:     time.Second * 10,
+			Enabled:                true,
+			AuthoritativeRegion:    "global2",
+			BootstrapExpect:        2,
+			DataDir:                "/tmp/data2",
+			ProtocolVersion:        2,
+			NumSchedulers:          2,
+			EnabledSchedulers:      []string{structs.JobTypeBatch},
+			NodeGCThreshold:        "12h",
+			HeartbeatGrace:         2 * time.Minute,
+			MinHeartbeatTTL:        2 * time.Minute,
+			MaxHeartbeatsPerSecond: 200.0,
+			RejoinAfterLeave:       true,
+			StartJoin:              []string{"1.1.1.1"},
+			RetryJoin:              []string{"1.1.1.1"},
+			RetryInterval:          "10s",
+			retryInterval:          time.Second * 10,
+		},
+		ACL: &ACLConfig{
+			Enabled:          true,
+			TokenTTL:         20 * time.Second,
+			PolicyTTL:        20 * time.Second,
+			ReplicationToken: "foobar",
 		},
 		Ports: &Ports{
 			HTTP: 20000,
@@ -249,26 +294,29 @@ func TestConfig_Merge(t *testing.T) {
 			TLSServerName:        "2",
 		},
 		Consul: &config.ConsulConfig{
-			ServerServiceName: "2",
-			ClientServiceName: "2",
-			AutoAdvertise:     true,
-			Addr:              "2",
-			Timeout:           2 * time.Second,
-			Token:             "2",
-			Auth:              "2",
-			EnableSSL:         true,
-			VerifySSL:         true,
-			CAFile:            "2",
-			CertFile:          "2",
-			KeyFile:           "2",
-			ServerAutoJoin:    true,
-			ClientAutoJoin:    true,
+			ServerServiceName:  "2",
+			ClientServiceName:  "2",
+			AutoAdvertise:      &trueValue,
+			Addr:               "2",
+			Timeout:            2 * time.Second,
+			Token:              "2",
+			Auth:               "2",
+			EnableSSL:          &trueValue,
+			VerifySSL:          &trueValue,
+			CAFile:             "2",
+			CertFile:           "2",
+			KeyFile:            "2",
+			ServerAutoJoin:     &trueValue,
+			ClientAutoJoin:     &trueValue,
+			ChecksUseAdvertise: &trueValue,
 		},
 	}
 
-	result := c1.Merge(c2)
-	if !reflect.DeepEqual(result, c2) {
-		t.Fatalf("bad:\n%#v\n%#v", result, c2)
+	result := c0.Merge(c1)
+	result = result.Merge(c2)
+	result = result.Merge(c3)
+	if !reflect.DeepEqual(result, c3) {
+		t.Fatalf("bad:\n%#v\n%#v", result, c3)
 	}
 }
 
@@ -496,6 +544,271 @@ func TestConfig_Listener(t *testing.T) {
 
 	if addr := ln.Addr().String(); addr != "0.0.0.0:24000" {
 		t.Fatalf("expected 0.0.0.0:24000, got: %q", addr)
+	}
+}
+
+// TestConfig_normalizeAddrs_DevMode asserts that normalizeAddrs allows
+// advertising localhost in dev mode.
+func TestConfig_normalizeAddrs_DevMode(t *testing.T) {
+	// allow to advertise 127.0.0.1 if dev-mode is enabled
+	c := &Config{
+		BindAddr: "127.0.0.1",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses:      &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{},
+		DevMode:        true,
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unable to normalize addresses: %s", err)
+	}
+
+	if c.BindAddr != "127.0.0.1" {
+		t.Fatalf("expected BindAddr 127.0.0.1, got %s", c.BindAddr)
+	}
+
+	if c.normalizedAddrs.HTTP != "127.0.0.1:4646" {
+		t.Fatalf("expected HTTP address 127.0.0.1:4646, got %s", c.normalizedAddrs.HTTP)
+	}
+
+	if c.normalizedAddrs.RPC != "127.0.0.1:4647" {
+		t.Fatalf("expected RPC address 127.0.0.1:4647, got %s", c.normalizedAddrs.RPC)
+	}
+
+	if c.normalizedAddrs.Serf != "127.0.0.1:4648" {
+		t.Fatalf("expected Serf address 127.0.0.1:4648, got %s", c.normalizedAddrs.Serf)
+	}
+
+	if c.AdvertiseAddrs.HTTP != "127.0.0.1:4646" {
+		t.Fatalf("expected HTTP advertise address 127.0.0.1:4646, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != "127.0.0.1:4647" {
+		t.Fatalf("expected RPC advertise address 127.0.0.1:4647, got %s", c.AdvertiseAddrs.RPC)
+	}
+
+	// Client mode, no Serf address defined
+	if c.AdvertiseAddrs.Serf != "" {
+		t.Fatalf("expected unset Serf advertise address, got %s", c.AdvertiseAddrs.Serf)
+	}
+}
+
+// TestConfig_normalizeAddrs_NoAdvertise asserts that normalizeAddrs will
+// fail if no valid advertise address available in non-dev mode.
+func TestConfig_normalizeAddrs_NoAdvertise(t *testing.T) {
+	c := &Config{
+		BindAddr: "127.0.0.1",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses:      &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{},
+		DevMode:        false,
+	}
+
+	if err := c.normalizeAddrs(); err == nil {
+		t.Fatalf("expected an error when no valid advertise address is available")
+	}
+
+	if c.AdvertiseAddrs.HTTP == "127.0.0.1:4646" {
+		t.Fatalf("expected non-localhost HTTP advertise address, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC == "127.0.0.1:4647" {
+		t.Fatalf("expected non-localhost RPC advertise address, got %s", c.AdvertiseAddrs.RPC)
+	}
+
+	if c.AdvertiseAddrs.Serf == "127.0.0.1:4648" {
+		t.Fatalf("expected non-localhost Serf advertise address, got %s", c.AdvertiseAddrs.Serf)
+	}
+}
+
+// TestConfig_normalizeAddrs_AdvertiseLocalhost asserts localhost can be
+// advertised if it's explicitly set in the config.
+func TestConfig_normalizeAddrs_AdvertiseLocalhost(t *testing.T) {
+	c := &Config{
+		BindAddr: "127.0.0.1",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses: &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{
+			HTTP: "127.0.0.1",
+			RPC:  "127.0.0.1",
+			Serf: "127.0.0.1",
+		},
+		DevMode: false,
+		Server:  &ServerConfig{Enabled: true},
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unexpected error when manually setting bind mode: %v", err)
+	}
+
+	if c.AdvertiseAddrs.HTTP != "127.0.0.1:4646" {
+		t.Errorf("expected localhost HTTP advertise address, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != "127.0.0.1:4647" {
+		t.Errorf("expected localhost RPC advertise address, got %s", c.AdvertiseAddrs.RPC)
+	}
+
+	if c.AdvertiseAddrs.Serf != "127.0.0.1:4648" {
+		t.Errorf("expected localhost Serf advertise address, got %s", c.AdvertiseAddrs.Serf)
+	}
+}
+
+// TestConfig_normalizeAddrs_IPv6Loopback asserts that an IPv6 loopback address
+// is normalized properly. See #2739
+func TestConfig_normalizeAddrs_IPv6Loopback(t *testing.T) {
+	c := &Config{
+		BindAddr: "::1",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+		},
+		Addresses: &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{
+			HTTP: "::1",
+			RPC:  "::1",
+		},
+		DevMode: false,
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unexpected error when manually setting bind mode: %v", err)
+	}
+
+	if c.Addresses.HTTP != "::1" {
+		t.Errorf("expected ::1 HTTP address, got %s", c.Addresses.HTTP)
+	}
+
+	if c.Addresses.RPC != "::1" {
+		t.Errorf("expected ::1 RPC address, got %s", c.Addresses.RPC)
+	}
+
+	if c.AdvertiseAddrs.HTTP != "[::1]:4646" {
+		t.Errorf("expected [::1] HTTP advertise address, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != "[::1]:4647" {
+		t.Errorf("expected [::1] RPC advertise address, got %s", c.AdvertiseAddrs.RPC)
+	}
+}
+
+func TestConfig_normalizeAddrs(t *testing.T) {
+	c := &Config{
+		BindAddr: "169.254.1.5",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses: &Addresses{
+			HTTP: "169.254.1.10",
+		},
+		AdvertiseAddrs: &AdvertiseAddrs{
+			RPC: "169.254.1.40",
+		},
+		Server: &ServerConfig{
+			Enabled: true,
+		},
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unable to normalize addresses: %s", err)
+	}
+
+	if c.BindAddr != "169.254.1.5" {
+		t.Fatalf("expected BindAddr 169.254.1.5, got %s", c.BindAddr)
+	}
+
+	if c.AdvertiseAddrs.HTTP != "169.254.1.10:4646" {
+		t.Fatalf("expected HTTP advertise address 169.254.1.10:4646, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != "169.254.1.40:4647" {
+		t.Fatalf("expected RPC advertise address 169.254.1.40:4647, got %s", c.AdvertiseAddrs.RPC)
+	}
+
+	if c.AdvertiseAddrs.Serf != "169.254.1.5:4648" {
+		t.Fatalf("expected Serf advertise address 169.254.1.5:4648, got %s", c.AdvertiseAddrs.Serf)
+	}
+
+	c = &Config{
+		BindAddr: "{{ GetPrivateIP }}",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses: &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{
+			RPC: "{{ GetPrivateIP }}:8888",
+		},
+		Server: &ServerConfig{
+			Enabled: true,
+		},
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unable to normalize addresses: %s", err)
+	}
+
+	if c.AdvertiseAddrs.HTTP != fmt.Sprintf("%s:4646", c.BindAddr) {
+		t.Fatalf("expected HTTP advertise address %s:4646, got %s", c.BindAddr, c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != fmt.Sprintf("%s:8888", c.BindAddr) {
+		t.Fatalf("expected RPC advertise address %s:8888, got %s", c.BindAddr, c.AdvertiseAddrs.RPC)
+	}
+
+	if c.AdvertiseAddrs.Serf != fmt.Sprintf("%s:4648", c.BindAddr) {
+		t.Fatalf("expected Serf advertise address %s:4648, got %s", c.BindAddr, c.AdvertiseAddrs.Serf)
+	}
+
+	// allow to advertise 127.0.0.1 in non-dev mode, if explicitly configured to do so
+	c = &Config{
+		BindAddr: "127.0.0.1",
+		Ports: &Ports{
+			HTTP: 4646,
+			RPC:  4647,
+			Serf: 4648,
+		},
+		Addresses: &Addresses{},
+		AdvertiseAddrs: &AdvertiseAddrs{
+			HTTP: "127.0.0.1:4646",
+			RPC:  "127.0.0.1:4647",
+			Serf: "127.0.0.1:4648",
+		},
+		DevMode: false,
+		Server: &ServerConfig{
+			Enabled: true,
+		},
+	}
+
+	if err := c.normalizeAddrs(); err != nil {
+		t.Fatalf("unable to normalize addresses: %s", err)
+	}
+
+	if c.AdvertiseAddrs.HTTP != "127.0.0.1:4646" {
+		t.Fatalf("expected HTTP advertise address 127.0.0.1:4646, got %s", c.AdvertiseAddrs.HTTP)
+	}
+
+	if c.AdvertiseAddrs.RPC != "127.0.0.1:4647" {
+		t.Fatalf("expected RPC advertise address 127.0.0.1:4647, got %s", c.AdvertiseAddrs.RPC)
+	}
+
+	if c.AdvertiseAddrs.RPC != "127.0.0.1:4647" {
+		t.Fatalf("expected RPC advertise address 127.0.0.1:4647, got %s", c.AdvertiseAddrs.RPC)
 	}
 }
 
