@@ -385,9 +385,9 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 		"plan": &command.PlanCommand{
 			Meta: meta,
 		},
-		"remote": &command.RemoteCommand{
-			Meta: meta,
-		},
+		//"remote": &command.RemoteCommand{
+			//Meta: meta,
+		//},
 		"show": &command.ShowCommand{
 			Meta: meta,
 		},
@@ -446,7 +446,7 @@ func ctxConfig() *terraform.ContextOpts {
 		},
 		Provisioners: map[string]terraform.ResourceProvisionerFactory{
 			"local-exec": func() (terraform.ResourceProvisioner, error) {
-				return new(localexec.ResourceProvisioner), nil
+				return localexec.Provisioner(), nil
 			},
 		},
 	}
