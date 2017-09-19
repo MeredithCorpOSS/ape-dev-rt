@@ -2,6 +2,8 @@
 
 The Release Tool deploys apps (defined in [ape-dev-rt-apps](https://github.com/TimeInc/ape-dev-rt-apps)) into AWS environments (prerequisites defined in [ape-dev-terraform](https://github.com/TimeInc/ape-dev-terraform)).
 
+Terraform version RT uses is: [v0.8.8](https://github.com/hashicorp/terraform/tree/v0.8.8/website/source/docs/)
+
 - [Installation](docs/install.md)
 - [Internals](docs/internals.md)
 - [Usage](docs/usage.md)
