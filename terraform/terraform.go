@@ -248,31 +248,30 @@ func Show(rootPath string) (string, error) {
 	return strings.TrimSpace(out.Stdout), nil
 }
 
+func GenerateBackendConfig(remoteState *RemoteState, rootPath string) (string, error) {
+	return 'test',nil
+}
+
 func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, error) {
 	os.RemoveAll(path.Join(rootPath, ".terraform"))
 
-	var output string
-
-	// TODO: See https://github.com/hashicorp/terraform/issues/1964
-	out, _ := Cmd("remote", []string{
-		"config",
-		"-disable",
-	}, rootPath, ioutil.Discard, ioutil.Discard)
-	output += out.Stdout
-
-	args := []string{
-		"config",
-		"-backend=" + remoteState.Backend,
-	}
-	for k, v := range remoteState.Config {
-		args = append(args, "-backend-config="+k+"="+v)
-	}
-	out, err := Cmd("remote", args, rootPath, ioutil.Discard, ioutil.Discard)
+	_, err := GenerateBackendConfig(remoteState, rootPath)
 	if err != nil {
 		return "", err
 	}
+
+	var output string
+
+	// args := []string{""}
+
+	out, err := Cmd("init", nil, rootPath, ioutil.Discard, ioutil.Discard)
+
+	if err != nil {
+		return "", err
+	}
+
 	if out.ExitCode != 0 {
-		return "", fmt.Errorf("Error(s) occured when configuring remote state (exit code %d). Stderr:\n%s",
+		return "", fmt.Errorf("Error(s) occured when initialising backend (exit code %d). Stderr:\n%s",
 			out.ExitCode, out.Stderr)
 	}
 	output += out.Stdout
@@ -385,9 +384,9 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 		"plan": &command.PlanCommand{
 			Meta: meta,
 		},
-		//"remote": &command.RemoteCommand{
-			//Meta: meta,
-		//},
+		"init": &command.InitCommand{
+			Meta: meta,
+		},
 		"show": &command.ShowCommand{
 			Meta: meta,
 		},
