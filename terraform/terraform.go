@@ -249,7 +249,7 @@ func Show(rootPath string) (string, error) {
 }
 
 func GenerateBackendConfig(remoteState *RemoteState, rootPath string) (string, error) {
-	return 'test',nil
+	return "test",nil
 }
 
 func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, error) {
