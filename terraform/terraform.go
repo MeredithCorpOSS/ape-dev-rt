@@ -311,8 +311,11 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 	}
 	output += out.Stdout
 
-  // TODO: remove backend config file
-
+  // remove backend config file
+  err = os.Remove(path.Join(rootPath, config_file_name))
+  if err != nil {
+    log.Printf("[WARN] Error deleting backend config %s", err)
+  }
 	return output, nil
 }
 

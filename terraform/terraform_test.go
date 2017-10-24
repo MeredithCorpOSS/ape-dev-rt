@@ -2,10 +2,12 @@ package terraform
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"reflect"
 	"testing"
+	"encoding/json"
 )
 
 func TestPlan(t *testing.T) {
@@ -512,4 +514,38 @@ Destroy complete! Resources: 1 destroyed.[0m
 				i, *c.ExpectedDiff, *diff)
 		}
 	}
+}
+
+func TestGenerateBackendConfig(t *testing.T) {
+  var test_config map[string]string
+  test_config = make(map[string]string)
+  test_config["key"] = "some_path"
+  var test_state = RemoteState{"s3", test_config}
+  _, err := GenerateBackendConfig(&test_state, "./", "test_config_file.tf.json")
+  if err != nil {
+    t.Fatalf("GenerateBackendConfig failed %s", err)
+  }
+
+  raw, err := ioutil.ReadFile("./test_config_file.tf.json")
+  if err != nil {
+    fmt.Println(err.Error())
+    t.Fatalf("Failed to open json file")
+  }
+  var f interface{}
+  err = json.Unmarshal(raw, &f)
+  if err != nil {
+    fmt.Println(err.Error())
+    t.Fatalf("Failed to read json")
+  }
+
+  m := f.(map[string]interface{})
+  _, ok := m["terraform"].([]interface{})
+  if ok != true {
+    t.Fatalf("Incorrect format backend config")
+  }
+
+  err = os.Remove("./test_config_file.tf.json")
+  if err != nil {
+    fmt.Println("failed to remove test backend config file")
+  }
 }
