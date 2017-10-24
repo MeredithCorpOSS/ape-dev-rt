@@ -1,25 +1,26 @@
 package terraform
 
 import (
-	"fmt"
-	"io"
-	"io/ioutil"
-	"log"
-	"os"
-	"path"
-	"regexp"
-	"strconv"
-	"strings"
+  "fmt"
+  "io"
+  "io/ioutil"
+  "log"
+  "os"
+  "path"
+  "regexp"
+  "strconv"
+  "strings"
+  "encoding/json"
 
-	"github.com/TimeInc/ape-dev-rt/ui"
-	"github.com/hashicorp/terraform/builtin/providers/aws"
-	"github.com/hashicorp/terraform/builtin/providers/null"
-	"github.com/hashicorp/terraform/builtin/providers/template"
-	tf "github.com/hashicorp/terraform/builtin/providers/terraform"
-	"github.com/hashicorp/terraform/builtin/provisioners/local-exec"
-	"github.com/hashicorp/terraform/command"
-	"github.com/hashicorp/terraform/terraform"
-	m_cli "github.com/mitchellh/cli"
+  "github.com/TimeInc/ape-dev-rt/ui"
+  "github.com/hashicorp/terraform/builtin/providers/aws"
+  "github.com/hashicorp/terraform/builtin/providers/null"
+  "github.com/hashicorp/terraform/builtin/providers/template"
+  tf "github.com/hashicorp/terraform/builtin/providers/terraform"
+  "github.com/hashicorp/terraform/builtin/provisioners/local-exec"
+  "github.com/hashicorp/terraform/command"
+  "github.com/hashicorp/terraform/terraform"
+  m_cli "github.com/mitchellh/cli"
 )
 
 const AppName = "app"
@@ -248,24 +249,58 @@ func Show(rootPath string) (string, error) {
 	return strings.TrimSpace(out.Stdout), nil
 }
 
-func GenerateBackendConfig(remoteState *RemoteState, rootPath string) (string, error) {
-	return "test",nil
+func GenerateBackendConfig(remoteState *RemoteState, rootPath string, config_file_name string) (string, error) {
+  // create backend config file from remoteState object
+  // TODO: check for existing file before writing
+
+  var s3backend = S3Backend{remoteState.Config}
+  var backends []S3Backend
+  backends = make([]S3Backend, 1)
+  backends[0] = s3backend
+  var backendObject = BackendObj{backends}
+
+  var backendList []BackendObj
+  backendList = make([]BackendObj, 1)
+  backendList[0] = backendObject
+  var backendConfig = BackendConfig{backendList}
+
+  b, err := json.Marshal(backendConfig)
+  if err != nil {
+    return "", err
+  }
+
+  file, err := os.Create(path.Join(rootPath, config_file_name))
+  if err != nil {
+    return "", fmt.Errorf("Unable to create backend config file %s", err)
+  }
+  defer file.Close()
+
+  var bytes_written int
+  bytes_written, err = fmt.Fprintf(file, string(b))
+  if err != nil {
+    return "", fmt.Errorf("Unable to write backend config into %s", err)
+  }
+  if bytes_written == 0 {
+    return "", fmt.Errorf("Zero bytes written to backend config file")
+  }
+	log.Printf("[DEBUG] Wrote backend config: %s in path %s", config_file_name, rootPath)
+
+  return "", nil
 }
 
 func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, error) {
 	os.RemoveAll(path.Join(rootPath, ".terraform"))
 
-	_, err := GenerateBackendConfig(remoteState, rootPath)
+  var config_file_name string
+  config_file_name = "backend-config.tf.json"
+	_, err := GenerateBackendConfig(remoteState, rootPath, config_file_name)
 	if err != nil {
 		return "", err
 	}
 
 	var output string
 
-	// args := []string{""}
-
 	out, err := Cmd("init", nil, rootPath, ioutil.Discard, ioutil.Discard)
-
 	if err != nil {
 		return "", err
 	}
@@ -275,6 +310,8 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 			out.ExitCode, out.Stderr)
 	}
 	output += out.Stdout
+
+  // TODO: remove backend config file
 
 	return output, nil
 }

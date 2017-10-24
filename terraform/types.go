@@ -120,3 +120,15 @@ type DestroyOutput struct {
 	Warnings []string
 	Diff     *ResourceDiff
 }
+
+type S3Backend struct {
+  S3 map[string]string `json:"s3"`
+}
+
+type BackendObj struct {
+  Backend []S3Backend `json:"backend"`
+}
+
+type BackendConfig struct {
+  Terraform []BackendObj `json:"terraform"`
+}
