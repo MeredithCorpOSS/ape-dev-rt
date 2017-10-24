@@ -122,13 +122,13 @@ type DestroyOutput struct {
 }
 
 type S3Backend struct {
-  S3 map[string]string `json:"s3"`
+	S3 map[string]string `json:"s3"`
 }
 
 type BackendObj struct {
-  Backend []S3Backend `json:"backend"`
+	Backend []S3Backend `json:"backend"`
 }
 
 type BackendConfig struct {
-  Terraform []BackendObj `json:"terraform"`
+	Terraform []BackendObj `json:"terraform"`
 }
