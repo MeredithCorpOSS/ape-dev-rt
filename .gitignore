@@ -7,6 +7,9 @@
 ## Directory-based project format:
 .idea/
 
+# VI(M) files
+.*.swp
+
 # custom IGNORES
 /pkg/
 /bin/
