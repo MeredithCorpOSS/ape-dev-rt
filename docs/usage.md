@@ -12,8 +12,10 @@ COMMANDS:
      create-app                 Initialize a new application definition
      apply-infra                Provision application infrastructure
      destroy-infra              Destroy application infrastructure.
+     diff-infra                 Run terraform plan on application infrastructure
      deploy                     Deploy an application into a given environment & slot
      deploy-destroy             Destroy an application from a given environment & slot
+     diff-deploy                Run terraform plan on version
      disable-traffic            Detach load-balancers from the version scaling-group
      enable-traffic             Attach load-balancers to the version scaling-group
      show-traffic               Show which Scaling Groups have Load Balancers attached
