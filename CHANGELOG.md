@@ -1,3 +1,9 @@
+## 0.9.0 (November 16, 2017)
+IMPROVEMENTS:
+ - Upgraded to Terraform 0.9.11
+ - Added diff-infra and diff-deploy commands to output terraform plan at app and version levels
+ - Added validate command
+
 ## 0.8.2 (Unreleased)
 
 BREAKING CHANGES:
