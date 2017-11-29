@@ -521,12 +521,13 @@ func TestGenerateBackendConfig(t *testing.T) {
 	test_config = make(map[string]string)
 	test_config["key"] = "some_path"
 	var test_state = RemoteState{"s3", test_config}
-	_, err := GenerateBackendConfig(&test_state, "./", "test_config_file.tf.json")
+	var filename = "backend-config.tf.json"
+	_, err := GenerateBackendConfig(&test_state, "./")
 	if err != nil {
 		t.Fatalf("GenerateBackendConfig failed %s", err)
 	}
 
-	raw, err := ioutil.ReadFile("./test_config_file.tf.json")
+	raw, err := ioutil.ReadFile(path.Join(".", filename))
 	if err != nil {
 		fmt.Println(err.Error())
 		t.Fatalf("Failed to open json file")
@@ -544,7 +545,7 @@ func TestGenerateBackendConfig(t *testing.T) {
 		t.Fatalf("Incorrect format backend config")
 	}
 
-	err = os.Remove("./test_config_file.tf.json")
+	err = os.Remove(path.Join(".", filename))
 	if err != nil {
 		fmt.Println("failed to remove test backend config file")
 	}

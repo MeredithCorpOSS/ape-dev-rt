@@ -249,7 +249,13 @@ func Show(rootPath string) (string, error) {
 	return strings.TrimSpace(out.Stdout), nil
 }
 
-func GenerateBackendConfig(remoteState *RemoteState, rootPath string, config_file_name string) (string, error) {
+func GetBackendConfigFilename(rootPath string) string {
+	var config_file_name string
+	config_file_name = "backend-config.tf.json"
+	return path.Join(rootPath, config_file_name)
+}
+
+func GenerateBackendConfig(remoteState *RemoteState, rootPath string) (string, error) {
 	// create backend config file from remoteState object
 	// TODO: check for existing file before writing
 
@@ -269,7 +275,7 @@ func GenerateBackendConfig(remoteState *RemoteState, rootPath string, config_fil
 		return "", err
 	}
 
-	file, err := os.Create(path.Join(rootPath, config_file_name))
+	file, err := os.Create(GetBackendConfigFilename(rootPath))
 	if err != nil {
 		return "", fmt.Errorf("Unable to create backend config file %s", err)
 	}
@@ -283,7 +289,7 @@ func GenerateBackendConfig(remoteState *RemoteState, rootPath string, config_fil
 	if bytes_written == 0 {
 		return "", fmt.Errorf("Zero bytes written to backend config file")
 	}
-	log.Printf("[DEBUG] Wrote backend config: %s in path %s", config_file_name, rootPath)
+	log.Printf("[DEBUG] Wrote backend config: %s", GetBackendConfigFilename(rootPath))
 
 	return "", nil
 }
@@ -291,9 +297,7 @@ func GenerateBackendConfig(remoteState *RemoteState, rootPath string, config_fil
 func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, error) {
 	os.RemoveAll(path.Join(rootPath, ".terraform"))
 
-	var config_file_name string
-	config_file_name = "backend-config.tf.json"
-	_, err := GenerateBackendConfig(remoteState, rootPath, config_file_name)
+	_, err := GenerateBackendConfig(remoteState, rootPath)
 	if err != nil {
 		return "", err
 	}
@@ -311,11 +315,6 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 	}
 	output += out.Stdout
 
-	// remove backend config file
-	err = os.Remove(path.Join(rootPath, config_file_name))
-	if err != nil {
-		log.Printf("[WARN] Error deleting backend config %s", err)
-	}
 	return output, nil
 }
 

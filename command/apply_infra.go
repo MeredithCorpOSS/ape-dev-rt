@@ -97,6 +97,7 @@ func ApplyInfra(c *commons.Context) error {
 		Destroy:      false,
 		XLegacy:      c.Bool("x"),
 	})
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 	planFinishTime := time.Now().UTC()
 	if err != nil {
 		return err
