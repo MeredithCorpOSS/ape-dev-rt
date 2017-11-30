@@ -1,3 +1,6 @@
+## 0.9.1 (November 30, 2017)
+ - Bug fix in Terraform init (backend config was deleted too early)
+
 ## 0.9.0 (November 16, 2017)
 IMPROVEMENTS:
  - Upgraded to Terraform 0.9.11
