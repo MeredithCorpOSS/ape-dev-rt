@@ -1,3 +1,7 @@
+## 0.9.2 (December 11, 2017)
+IMPROVEMENTS:
+ - Enable built-in Consul provider for dealing with Consul clusters
+
 ## 0.9.1 (November 30, 2017)
  - Bug fix in Terraform init (backend config was deleted too early)
 
