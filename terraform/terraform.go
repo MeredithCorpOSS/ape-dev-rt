@@ -14,6 +14,7 @@ import (
 
 	"github.com/TimeInc/ape-dev-rt/ui"
 	"github.com/hashicorp/terraform/builtin/providers/aws"
+	"github.com/hashicorp/terraform/builtin/providers/consul"
 	"github.com/hashicorp/terraform/builtin/providers/null"
 	"github.com/hashicorp/terraform/builtin/providers/template"
 	tf "github.com/hashicorp/terraform/builtin/providers/terraform"
@@ -471,6 +472,9 @@ func ctxConfig() *terraform.ContextOpts {
 		Providers: map[string]terraform.ResourceProviderFactory{
 			"aws": func() (terraform.ResourceProvider, error) {
 				return aws.Provider(), nil
+			},
+			"consul": func() (terraform.ResourceProvider, error) {
+				return consul.Provider(), nil
 			},
 			"null": func() (terraform.ResourceProvider, error) {
 				return null.Provider(), nil
