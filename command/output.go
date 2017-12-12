@@ -29,6 +29,7 @@ func Output(c *commons.Context) error {
 	if err != nil {
 		return err
 	}
+	rootDir := cfgPath
 
 	appData, exists, err := BeginApplicationOperation(c.String("env"), c.String("app"), ds)
 	if err != nil {
