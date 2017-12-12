@@ -72,10 +72,12 @@ func SlotOutput(c *commons.Context) error {
 		return err
 	}
 
+	filesToCleanup := make([]string, 0)
 	outputs, err := terraform.FreshOutput(remoteState, rootDir)
 	if err != nil {
 		return err
 	}
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 
 	outputMessage, err := generateOutputMessage(c.String("app"), c.String("env"), slotId, c.String("name"), outputs)
 	if err != nil {
@@ -84,5 +86,5 @@ func SlotOutput(c *commons.Context) error {
 
 	fmt.Println(outputMessage)
 
-	return nil
+	return cleanupFilePaths(filesToCleanup)
 }

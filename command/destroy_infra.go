@@ -105,6 +105,7 @@ func DestroyInfra(c *commons.Context) error {
 
 	planStartTime := time.Now().UTC()
 	filesToCleanup = append(filesToCleanup, path.Join(rootDir, ".terraform"))
+	filesToCleanup = append(filesToCleanup, path.Join(rootDir, "terraform.tfstate.backup"))
 	planOut, err := terraform.FreshPlan(&terraform.FreshPlanInput{
 		RemoteState: remoteState,
 		RootPath:    rootDir,
@@ -114,6 +115,7 @@ func DestroyInfra(c *commons.Context) error {
 		Destroy:     true,
 		XLegacy:     c.Bool("x"),
 	})
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 	planFinishTime := time.Now().UTC()
 	if err != nil {
 		return err

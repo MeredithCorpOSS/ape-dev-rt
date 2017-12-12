@@ -55,10 +55,12 @@ func Output(c *commons.Context) error {
 		return err
 	}
 
+	filesToCleanup := make([]string, 0)
 	outputs, err := terraform.FreshOutput(remoteState, cfgPath)
 	if err != nil {
 		return err
 	}
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 
 	outputMessage, err := generateOutputMessage(c.String("app"), c.String("env"), "", c.String("name"), outputs)
 	if err != nil {
@@ -67,5 +69,5 @@ func Output(c *commons.Context) error {
 
 	fmt.Println(outputMessage)
 
-	return nil
+	return cleanupFilePaths(filesToCleanup)
 }

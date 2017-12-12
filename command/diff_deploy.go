@@ -124,6 +124,7 @@ func DiffDeploy(c *commons.Context) error {
 	planStartTime := time.Now().UTC()
 	planFilePath := path.Join(rootDir, slotId+"-planfile")
 	filesToCleanup = append(filesToCleanup, path.Join(rootDir, ".terraform"))
+	filesToCleanup = append(filesToCleanup, path.Join(rootDir, "terraform.tfstate.backup"))
 	filesToCleanup = append(filesToCleanup, planFilePath)
 	out, err := terraform.FreshPlan(&terraform.FreshPlanInput{
 		RemoteState:  remoteState,
@@ -135,6 +136,7 @@ func DiffDeploy(c *commons.Context) error {
 		Destroy:      false,
 		XLegacy:      c.Bool("x"),
 	})
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 	planFinishTime := time.Now().UTC()
 	if err != nil {
 		return err

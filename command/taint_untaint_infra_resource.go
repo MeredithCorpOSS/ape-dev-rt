@@ -74,6 +74,8 @@ func TaintUntaintInfraResource(c *commons.Context) error {
 	if err != nil {
 		return err
 	}
+
+	filesToCleanup := make([]string, 0)
 	_, err = terraform.ReenableRemoteState(remoteState, rootDir)
 	if err != nil {
 		return err
@@ -100,9 +102,10 @@ func TaintUntaintInfraResource(c *commons.Context) error {
 		return fmt.Errorf("Failed to %s a resource (exit code %d). Stderr:\n%s",
 			action, out.ExitCode, out.Stderr)
 	}
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 
 	fmt.Printf("%s\n", out.Stdout)
 
-	return err
+	return cleanupFilePaths(filesToCleanup)
 
 }

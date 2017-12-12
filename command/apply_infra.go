@@ -86,6 +86,7 @@ func ApplyInfra(c *commons.Context) error {
 	planStartTime := time.Now().UTC()
 	planFilePath := path.Join(rootDir, "planfile")
 	filesToCleanup = append(filesToCleanup, path.Join(rootDir, ".terraform"))
+	filesToCleanup = append(filesToCleanup, path.Join(rootDir, "terraform.tfstate.backup"))
 	filesToCleanup = append(filesToCleanup, planFilePath)
 	planOut, err := terraform.FreshPlan(&terraform.FreshPlanInput{
 		RemoteState:  remoteState,
