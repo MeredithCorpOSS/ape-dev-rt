@@ -1,3 +1,7 @@
+## 0.9.3 (December 12, 2017)
+BUG FIX:
+ - Cleanup leftover files (backend-config.tf.json and terraform.tfstate.backup)
+
 ## 0.9.2 (December 11, 2017)
 IMPROVEMENTS:
  - Enable built-in Consul provider for dealing with Consul clusters
