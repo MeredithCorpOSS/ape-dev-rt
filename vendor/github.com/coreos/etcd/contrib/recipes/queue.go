@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,35 +15,39 @@
 package recipe
 
 import (
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/storage/storagepb"
+	"context"
+
+	v3 "github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
 // Queue implements a multi-reader, multi-writer distributed queue.
 type Queue struct {
-	client    *clientv3.Client
+	client *v3.Client
+	ctx    context.Context
+
 	keyPrefix string
 }
 
-func NewQueue(client *clientv3.Client, keyPrefix string) *Queue {
-	return &Queue{client, keyPrefix}
+func NewQueue(client *v3.Client, keyPrefix string) *Queue {
+	return &Queue{client, context.TODO(), keyPrefix}
 }
 
 func (q *Queue) Enqueue(val string) error {
-	_, err := NewUniqueKV(q.client, q.keyPrefix, val, 0)
+	_, err := newUniqueKV(q.client, q.keyPrefix, val)
 	return err
 }
 
-// Dequeue returns Enqueued()'d elements in FIFO order. If the
+// Dequeue returns Enqueue()'d elements in FIFO order. If the
 // queue is empty, Dequeue blocks until elements are available.
 func (q *Queue) Dequeue() (string, error) {
 	// TODO: fewer round trips by fetching more than one key
-	resp, err := NewRange(q.client, q.keyPrefix).FirstRev()
+	resp, err := q.client.Get(q.ctx, q.keyPrefix, v3.WithFirstRev()...)
 	if err != nil {
 		return "", err
 	}
 
-	kv, err := claimFirstKey(q.client.KV, resp.Kvs)
+	kv, err := claimFirstKey(q.client, resp.Kvs)
 	if err != nil {
 		return "", err
 	} else if kv != nil {
@@ -58,12 +62,12 @@ func (q *Queue) Dequeue() (string, error) {
 		q.client,
 		q.keyPrefix,
 		resp.Header.Revision,
-		[]storagepb.Event_EventType{storagepb.PUT})
+		[]mvccpb.Event_EventType{mvccpb.PUT})
 	if err != nil {
 		return "", err
 	}
 
-	ok, err := deleteRevKey(q.client.KV, string(ev.Kv.Key), ev.Kv.ModRevision)
+	ok, err := deleteRevKey(q.client, string(ev.Kv.Key), ev.Kv.ModRevision)
 	if err != nil {
 		return "", err
 	} else if !ok {

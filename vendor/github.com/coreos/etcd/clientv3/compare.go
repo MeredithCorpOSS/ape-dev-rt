@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,14 @@ const (
 
 type Cmp pb.Compare
 
-func Compare(key string, t pb.Compare_CompareTarget, result string, v interface{}) Cmp {
+func Compare(cmp Cmp, result string, v interface{}) Cmp {
 	var r pb.Compare_CompareResult
 
 	switch result {
 	case "=":
 		r = pb.Compare_EQUAL
+	case "!=":
+		r = pb.Compare_NOT_EQUAL
 	case ">":
 		r = pb.Compare_GREATER
 	case "<":
@@ -44,38 +46,77 @@ func Compare(key string, t pb.Compare_CompareTarget, result string, v interface{
 		panic("Unknown result op")
 	}
 
-	switch t {
+	cmp.Result = r
+	switch cmp.Target {
 	case pb.Compare_VALUE:
 		val, ok := v.(string)
 		if !ok {
 			panic("bad compare value")
 		}
-		return Cmp{Key: []byte(key), Result: r, Target: t, TargetUnion: &pb.Compare_Value{Value: []byte(val)}}
+		cmp.TargetUnion = &pb.Compare_Value{Value: []byte(val)}
 	case pb.Compare_VERSION:
-		return Cmp{Key: []byte(key), Result: r, Target: t, TargetUnion: &pb.Compare_Version{Version: mustInt64(v)}}
+		cmp.TargetUnion = &pb.Compare_Version{Version: mustInt64(v)}
 	case pb.Compare_CREATE:
-		return Cmp{Key: []byte(key), Result: r, Target: t, TargetUnion: &pb.Compare_CreateRevision{CreateRevision: mustInt64(v)}}
+		cmp.TargetUnion = &pb.Compare_CreateRevision{CreateRevision: mustInt64(v)}
 	case pb.Compare_MOD:
-		return Cmp{Key: []byte(key), Result: r, Target: t, TargetUnion: &pb.Compare_ModRevision{ModRevision: mustInt64(v)}}
+		cmp.TargetUnion = &pb.Compare_ModRevision{ModRevision: mustInt64(v)}
+	case pb.Compare_LEASE:
+		cmp.TargetUnion = &pb.Compare_Lease{Lease: mustInt64(v)}
 	default:
 		panic("Unknown compare type")
 	}
+	return cmp
 }
 
-func Value(key string) (string, pb.Compare_CompareTarget) {
-	return key, pb.Compare_VALUE
+func Value(key string) Cmp {
+	return Cmp{Key: []byte(key), Target: pb.Compare_VALUE}
 }
 
-func Version(key string) (string, pb.Compare_CompareTarget) {
-	return key, pb.Compare_VERSION
+func Version(key string) Cmp {
+	return Cmp{Key: []byte(key), Target: pb.Compare_VERSION}
 }
 
-func CreatedRevision(key string) (string, pb.Compare_CompareTarget) {
-	return key, pb.Compare_CREATE
+func CreateRevision(key string) Cmp {
+	return Cmp{Key: []byte(key), Target: pb.Compare_CREATE}
 }
 
-func ModifiedRevision(key string) (string, pb.Compare_CompareTarget) {
-	return key, pb.Compare_MOD
+func ModRevision(key string) Cmp {
+	return Cmp{Key: []byte(key), Target: pb.Compare_MOD}
+}
+
+// LeaseValue compares a key's LeaseID to a value of your choosing. The empty
+// LeaseID is 0, otherwise known as `NoLease`.
+func LeaseValue(key string) Cmp {
+	return Cmp{Key: []byte(key), Target: pb.Compare_LEASE}
+}
+
+// KeyBytes returns the byte slice holding with the comparison key.
+func (cmp *Cmp) KeyBytes() []byte { return cmp.Key }
+
+// WithKeyBytes sets the byte slice for the comparison key.
+func (cmp *Cmp) WithKeyBytes(key []byte) { cmp.Key = key }
+
+// ValueBytes returns the byte slice holding the comparison value, if any.
+func (cmp *Cmp) ValueBytes() []byte {
+	if tu, ok := cmp.TargetUnion.(*pb.Compare_Value); ok {
+		return tu.Value
+	}
+	return nil
+}
+
+// WithValueBytes sets the byte slice for the comparison's value.
+func (cmp *Cmp) WithValueBytes(v []byte) { cmp.TargetUnion.(*pb.Compare_Value).Value = v }
+
+// WithRange sets the comparison to scan the range [key, end).
+func (cmp Cmp) WithRange(end string) Cmp {
+	cmp.RangeEnd = []byte(end)
+	return cmp
+}
+
+// WithPrefix sets the comparison to scan all keys prefixed by the key.
+func (cmp Cmp) WithPrefix() Cmp {
+	cmp.RangeEnd = getPrefix(cmp.Key)
+	return cmp
 }
 
 func mustInt64(val interface{}) int64 {

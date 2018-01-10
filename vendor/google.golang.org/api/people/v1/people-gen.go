@@ -106,22 +106,34 @@ func (s *Service) clientHeader() string {
 
 func NewPeopleService(s *Service) *PeopleService {
 	rs := &PeopleService{s: s}
-	rs.Connections = NewPeopleConnectionsService(s)
+	rs.Me = NewPeopleMeService(s)
 	return rs
 }
 
 type PeopleService struct {
 	s *Service
 
-	Connections *PeopleConnectionsService
+	Me *PeopleMeService
 }
 
-func NewPeopleConnectionsService(s *Service) *PeopleConnectionsService {
-	rs := &PeopleConnectionsService{s: s}
+func NewPeopleMeService(s *Service) *PeopleMeService {
+	rs := &PeopleMeService{s: s}
+	rs.Connections = NewPeopleMeConnectionsService(s)
 	return rs
 }
 
-type PeopleConnectionsService struct {
+type PeopleMeService struct {
+	s *Service
+
+	Connections *PeopleMeConnectionsService
+}
+
+func NewPeopleMeConnectionsService(s *Service) *PeopleMeConnectionsService {
+	rs := &PeopleMeConnectionsService{s: s}
+	return rs
+}
+
+type PeopleMeConnectionsService struct {
 	s *Service
 }
 
@@ -198,43 +210,6 @@ type Address struct {
 
 func (s *Address) MarshalJSON() ([]byte, error) {
 	type noMethod Address
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// AgeRangeType: A person's age range.
-type AgeRangeType struct {
-	// AgeRange: The age range.
-	//
-	// Possible values:
-	//   "AGE_RANGE_UNSPECIFIED" - Unspecified.
-	//   "LESS_THAN_EIGHTEEN" - Younger than eighteen.
-	//   "EIGHTEEN_TO_TWENTY" - Between eighteen and twenty.
-	//   "TWENTY_ONE_OR_OLDER" - Twenty-one and older.
-	AgeRange string `json:"ageRange,omitempty"`
-
-	// Metadata: Metadata about the age range.
-	Metadata *FieldMetadata `json:"metadata,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "AgeRange") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "AgeRange") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *AgeRangeType) MarshalJSON() ([]byte, error) {
-	type noMethod AgeRangeType
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
@@ -1158,13 +1133,11 @@ func (s *Organization) MarshalJSON() ([]byte, error) {
 // order, but each non-empty field is guaranteed to have exactly one
 // field with
 // `metadata.primary` set to true.
-// NEXT_ID: 31
 type Person struct {
 	// Addresses: The person's street addresses.
 	Addresses []*Address `json:"addresses,omitempty"`
 
-	// AgeRange: DEPRECATED(Please read person.age_ranges instead). The
-	// person's age range.
+	// AgeRange: The person's age range.
 	//
 	// Possible values:
 	//   "AGE_RANGE_UNSPECIFIED" - Unspecified.
@@ -1172,9 +1145,6 @@ type Person struct {
 	//   "EIGHTEEN_TO_TWENTY" - Between eighteen and twenty.
 	//   "TWENTY_ONE_OR_OLDER" - Twenty-one and older.
 	AgeRange string `json:"ageRange,omitempty"`
-
-	// AgeRanges: The person's age ranges.
-	AgeRanges []*AgeRangeType `json:"ageRanges,omitempty"`
 
 	// Biographies: The person's biographies.
 	Biographies []*Biography `json:"biographies,omitempty"`
@@ -1302,9 +1272,7 @@ type PersonMetadata struct {
 	// resource.
 	LinkedPeopleResourceNames []string `json:"linkedPeopleResourceNames,omitempty"`
 
-	// ObjectType: DEPRECATED(Please read
-	// person.metadata.sources.profile_metadata instead).
-	// The type of the person object.
+	// ObjectType: The type of the person object.
 	//
 	// Possible values:
 	//   "OBJECT_TYPE_UNSPECIFIED" - Unspecified.
@@ -1486,39 +1454,6 @@ type Photo struct {
 
 func (s *Photo) MarshalJSON() ([]byte, error) {
 	type noMethod Photo
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// ProfileMetadata: The read-only metadata about a profile.
-type ProfileMetadata struct {
-	// ObjectType: The profile object type.
-	//
-	// Possible values:
-	//   "OBJECT_TYPE_UNSPECIFIED" - Unspecified.
-	//   "PERSON" - Person.
-	//   "PAGE" - [Google+ Page.](http://www.google.com/+/brands/)
-	ObjectType string `json:"objectType,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "ObjectType") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "ObjectType") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *ProfileMetadata) MarshalJSON() ([]byte, error) {
-	type noMethod ProfileMetadata
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
@@ -1758,8 +1693,10 @@ type Source struct {
 	// server.
 	Id string `json:"id,omitempty"`
 
-	// ProfileMetadata: Metadata about a source of type PROFILE.
-	ProfileMetadata *ProfileMetadata `json:"profileMetadata,omitempty"`
+	// ResourceName: The resource name of the source. Only set if there is a
+	// separate
+	// resource endpoint.
+	ResourceName string `json:"resourceName,omitempty"`
 
 	// Type: The source type.
 	//
@@ -2236,11 +2173,10 @@ func (c *PeopleGetBatchGetCall) Do(opts ...googleapi.CallOption) (*GetPeopleResp
 
 }
 
-// method id "people.people.connections.list":
+// method id "people.people.me.connections.list":
 
-type PeopleConnectionsListCall struct {
+type PeopleMeConnectionsListCall struct {
 	s            *Service
-	resourceName string
 	urlParams_   gensupport.URLParams
 	ifNoneMatch_ string
 	ctx_         context.Context
@@ -2250,23 +2186,22 @@ type PeopleConnectionsListCall struct {
 // List: Provides a list of the authenticated user's contacts merged
 // with any
 // linked profiles.
-func (r *PeopleConnectionsService) List(resourceName string) *PeopleConnectionsListCall {
-	c := &PeopleConnectionsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.resourceName = resourceName
+func (r *PeopleMeConnectionsService) List() *PeopleMeConnectionsListCall {
+	c := &PeopleMeConnectionsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	return c
 }
 
 // PageSize sets the optional parameter "pageSize": The number of
 // connections to include in the response. Valid values are
 // between 1 and 500, inclusive. Defaults to 100.
-func (c *PeopleConnectionsListCall) PageSize(pageSize int64) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) PageSize(pageSize int64) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("pageSize", fmt.Sprint(pageSize))
 	return c
 }
 
 // PageToken sets the optional parameter "pageToken": The token of the
 // page to be returned.
-func (c *PeopleConnectionsListCall) PageToken(pageToken string) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) PageToken(pageToken string) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("pageToken", pageToken)
 	return c
 }
@@ -2282,17 +2217,8 @@ func (c *PeopleConnectionsListCall) PageToken(pageToken string) *PeopleConnectio
 // Each path should start with `person.`: for example, `person.names`
 // or
 // `person.photos`.
-func (c *PeopleConnectionsListCall) RequestMaskIncludeField(requestMaskIncludeField string) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) RequestMaskIncludeField(requestMaskIncludeField string) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("requestMask.includeField", requestMaskIncludeField)
-	return c
-}
-
-// RequestSyncToken sets the optional parameter "requestSyncToken":
-// Whether the response should include a sync token, which can be used
-// to get
-// all changes since the last request.
-func (c *PeopleConnectionsListCall) RequestSyncToken(requestSyncToken bool) *PeopleConnectionsListCall {
-	c.urlParams_.Set("requestSyncToken", fmt.Sprint(requestSyncToken))
 	return c
 }
 
@@ -2305,7 +2231,7 @@ func (c *PeopleConnectionsListCall) RequestSyncToken(requestSyncToken bool) *Peo
 //   "LAST_MODIFIED_ASCENDING"
 //   "FIRST_NAME_ASCENDING"
 //   "LAST_NAME_ASCENDING"
-func (c *PeopleConnectionsListCall) SortOrder(sortOrder string) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) SortOrder(sortOrder string) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("sortOrder", sortOrder)
 	return c
 }
@@ -2314,7 +2240,7 @@ func (c *PeopleConnectionsListCall) SortOrder(sortOrder string) *PeopleConnectio
 // returned by a previous call to `people.connections.list`.
 // Only resources changed since the sync token was created will be
 // returned.
-func (c *PeopleConnectionsListCall) SyncToken(syncToken string) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) SyncToken(syncToken string) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("syncToken", syncToken)
 	return c
 }
@@ -2322,7 +2248,7 @@ func (c *PeopleConnectionsListCall) SyncToken(syncToken string) *PeopleConnectio
 // Fields allows partial responses to be retrieved. See
 // https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
 // for more information.
-func (c *PeopleConnectionsListCall) Fields(s ...googleapi.Field) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) Fields(s ...googleapi.Field) *PeopleMeConnectionsListCall {
 	c.urlParams_.Set("fields", googleapi.CombineFields(s))
 	return c
 }
@@ -2332,7 +2258,7 @@ func (c *PeopleConnectionsListCall) Fields(s ...googleapi.Field) *PeopleConnecti
 // getting updates only after the object has changed since the last
 // request. Use googleapi.IsNotModified to check whether the response
 // error from Do is the result of In-None-Match.
-func (c *PeopleConnectionsListCall) IfNoneMatch(entityTag string) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) IfNoneMatch(entityTag string) *PeopleMeConnectionsListCall {
 	c.ifNoneMatch_ = entityTag
 	return c
 }
@@ -2340,21 +2266,21 @@ func (c *PeopleConnectionsListCall) IfNoneMatch(entityTag string) *PeopleConnect
 // Context sets the context to be used in this call's Do method. Any
 // pending HTTP request will be aborted if the provided context is
 // canceled.
-func (c *PeopleConnectionsListCall) Context(ctx context.Context) *PeopleConnectionsListCall {
+func (c *PeopleMeConnectionsListCall) Context(ctx context.Context) *PeopleMeConnectionsListCall {
 	c.ctx_ = ctx
 	return c
 }
 
 // Header returns an http.Header that can be modified by the caller to
 // add HTTP headers to the request.
-func (c *PeopleConnectionsListCall) Header() http.Header {
+func (c *PeopleMeConnectionsListCall) Header() http.Header {
 	if c.header_ == nil {
 		c.header_ = make(http.Header)
 	}
 	return c.header_
 }
 
-func (c *PeopleConnectionsListCall) doRequest(alt string) (*http.Response, error) {
+func (c *PeopleMeConnectionsListCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := make(http.Header)
 	for k, v := range c.header_ {
 		reqHeaders[k] = v
@@ -2366,24 +2292,21 @@ func (c *PeopleConnectionsListCall) doRequest(alt string) (*http.Response, error
 	}
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/{+resourceName}/connections")
+	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/people/me/connections")
 	urls += "?" + c.urlParams_.Encode()
 	req, _ := http.NewRequest("GET", urls, body)
 	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"resourceName": c.resourceName,
-	})
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
-// Do executes the "people.people.connections.list" call.
+// Do executes the "people.people.me.connections.list" call.
 // Exactly one of *ListConnectionsResponse or error will be non-nil. Any
 // non-2xx status code is an error. Response headers are in either
 // *ListConnectionsResponse.ServerResponse.Header or (if a response was
 // returned at all) in error.(*googleapi.Error).Header. Use
 // googleapi.IsNotModified to check whether the returned error was
 // because http.StatusNotModified was returned.
-func (c *PeopleConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConnectionsResponse, error) {
+func (c *PeopleMeConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConnectionsResponse, error) {
 	gensupport.SetOptions(c.urlParams_, opts...)
 	res, err := c.doRequest("json")
 	if res != nil && res.StatusCode == http.StatusNotModified {
@@ -2415,12 +2338,10 @@ func (c *PeopleConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConne
 	return ret, nil
 	// {
 	//   "description": "Provides a list of the authenticated user's contacts merged with any\nlinked profiles.",
-	//   "flatPath": "v1/people/{peopleId}/connections",
+	//   "flatPath": "v1/people/me/connections",
 	//   "httpMethod": "GET",
-	//   "id": "people.people.connections.list",
-	//   "parameterOrder": [
-	//     "resourceName"
-	//   ],
+	//   "id": "people.people.me.connections.list",
+	//   "parameterOrder": [],
 	//   "parameters": {
 	//     "pageSize": {
 	//       "description": "The number of connections to include in the response. Valid values are\nbetween 1 and 500, inclusive. Defaults to 100.",
@@ -2439,18 +2360,6 @@ func (c *PeopleConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConne
 	//       "location": "query",
 	//       "type": "string"
 	//     },
-	//     "requestSyncToken": {
-	//       "description": "Whether the response should include a sync token, which can be used to get\nall changes since the last request.",
-	//       "location": "query",
-	//       "type": "boolean"
-	//     },
-	//     "resourceName": {
-	//       "description": "The resource name to return connections for. Only `people/me` is valid.",
-	//       "location": "path",
-	//       "pattern": "^people/[^/]+$",
-	//       "required": true,
-	//       "type": "string"
-	//     },
 	//     "sortOrder": {
 	//       "description": "The order in which the connections should be sorted. Defaults to\n`LAST_MODIFIED_ASCENDING`.",
 	//       "enum": [
@@ -2467,7 +2376,7 @@ func (c *PeopleConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConne
 	//       "type": "string"
 	//     }
 	//   },
-	//   "path": "v1/{+resourceName}/connections",
+	//   "path": "v1/people/me/connections",
 	//   "response": {
 	//     "$ref": "ListConnectionsResponse"
 	//   },
@@ -2482,7 +2391,7 @@ func (c *PeopleConnectionsListCall) Do(opts ...googleapi.CallOption) (*ListConne
 // Pages invokes f for each page of results.
 // A non-nil error returned from f will halt the iteration.
 // The provided context supersedes any context provided to the Context method.
-func (c *PeopleConnectionsListCall) Pages(ctx context.Context, f func(*ListConnectionsResponse) error) error {
+func (c *PeopleMeConnectionsListCall) Pages(ctx context.Context, f func(*ListConnectionsResponse) error) error {
 	c.ctx_ = ctx
 	defer c.PageToken(c.urlParams_.Get("pageToken")) // reset paging to original point
 	for {

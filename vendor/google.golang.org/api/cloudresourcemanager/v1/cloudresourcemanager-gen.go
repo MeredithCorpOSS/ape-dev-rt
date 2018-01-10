@@ -59,7 +59,6 @@ func New(client *http.Client) (*Service, error) {
 		return nil, errors.New("client is nil")
 	}
 	s := &Service{client: client, BasePath: basePath}
-	s.Liens = NewLiensService(s)
 	s.Operations = NewOperationsService(s)
 	s.Organizations = NewOrganizationsService(s)
 	s.Projects = NewProjectsService(s)
@@ -67,11 +66,10 @@ func New(client *http.Client) (*Service, error) {
 }
 
 type Service struct {
-	client    *http.Client
-	BasePath  string // API endpoint base URL
-	UserAgent string // optional additional User-Agent fragment
-
-	Liens *LiensService
+	client                    *http.Client
+	BasePath                  string // API endpoint base URL
+	UserAgent                 string // optional additional User-Agent fragment
+	GoogleClientHeaderElement string // client header fragment, for Google use only
 
 	Operations *OperationsService
 
@@ -87,13 +85,8 @@ func (s *Service) userAgent() string {
 	return googleapi.UserAgent + " " + s.UserAgent
 }
 
-func NewLiensService(s *Service) *LiensService {
-	rs := &LiensService{s: s}
-	return rs
-}
-
-type LiensService struct {
-	s *Service
+func (s *Service) clientHeader() string {
+	return gensupport.GoogleClientHeader("20170210", s.GoogleClientHeaderElement)
 }
 
 func NewOperationsService(s *Service) *OperationsService {
@@ -147,157 +140,6 @@ type Ancestor struct {
 
 func (s *Ancestor) MarshalJSON() ([]byte, error) {
 	type noMethod Ancestor
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// AuditConfig: Specifies the audit configuration for a service.
-// It consists of which permission types are logged, and what
-// identities, if
-// any, are exempted from logging.
-// An AuditConifg must have one or more AuditLogConfigs.
-//
-// If there are AuditConfigs for both `allServices` and a specific
-// service,
-// the union of the two AuditConfigs is used for that service: the
-// log_types
-// specified in each AuditConfig are enabled, and the exempted_members
-// in each
-// AuditConfig are exempted.
-// Example Policy with multiple AuditConfigs:
-// {
-//   "audit_configs": [
-//     {
-//       "service": "allServices"
-//       "audit_log_configs": [
-//         {
-//           "log_type": "DATA_READ",
-//           "exempted_members": [
-//             "user:foo@gmail.com"
-//           ]
-//         },
-//         {
-//           "log_type": "DATA_WRITE",
-//         },
-//         {
-//           "log_type": "ADMIN_READ",
-//         }
-//       ]
-//     },
-//     {
-//       "service": "fooservice@googleapis.com"
-//       "audit_log_configs": [
-//         {
-//           "log_type": "DATA_READ",
-//         },
-//         {
-//           "log_type": "DATA_WRITE",
-//           "exempted_members": [
-//             "user:bar@gmail.com"
-//           ]
-//         }
-//       ]
-//     }
-//   ]
-// }
-// For fooservice, this policy enables DATA_READ, DATA_WRITE and
-// ADMIN_READ
-// logging. It also exempts foo@gmail.com from DATA_READ logging,
-// and
-// bar@gmail.com from DATA_WRITE logging.
-type AuditConfig struct {
-	// AuditLogConfigs: The configuration for logging of each type of
-	// permission.
-	// Next ID: 4
-	AuditLogConfigs []*AuditLogConfig `json:"auditLogConfigs,omitempty"`
-
-	// Service: Specifies a service that will be enabled for audit
-	// logging.
-	// For example, `resourcemanager`, `storage`, `compute`.
-	// `allServices` is a special value that covers all services.
-	Service string `json:"service,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "AuditLogConfigs") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "AuditLogConfigs") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *AuditConfig) MarshalJSON() ([]byte, error) {
-	type noMethod AuditConfig
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// AuditLogConfig: Provides the configuration for logging a type of
-// permissions.
-// Example:
-//
-//     {
-//       "audit_log_configs": [
-//         {
-//           "log_type": "DATA_READ",
-//           "exempted_members": [
-//             "user:foo@gmail.com"
-//           ]
-//         },
-//         {
-//           "log_type": "DATA_WRITE",
-//         }
-//       ]
-//     }
-//
-// This enables 'DATA_READ' and 'DATA_WRITE' logging, while
-// exempting
-// foo@gmail.com from DATA_READ logging.
-type AuditLogConfig struct {
-	// ExemptedMembers: Specifies the identities that do not cause logging
-	// for this type of
-	// permission.
-	// Follows the same format of Binding.members.
-	ExemptedMembers []string `json:"exemptedMembers,omitempty"`
-
-	// LogType: The log type that this config enables.
-	//
-	// Possible values:
-	//   "LOG_TYPE_UNSPECIFIED" - Default case. Should never be this.
-	//   "ADMIN_READ" - Admin reads. Example: CloudIAM getIamPolicy
-	//   "DATA_WRITE" - Data writes. Example: CloudSQL Users create
-	//   "DATA_READ" - Data reads. Example: CloudSQL Users list
-	LogType string `json:"logType,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "ExemptedMembers") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "ExemptedMembers") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *AuditLogConfig) MarshalJSON() ([]byte, error) {
-	type noMethod AuditLogConfig
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
@@ -526,118 +368,6 @@ func (s *GetAncestryResponse) MarshalJSON() ([]byte, error) {
 type GetIamPolicyRequest struct {
 }
 
-// Lien: A Lien represents an encumbrance on the actions that can be
-// performed on a
-// resource.
-type Lien struct {
-	// CreateTime: The creation time of this Lien.
-	CreateTime string `json:"createTime,omitempty"`
-
-	// Name: A system-generated unique identifier for this Lien.
-	//
-	// Example: `liens/1234abcd`
-	Name string `json:"name,omitempty"`
-
-	// Origin: A stable, user-visible/meaningful string identifying the
-	// origin of the
-	// Lien, intended to be inspected programmatically. Maximum length of
-	// 200
-	// characters.
-	//
-	// Example: 'compute.googleapis.com'
-	Origin string `json:"origin,omitempty"`
-
-	// Parent: A reference to the resource this Lien is attached to. The
-	// server will
-	// validate the parent against those for which Liens are
-	// supported.
-	//
-	// Example: `projects/1234`
-	Parent string `json:"parent,omitempty"`
-
-	// Reason: Concise user-visible strings indicating why an action cannot
-	// be performed
-	// on a resource. Maximum lenth of 200 characters.
-	//
-	// Example: 'Holds production API key'
-	Reason string `json:"reason,omitempty"`
-
-	// Restrictions: The types of operations which should be blocked as a
-	// result of this Lien.
-	// Each value should correspond to an IAM permission. The server
-	// will
-	// validate the permissions against those for which Liens are
-	// supported.
-	//
-	// An empty list is meaningless and will be rejected.
-	//
-	// Example: ['resourcemanager.projects.delete']
-	Restrictions []string `json:"restrictions,omitempty"`
-
-	// ServerResponse contains the HTTP response code and headers from the
-	// server.
-	googleapi.ServerResponse `json:"-"`
-
-	// ForceSendFields is a list of field names (e.g. "CreateTime") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "CreateTime") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *Lien) MarshalJSON() ([]byte, error) {
-	type noMethod Lien
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// ListLiensResponse: The response message for Liens.ListLiens.
-type ListLiensResponse struct {
-	// Liens: A list of Liens.
-	Liens []*Lien `json:"liens,omitempty"`
-
-	// NextPageToken: Token to retrieve the next page of results, or empty
-	// if there are no more
-	// results in the list.
-	NextPageToken string `json:"nextPageToken,omitempty"`
-
-	// ServerResponse contains the HTTP response code and headers from the
-	// server.
-	googleapi.ServerResponse `json:"-"`
-
-	// ForceSendFields is a list of field names (e.g. "Liens") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "Liens") to include in API
-	// requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *ListLiensResponse) MarshalJSON() ([]byte, error) {
-	type noMethod ListLiensResponse
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // ListProjectsResponse: A page of the response received from
 // the
 // ListProjects
@@ -784,9 +514,9 @@ type Organization struct {
 
 	// DisplayName: A friendly string to be used to refer to the
 	// Organization in the UI.
-	// Assigned by the server, set to the primary domain of the G
-	// Suite
-	// customer that owns the organization.
+	// Assigned by the server, set to the firm name of the Google For
+	// Work
+	// customer that owns this organization.
 	// @OutputOnly
 	DisplayName string `json:"displayName,omitempty"`
 
@@ -915,10 +645,6 @@ func (s *OrganizationOwner) MarshalJSON() ([]byte, error) {
 // For a description of IAM and its features, see the
 // [IAM developer's guide](https://cloud.google.com/iam).
 type Policy struct {
-	// AuditConfigs: Specifies cloud audit logging configuration for this
-	// policy.
-	AuditConfigs []*AuditConfig `json:"auditConfigs,omitempty"`
-
 	// Bindings: Associates a list of `members` to a `role`.
 	// Multiple `bindings` must not be specified for the same
 	// `role`.
@@ -952,7 +678,7 @@ type Policy struct {
 	// server.
 	googleapi.ServerResponse `json:"-"`
 
-	// ForceSendFields is a list of field names (e.g. "AuditConfigs") to
+	// ForceSendFields is a list of field names (e.g. "Bindings") to
 	// unconditionally include in API requests. By default, fields with
 	// empty values are omitted from API requests. However, any non-pointer,
 	// non-interface field appearing in ForceSendFields will be sent to the
@@ -960,10 +686,10 @@ type Policy struct {
 	// used to include empty fields in Patch requests.
 	ForceSendFields []string `json:"-"`
 
-	// NullFields is a list of field names (e.g. "AuditConfigs") to include
-	// in API requests with the JSON null value. By default, fields with
-	// empty values are omitted from API requests. However, any field with
-	// an empty value appearing in NullFields will be sent to the server as
+	// NullFields is a list of field names (e.g. "Bindings") to include in
+	// API requests with the JSON null value. By default, fields with empty
+	// values are omitted from API requests. However, any field with an
+	// empty value appearing in NullFields will be sent to the server as
 	// null. It is an error if a field in this list has a non-empty value.
 	// This may be used to include null fields in Patch requests.
 	NullFields []string `json:"-"`
@@ -977,7 +703,7 @@ func (s *Policy) MarshalJSON() ([]byte, error) {
 
 // Project: A Project is a high-level Google Cloud Platform entity.  It
 // is a
-// container for ACLs, APIs, App Engine Apps, VMs, and other
+// container for ACLs, APIs, AppEngine Apps, VMs, and other
 // Google Cloud Platform resources.
 type Project struct {
 	// CreateTime: Creation time.
@@ -1139,8 +865,8 @@ func (s *ProjectCreationStatus) MarshalJSON() ([]byte, error) {
 // `resource` in Google
 // Cloud Platform is a generic term for something you (a developer) may
 // want to
-// interact with through one of our API's. Some examples are an App
-// Engine app,
+// interact with through one of our API's. Some examples are an
+// AppEngine app,
 // a Compute Engine instance, a Cloud SQL database, and so on.
 type ResourceId struct {
 	// Id: Required field for the type-specific id. This should correspond
@@ -1150,7 +876,7 @@ type ResourceId struct {
 
 	// Type: Required field representing the resource type this id is
 	// for.
-	// At present, the valid types are: "organization"
+	// At present, the only valid type is "organization".
 	Type string `json:"type,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "Id") to
@@ -1290,15 +1016,6 @@ type SetIamPolicyRequest struct {
 	// Projects)
 	// might reject them.
 	Policy *Policy `json:"policy,omitempty"`
-
-	// UpdateMask: OPTIONAL: A FieldMask specifying which fields of the
-	// policy to modify. Only
-	// the fields in the mask will be modified. If no mask is provided, a
-	// default
-	// mask is used:
-	// paths: "bindings, etag"
-	// This field is only used by Cloud IAM.
-	UpdateMask string `json:"updateMask,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "Policy") to
 	// unconditionally include in API requests. By default, fields with
@@ -1518,461 +1235,6 @@ func (s *TestIamPermissionsResponse) MarshalJSON() ([]byte, error) {
 type UndeleteProjectRequest struct {
 }
 
-// method id "cloudresourcemanager.liens.create":
-
-type LiensCreateCall struct {
-	s          *Service
-	lien       *Lien
-	urlParams_ gensupport.URLParams
-	ctx_       context.Context
-	header_    http.Header
-}
-
-// Create: Create a Lien which applies to the resource denoted by the
-// `parent` field.
-//
-// Callers of this method will require permission on the `parent`
-// resource.
-// For example, applying to `projects/1234` requires
-// permission
-// `resourcemanager.projects.updateLiens`.
-//
-// NOTE: Some resources may limit the number of Liens which may be
-// applied.
-func (r *LiensService) Create(lien *Lien) *LiensCreateCall {
-	c := &LiensCreateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.lien = lien
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *LiensCreateCall) Fields(s ...googleapi.Field) *LiensCreateCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *LiensCreateCall) Context(ctx context.Context) *LiensCreateCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *LiensCreateCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *LiensCreateCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.lien)
-	if err != nil {
-		return nil, err
-	}
-	reqHeaders.Set("Content-Type", "application/json")
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/liens")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("POST", urls, body)
-	req.Header = reqHeaders
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "cloudresourcemanager.liens.create" call.
-// Exactly one of *Lien or error will be non-nil. Any non-2xx status
-// code is an error. Response headers are in either
-// *Lien.ServerResponse.Header or (if a response was returned at all) in
-// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
-// whether the returned error was because http.StatusNotModified was
-// returned.
-func (c *LiensCreateCall) Do(opts ...googleapi.CallOption) (*Lien, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Lien{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Create a Lien which applies to the resource denoted by the `parent` field.\n\nCallers of this method will require permission on the `parent` resource.\nFor example, applying to `projects/1234` requires permission\n`resourcemanager.projects.updateLiens`.\n\nNOTE: Some resources may limit the number of Liens which may be applied.",
-	//   "flatPath": "v1/liens",
-	//   "httpMethod": "POST",
-	//   "id": "cloudresourcemanager.liens.create",
-	//   "parameterOrder": [],
-	//   "parameters": {},
-	//   "path": "v1/liens",
-	//   "request": {
-	//     "$ref": "Lien"
-	//   },
-	//   "response": {
-	//     "$ref": "Lien"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/cloud-platform",
-	//     "https://www.googleapis.com/auth/cloud-platform.read-only"
-	//   ]
-	// }
-
-}
-
-// method id "cloudresourcemanager.liens.delete":
-
-type LiensDeleteCall struct {
-	s          *Service
-	nameid     string
-	urlParams_ gensupport.URLParams
-	ctx_       context.Context
-	header_    http.Header
-}
-
-// Delete: Delete a Lien by `name`.
-//
-// Callers of this method will require permission on the `parent`
-// resource.
-// For example, a Lien with a `parent` of `projects/1234` requires
-// permission
-// `resourcemanager.projects.updateLiens`.
-func (r *LiensService) Delete(nameid string) *LiensDeleteCall {
-	c := &LiensDeleteCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	c.nameid = nameid
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *LiensDeleteCall) Fields(s ...googleapi.Field) *LiensDeleteCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *LiensDeleteCall) Context(ctx context.Context) *LiensDeleteCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *LiensDeleteCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *LiensDeleteCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/{+name}")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("DELETE", urls, body)
-	req.Header = reqHeaders
-	googleapi.Expand(req.URL, map[string]string{
-		"name": c.nameid,
-	})
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "cloudresourcemanager.liens.delete" call.
-// Exactly one of *Empty or error will be non-nil. Any non-2xx status
-// code is an error. Response headers are in either
-// *Empty.ServerResponse.Header or (if a response was returned at all)
-// in error.(*googleapi.Error).Header. Use googleapi.IsNotModified to
-// check whether the returned error was because http.StatusNotModified
-// was returned.
-func (c *LiensDeleteCall) Do(opts ...googleapi.CallOption) (*Empty, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &Empty{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "Delete a Lien by `name`.\n\nCallers of this method will require permission on the `parent` resource.\nFor example, a Lien with a `parent` of `projects/1234` requires permission\n`resourcemanager.projects.updateLiens`.",
-	//   "flatPath": "v1/liens/{liensId}",
-	//   "httpMethod": "DELETE",
-	//   "id": "cloudresourcemanager.liens.delete",
-	//   "parameterOrder": [
-	//     "name"
-	//   ],
-	//   "parameters": {
-	//     "name": {
-	//       "description": "The name/identifier of the Lien to delete.",
-	//       "location": "path",
-	//       "pattern": "^liens/.+$",
-	//       "required": true,
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "v1/{+name}",
-	//   "response": {
-	//     "$ref": "Empty"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/cloud-platform",
-	//     "https://www.googleapis.com/auth/cloud-platform.read-only"
-	//   ]
-	// }
-
-}
-
-// method id "cloudresourcemanager.liens.list":
-
-type LiensListCall struct {
-	s            *Service
-	urlParams_   gensupport.URLParams
-	ifNoneMatch_ string
-	ctx_         context.Context
-	header_      http.Header
-}
-
-// List: List all Liens applied to the `parent` resource.
-//
-// Callers of this method will require permission on the `parent`
-// resource.
-// For example, a Lien with a `parent` of `projects/1234` requires
-// permission
-// `resourcemanager.projects.get`.
-func (r *LiensService) List() *LiensListCall {
-	c := &LiensListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
-	return c
-}
-
-// PageSize sets the optional parameter "pageSize": The maximum number
-// of items to return. This is a suggestion for the server.
-func (c *LiensListCall) PageSize(pageSize int64) *LiensListCall {
-	c.urlParams_.Set("pageSize", fmt.Sprint(pageSize))
-	return c
-}
-
-// PageToken sets the optional parameter "pageToken": The
-// `next_page_token` value returned from a previous List request, if
-// any.
-func (c *LiensListCall) PageToken(pageToken string) *LiensListCall {
-	c.urlParams_.Set("pageToken", pageToken)
-	return c
-}
-
-// Parent sets the optional parameter "parent": The name of the resource
-// to list all attached Liens.
-// For example, `projects/1234`.
-func (c *LiensListCall) Parent(parent string) *LiensListCall {
-	c.urlParams_.Set("parent", parent)
-	return c
-}
-
-// Fields allows partial responses to be retrieved. See
-// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse
-// for more information.
-func (c *LiensListCall) Fields(s ...googleapi.Field) *LiensListCall {
-	c.urlParams_.Set("fields", googleapi.CombineFields(s))
-	return c
-}
-
-// IfNoneMatch sets the optional parameter which makes the operation
-// fail if the object's ETag matches the given value. This is useful for
-// getting updates only after the object has changed since the last
-// request. Use googleapi.IsNotModified to check whether the response
-// error from Do is the result of In-None-Match.
-func (c *LiensListCall) IfNoneMatch(entityTag string) *LiensListCall {
-	c.ifNoneMatch_ = entityTag
-	return c
-}
-
-// Context sets the context to be used in this call's Do method. Any
-// pending HTTP request will be aborted if the provided context is
-// canceled.
-func (c *LiensListCall) Context(ctx context.Context) *LiensListCall {
-	c.ctx_ = ctx
-	return c
-}
-
-// Header returns an http.Header that can be modified by the caller to
-// add HTTP headers to the request.
-func (c *LiensListCall) Header() http.Header {
-	if c.header_ == nil {
-		c.header_ = make(http.Header)
-	}
-	return c.header_
-}
-
-func (c *LiensListCall) doRequest(alt string) (*http.Response, error) {
-	reqHeaders := make(http.Header)
-	for k, v := range c.header_ {
-		reqHeaders[k] = v
-	}
-	reqHeaders.Set("User-Agent", c.s.userAgent())
-	if c.ifNoneMatch_ != "" {
-		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
-	}
-	var body io.Reader = nil
-	c.urlParams_.Set("alt", alt)
-	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/liens")
-	urls += "?" + c.urlParams_.Encode()
-	req, _ := http.NewRequest("GET", urls, body)
-	req.Header = reqHeaders
-	return gensupport.SendRequest(c.ctx_, c.s.client, req)
-}
-
-// Do executes the "cloudresourcemanager.liens.list" call.
-// Exactly one of *ListLiensResponse or error will be non-nil. Any
-// non-2xx status code is an error. Response headers are in either
-// *ListLiensResponse.ServerResponse.Header or (if a response was
-// returned at all) in error.(*googleapi.Error).Header. Use
-// googleapi.IsNotModified to check whether the returned error was
-// because http.StatusNotModified was returned.
-func (c *LiensListCall) Do(opts ...googleapi.CallOption) (*ListLiensResponse, error) {
-	gensupport.SetOptions(c.urlParams_, opts...)
-	res, err := c.doRequest("json")
-	if res != nil && res.StatusCode == http.StatusNotModified {
-		if res.Body != nil {
-			res.Body.Close()
-		}
-		return nil, &googleapi.Error{
-			Code:   res.StatusCode,
-			Header: res.Header,
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer googleapi.CloseBody(res)
-	if err := googleapi.CheckResponse(res); err != nil {
-		return nil, err
-	}
-	ret := &ListLiensResponse{
-		ServerResponse: googleapi.ServerResponse{
-			Header:         res.Header,
-			HTTPStatusCode: res.StatusCode,
-		},
-	}
-	target := &ret
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return nil, err
-	}
-	return ret, nil
-	// {
-	//   "description": "List all Liens applied to the `parent` resource.\n\nCallers of this method will require permission on the `parent` resource.\nFor example, a Lien with a `parent` of `projects/1234` requires permission\n`resourcemanager.projects.get`.",
-	//   "flatPath": "v1/liens",
-	//   "httpMethod": "GET",
-	//   "id": "cloudresourcemanager.liens.list",
-	//   "parameterOrder": [],
-	//   "parameters": {
-	//     "pageSize": {
-	//       "description": "The maximum number of items to return. This is a suggestion for the server.",
-	//       "format": "int32",
-	//       "location": "query",
-	//       "type": "integer"
-	//     },
-	//     "pageToken": {
-	//       "description": "The `next_page_token` value returned from a previous List request, if any.",
-	//       "location": "query",
-	//       "type": "string"
-	//     },
-	//     "parent": {
-	//       "description": "The name of the resource to list all attached Liens.\nFor example, `projects/1234`.",
-	//       "location": "query",
-	//       "type": "string"
-	//     }
-	//   },
-	//   "path": "v1/liens",
-	//   "response": {
-	//     "$ref": "ListLiensResponse"
-	//   },
-	//   "scopes": [
-	//     "https://www.googleapis.com/auth/cloud-platform",
-	//     "https://www.googleapis.com/auth/cloud-platform.read-only"
-	//   ]
-	// }
-
-}
-
-// Pages invokes f for each page of results.
-// A non-nil error returned from f will halt the iteration.
-// The provided context supersedes any context provided to the Context method.
-func (c *LiensListCall) Pages(ctx context.Context, f func(*ListLiensResponse) error) error {
-	c.ctx_ = ctx
-	defer c.PageToken(c.urlParams_.Get("pageToken")) // reset paging to original point
-	for {
-		x, err := c.Do()
-		if err != nil {
-			return err
-		}
-		if err := f(x); err != nil {
-			return err
-		}
-		if x.NextPageToken == "" {
-			return nil
-		}
-		c.PageToken(x.NextPageToken)
-	}
-}
-
 // method id "cloudresourcemanager.operations.get":
 
 type OperationsGetCall struct {
@@ -2036,6 +1298,7 @@ func (c *OperationsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -2177,6 +1440,7 @@ func (c *OrganizationsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -2312,6 +1576,7 @@ func (c *OrganizationsGetIamPolicyCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.getiampolicyrequest)
 	if err != nil {
@@ -2376,7 +1641,7 @@ func (c *OrganizationsGetIamPolicyCall) Do(opts ...googleapi.CallOption) (*Polic
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy is being requested.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy is being requested.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "pattern": "^organizations/[^/]+$",
 	//       "required": true,
@@ -2452,6 +1717,7 @@ func (c *OrganizationsSearchCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.searchorganizationsrequest)
 	if err != nil {
@@ -2600,6 +1866,7 @@ func (c *OrganizationsSetIamPolicyCall) doRequest(alt string) (*http.Response, e
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.setiampolicyrequest)
 	if err != nil {
@@ -2664,7 +1931,7 @@ func (c *OrganizationsSetIamPolicyCall) Do(opts ...googleapi.CallOption) (*Polic
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy is being specified.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy is being specified.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "pattern": "^organizations/[^/]+$",
 	//       "required": true,
@@ -2738,6 +2005,7 @@ func (c *OrganizationsTestIamPermissionsCall) doRequest(alt string) (*http.Respo
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.testiampermissionsrequest)
 	if err != nil {
@@ -2802,7 +2070,7 @@ func (c *OrganizationsTestIamPermissionsCall) Do(opts ...googleapi.CallOption) (
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy detail is being requested.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy detail is being requested.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "pattern": "^organizations/[^/]+$",
 	//       "required": true,
@@ -2884,6 +2152,7 @@ func (c *ProjectsCreateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.project)
 	if err != nil {
@@ -3029,6 +2298,7 @@ func (c *ProjectsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	urls := googleapi.ResolveRelative(c.s.BasePath, "v1/projects/{projectId}")
@@ -3167,6 +2437,7 @@ func (c *ProjectsGetCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -3302,6 +2573,7 @@ func (c *ProjectsGetAncestryCall) doRequest(alt string) (*http.Response, error) 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.getancestryrequest)
 	if err != nil {
@@ -3439,6 +2711,7 @@ func (c *ProjectsGetIamPolicyCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.getiampolicyrequest)
 	if err != nil {
@@ -3503,7 +2776,7 @@ func (c *ProjectsGetIamPolicyCall) Do(opts ...googleapi.CallOption) (*Policy, er
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy is being requested.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy is being requested.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "required": true,
 	//       "type": "string"
@@ -3633,6 +2906,7 @@ func (c *ProjectsListCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
@@ -3842,6 +3116,7 @@ func (c *ProjectsSetIamPolicyCall) doRequest(alt string) (*http.Response, error)
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.setiampolicyrequest)
 	if err != nil {
@@ -3906,7 +3181,7 @@ func (c *ProjectsSetIamPolicyCall) Do(opts ...googleapi.CallOption) (*Policy, er
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy is being specified.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy is being specified.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "required": true,
 	//       "type": "string"
@@ -3977,6 +3252,7 @@ func (c *ProjectsTestIamPermissionsCall) doRequest(alt string) (*http.Response, 
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.testiampermissionsrequest)
 	if err != nil {
@@ -4041,7 +3317,7 @@ func (c *ProjectsTestIamPermissionsCall) Do(opts ...googleapi.CallOption) (*Test
 	//   ],
 	//   "parameters": {
 	//     "resource": {
-	//       "description": "REQUIRED: The resource for which the policy detail is being requested.\nSee the operation documentation for the appropriate value for this field.",
+	//       "description": "REQUIRED: The resource for which the policy detail is being requested.\n`resource` is usually specified as a path. For example, a Project\nresource is specified as `projects/{project}`.",
 	//       "location": "path",
 	//       "required": true,
 	//       "type": "string"
@@ -4120,6 +3396,7 @@ func (c *ProjectsUndeleteCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.undeleteprojectrequest)
 	if err != nil {
@@ -4258,6 +3535,7 @@ func (c *ProjectsUpdateCall) doRequest(alt string) (*http.Response, error) {
 		reqHeaders[k] = v
 	}
 	reqHeaders.Set("User-Agent", c.s.userAgent())
+	reqHeaders.Set("x-goog-api-client", c.s.clientHeader())
 	var body io.Reader = nil
 	body, err := googleapi.WithoutDataWrapper.JSONReader(c.project)
 	if err != nil {

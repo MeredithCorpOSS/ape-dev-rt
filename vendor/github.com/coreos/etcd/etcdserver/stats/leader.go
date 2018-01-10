@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,24 +24,30 @@ import (
 // LeaderStats is used by the leader in an etcd cluster, and encapsulates
 // statistics about communication with its followers
 type LeaderStats struct {
+	leaderStats
+	sync.Mutex
+}
+
+type leaderStats struct {
+	// Leader is the ID of the leader in the etcd cluster.
 	// TODO(jonboulle): clarify that these are IDs, not names
 	Leader    string                    `json:"leader"`
 	Followers map[string]*FollowerStats `json:"followers"`
-
-	sync.Mutex
 }
 
 // NewLeaderStats generates a new LeaderStats with the given id as leader
 func NewLeaderStats(id string) *LeaderStats {
 	return &LeaderStats{
-		Leader:    id,
-		Followers: make(map[string]*FollowerStats),
+		leaderStats: leaderStats{
+			Leader:    id,
+			Followers: make(map[string]*FollowerStats),
+		},
 	}
 }
 
 func (ls *LeaderStats) JSON() []byte {
 	ls.Lock()
-	stats := *ls
+	stats := ls.leaderStats
 	ls.Unlock()
 	b, err := json.Marshal(stats)
 	// TODO(jonboulle): appropriate error handling?

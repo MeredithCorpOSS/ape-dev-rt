@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build linux
-
 package fileutil
 
 import (
+	"io"
 	"os"
-	"syscall"
 )
 
 // Preallocate tries to allocate the space for given
@@ -26,17 +24,31 @@ import (
 // few filesystems (btrfs, ext4, etc.).
 // If the operation is unsupported, no error will be returned.
 // Otherwise, the error encountered will be returned.
-func Preallocate(f *os.File, sizeInBytes int) error {
-	// use mode = 1 to keep size
-	// see FALLOC_FL_KEEP_SIZE
-	err := syscall.Fallocate(int(f.Fd()), 1, 0, int64(sizeInBytes))
+func Preallocate(f *os.File, sizeInBytes int64, extendFile bool) error {
+	if sizeInBytes == 0 {
+		// fallocate will return EINVAL if length is 0; skip
+		return nil
+	}
+	if extendFile {
+		return preallocExtend(f, sizeInBytes)
+	}
+	return preallocFixed(f, sizeInBytes)
+}
+
+func preallocExtendTrunc(f *os.File, sizeInBytes int64) error {
+	curOff, err := f.Seek(0, io.SeekCurrent)
 	if err != nil {
-		errno, ok := err.(syscall.Errno)
-		// treat not support as nil error
-		if ok && errno == syscall.ENOTSUP {
-			return nil
-		}
 		return err
 	}
-	return nil
+	size, err := f.Seek(sizeInBytes, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Seek(curOff, io.SeekStart); err != nil {
+		return err
+	}
+	if sizeInBytes > size {
+		return nil
+	}
+	return f.Truncate(sizeInBytes)
 }

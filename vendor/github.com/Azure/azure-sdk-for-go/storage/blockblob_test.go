@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"encoding/base64"
+	"io"
 	"io/ioutil"
 
 	chk "gopkg.in/check.v1"
@@ -22,9 +23,11 @@ func (s *BlockBlobSuite) TestCreateBlockBlobFromReader(c *chk.C) {
 	c.Assert(cnt.Create(nil), chk.IsNil)
 	defer cnt.Delete(nil)
 
-	data := content(8888)
-	b.Properties.ContentLength = int64(len(data))
-	c.Assert(b.CreateBlockBlobFromReader(bytes.NewReader(data), nil), chk.IsNil)
+	length := 8888
+	data := content(length)
+	err := b.CreateBlockBlobFromReader(bytes.NewReader(data), nil)
+	c.Assert(err, chk.IsNil)
+	c.Assert(b.Properties.ContentLength, chk.Equals, int64(length))
 
 	resp, err := b.Get(nil)
 	c.Assert(err, chk.IsNil)
@@ -33,26 +36,6 @@ func (s *BlockBlobSuite) TestCreateBlockBlobFromReader(c *chk.C) {
 
 	c.Assert(err, chk.IsNil)
 	c.Assert(gotData, chk.DeepEquals, data)
-}
-
-func (s *BlockBlobSuite) TestCreateBlockBlobFromReaderWithShortData(c *chk.C) {
-	cli := getBlobClient(c)
-	rec := cli.client.appendRecorder(c)
-	defer rec.Stop()
-
-	cnt := cli.GetContainerReference(containerName(c))
-	b := cnt.GetBlobReference(blobName(c))
-	c.Assert(cnt.Create(nil), chk.IsNil)
-	defer cnt.Delete(nil)
-
-	data := content(8888)
-	b.Properties.ContentLength = 9999
-	err := b.CreateBlockBlobFromReader(bytes.NewReader(data), nil)
-	c.Assert(err, chk.NotNil)
-
-	_, err = b.Get(nil)
-	// Upload was incomplete: blob should not have been created.
-	c.Assert(err, chk.NotNil)
 }
 
 func (s *BlockBlobSuite) TestPutBlock(c *chk.C) {
@@ -149,4 +132,21 @@ func (s *BlockBlobSuite) TestPutEmptyBlockBlob(c *chk.C) {
 	err := b.GetProperties(nil)
 	c.Assert(err, chk.IsNil)
 	c.Assert(b.Properties.ContentLength, chk.Not(chk.Equals), 0)
+}
+
+func (s *BlockBlobSuite) TestPutBlockWithLengthUsingLimitReader(c *chk.C) {
+	cli := getBlobClient(c)
+	rec := cli.client.appendRecorder(c)
+	defer rec.Stop()
+
+	cnt := cli.GetContainerReference(containerName(c))
+	b := cnt.GetBlobReference(blobName(c))
+	c.Assert(cnt.Create(nil), chk.IsNil)
+	defer cnt.Delete(nil)
+
+	length := 512
+	data := content(length)
+
+	lr := io.LimitReader(bytes.NewReader(data), 256)
+	c.Assert(b.PutBlockWithLength("0000", 256, lr, nil), chk.IsNil)
 }
