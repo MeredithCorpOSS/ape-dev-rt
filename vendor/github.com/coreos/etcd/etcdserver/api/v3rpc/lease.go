@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,35 +15,92 @@
 package v3rpc
 
 import (
+	"context"
 	"io"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/lease"
 )
 
 type LeaseServer struct {
-	le etcdserver.Lessor
+	hdr header
+	le  etcdserver.Lessor
 }
 
-func NewLeaseServer(le etcdserver.Lessor) pb.LeaseServer {
-	return &LeaseServer{le: le}
+func NewLeaseServer(s *etcdserver.EtcdServer) pb.LeaseServer {
+	return &LeaseServer{le: s, hdr: newHeader(s)}
 }
 
-func (ls *LeaseServer) LeaseCreate(ctx context.Context, cr *pb.LeaseCreateRequest) (*pb.LeaseCreateResponse, error) {
-	return ls.le.LeaseCreate(ctx, cr)
+func (ls *LeaseServer) LeaseGrant(ctx context.Context, cr *pb.LeaseGrantRequest) (*pb.LeaseGrantResponse, error) {
+	resp, err := ls.le.LeaseGrant(ctx, cr)
+
+	if err != nil {
+		return nil, togRPCError(err)
+	}
+	ls.hdr.fill(resp.Header)
+	return resp, nil
 }
 
 func (ls *LeaseServer) LeaseRevoke(ctx context.Context, rr *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error) {
-	r, err := ls.le.LeaseRevoke(ctx, rr)
+	resp, err := ls.le.LeaseRevoke(ctx, rr)
 	if err != nil {
-		return nil, ErrLeaseNotFound
+		return nil, togRPCError(err)
 	}
-	return r, nil
+	ls.hdr.fill(resp.Header)
+	return resp, nil
 }
 
-func (ls *LeaseServer) LeaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) error {
+func (ls *LeaseServer) LeaseTimeToLive(ctx context.Context, rr *pb.LeaseTimeToLiveRequest) (*pb.LeaseTimeToLiveResponse, error) {
+	resp, err := ls.le.LeaseTimeToLive(ctx, rr)
+	if err != nil && err != lease.ErrLeaseNotFound {
+		return nil, togRPCError(err)
+	}
+	if err == lease.ErrLeaseNotFound {
+		resp = &pb.LeaseTimeToLiveResponse{
+			Header: &pb.ResponseHeader{},
+			ID:     rr.ID,
+			TTL:    -1,
+		}
+	}
+	ls.hdr.fill(resp.Header)
+	return resp, nil
+}
+
+func (ls *LeaseServer) LeaseLeases(ctx context.Context, rr *pb.LeaseLeasesRequest) (*pb.LeaseLeasesResponse, error) {
+	resp, err := ls.le.LeaseLeases(ctx, rr)
+	if err != nil && err != lease.ErrLeaseNotFound {
+		return nil, togRPCError(err)
+	}
+	if err == lease.ErrLeaseNotFound {
+		resp = &pb.LeaseLeasesResponse{
+			Header: &pb.ResponseHeader{},
+			Leases: []*pb.LeaseStatus{},
+		}
+	}
+	ls.hdr.fill(resp.Header)
+	return resp, nil
+}
+
+func (ls *LeaseServer) LeaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) (err error) {
+	errc := make(chan error, 1)
+	go func() {
+		errc <- ls.leaseKeepAlive(stream)
+	}()
+	select {
+	case err = <-errc:
+	case <-stream.Context().Done():
+		// the only server-side cancellation is noleader for now.
+		err = stream.Context().Err()
+		if err == context.Canceled {
+			err = rpctypes.ErrGRPCNoLeader
+		}
+	}
+	return err
+}
+
+func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) error {
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -53,12 +110,26 @@ func (ls *LeaseServer) LeaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) erro
 			return err
 		}
 
-		ttl, err := ls.le.LeaseRenew(lease.LeaseID(req.ID))
-		if err != nil {
-			return err
+		// Create header before we sent out the renew request.
+		// This can make sure that the revision is strictly smaller or equal to
+		// when the keepalive happened at the local server (when the local server is the leader)
+		// or remote leader.
+		// Without this, a lease might be revoked at rev 3 but client can see the keepalive succeeded
+		// at rev 4.
+		resp := &pb.LeaseKeepAliveResponse{ID: req.ID, Header: &pb.ResponseHeader{}}
+		ls.hdr.fill(resp.Header)
+
+		ttl, err := ls.le.LeaseRenew(stream.Context(), lease.LeaseID(req.ID))
+		if err == lease.ErrLeaseNotFound {
+			err = nil
+			ttl = 0
 		}
 
-		resp := &pb.LeaseKeepAliveResponse{ID: req.ID, TTL: ttl}
+		if err != nil {
+			return togRPCError(err)
+		}
+
+		resp.TTL = ttl
 		err = stream.Send(resp)
 		if err != nil {
 			return err

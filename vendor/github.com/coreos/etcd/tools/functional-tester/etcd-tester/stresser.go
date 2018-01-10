@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,101 +16,202 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
-	"net"
-	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/client"
+	"golang.org/x/time/rate"
+	"google.golang.org/grpc/grpclog"
 )
+
+func init() { grpclog.SetLogger(plog) }
 
 type Stresser interface {
 	// Stress starts to stress the etcd cluster
 	Stress() error
-	// Cancel cancels the stress test on the etcd cluster
-	Cancel()
-	// Report reports the success and failure of the stress test
-	Report() (success int, failure int)
+	// Pause stops the stresser from sending requests to etcd. Resume by calling Stress.
+	Pause()
+	// Close releases all of the Stresser's resources.
+	Close()
+	// ModifiedKeys reports the number of keys created and deleted by stresser
+	ModifiedKeys() int64
+	// Checker returns an invariant checker for after the stresser is canceled.
+	Checker() Checker
 }
 
-type stresser struct {
-	Endpoint string
-
-	KeySize        int
-	KeySuffixRange int
-
-	N int
-	// TODO: not implemented
-	Interval time.Duration
-
-	mu      sync.Mutex
-	failure int
-	success int
-
-	cancel func()
+// nopStresser implements Stresser that does nothing
+type nopStresser struct {
+	start time.Time
+	qps   int
 }
 
-func (s *stresser) Stress() error {
-	cfg := client.Config{
-		Endpoints: []string{s.Endpoint},
-		Transport: &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout:   time.Second,
-				KeepAlive: 30 * time.Second,
-			}).Dial,
-			MaxIdleConnsPerHost: s.N,
-		},
-	}
-	c, err := client.New(cfg)
-	if err != nil {
-		return err
-	}
+func (s *nopStresser) Stress() error { return nil }
+func (s *nopStresser) Pause()        {}
+func (s *nopStresser) Close()        {}
+func (s *nopStresser) ModifiedKeys() int64 {
+	return 0
+}
+func (s *nopStresser) Checker() Checker { return nil }
 
-	kv := client.NewKeysAPI(c)
-	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
+// compositeStresser implements a Stresser that runs a slice of
+// stressers concurrently.
+type compositeStresser struct {
+	stressers []Stresser
+}
 
-	for i := 0; i < s.N; i++ {
-		go func() {
-			for {
-				setctx, setcancel := context.WithTimeout(ctx, client.DefaultRequestTimeout)
-				key := fmt.Sprintf("foo%d", rand.Intn(s.KeySuffixRange))
-				_, err := kv.Set(setctx, key, randStr(s.KeySize), nil)
-				setcancel()
-				if err == context.Canceled {
-					return
-				}
-				s.mu.Lock()
-				if err != nil {
-					s.failure++
-				} else {
-					s.success++
-				}
-				s.mu.Unlock()
+func (cs *compositeStresser) Stress() error {
+	for i, s := range cs.stressers {
+		if err := s.Stress(); err != nil {
+			for j := 0; j < i; j++ {
+				cs.stressers[i].Close()
 			}
-		}()
+			return err
+		}
 	}
-
-	<-ctx.Done()
 	return nil
 }
 
-func (s *stresser) Cancel() {
-	s.cancel()
-}
-
-func (s *stresser) Report() (success int, failure int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.success, s.failure
-}
-
-func randStr(size int) string {
-	data := make([]byte, size)
-	for i := 0; i < size; i++ {
-		data[i] = byte(int('a') + rand.Intn(26))
+func (cs *compositeStresser) Pause() {
+	var wg sync.WaitGroup
+	wg.Add(len(cs.stressers))
+	for i := range cs.stressers {
+		go func(s Stresser) {
+			defer wg.Done()
+			s.Pause()
+		}(cs.stressers[i])
 	}
-	return string(data)
+	wg.Wait()
+}
+
+func (cs *compositeStresser) Close() {
+	var wg sync.WaitGroup
+	wg.Add(len(cs.stressers))
+	for i := range cs.stressers {
+		go func(s Stresser) {
+			defer wg.Done()
+			s.Close()
+		}(cs.stressers[i])
+	}
+	wg.Wait()
+}
+
+func (cs *compositeStresser) ModifiedKeys() (modifiedKey int64) {
+	for _, stress := range cs.stressers {
+		modifiedKey += stress.ModifiedKeys()
+	}
+	return modifiedKey
+}
+
+func (cs *compositeStresser) Checker() Checker {
+	var chks []Checker
+	for _, s := range cs.stressers {
+		if chk := s.Checker(); chk != nil {
+			chks = append(chks, chk)
+		}
+	}
+	if len(chks) == 0 {
+		return nil
+	}
+	return newCompositeChecker(chks)
+}
+
+type stressConfig struct {
+	keyLargeSize   int
+	keySize        int
+	keySuffixRange int
+
+	numLeases    int
+	keysPerLease int
+
+	rateLimiter *rate.Limiter
+
+	etcdRunnerPath string
+}
+
+// NewStresser creates stresser from a comma separated list of stresser types.
+func NewStresser(s string, sc *stressConfig, m *member) Stresser {
+	types := strings.Split(s, ",")
+	if len(types) > 1 {
+		stressers := make([]Stresser, len(types))
+		for i, stype := range types {
+			stressers[i] = NewStresser(stype, sc, m)
+		}
+		return &compositeStresser{stressers}
+	}
+	switch s {
+	case "nop":
+		return &nopStresser{start: time.Now(), qps: int(sc.rateLimiter.Limit())}
+	case "keys":
+		// TODO: Too intensive stressers can panic etcd member with
+		// 'out of memory' error. Put rate limits in server side.
+		return &keyStresser{
+			Endpoint:       m.grpcAddr(),
+			keyLargeSize:   sc.keyLargeSize,
+			keySize:        sc.keySize,
+			keySuffixRange: sc.keySuffixRange,
+			N:              100,
+			rateLimiter:    sc.rateLimiter,
+		}
+	case "v2keys":
+		return &v2Stresser{
+			Endpoint:       m.ClientURL,
+			keySize:        sc.keySize,
+			keySuffixRange: sc.keySuffixRange,
+			N:              100,
+			rateLimiter:    sc.rateLimiter,
+		}
+	case "lease":
+		return &leaseStresser{
+			endpoint:     m.grpcAddr(),
+			numLeases:    sc.numLeases,
+			keysPerLease: sc.keysPerLease,
+			rateLimiter:  sc.rateLimiter,
+		}
+	case "election-runner":
+		reqRate := 100
+		args := []string{
+			"election",
+			fmt.Sprintf("%v", time.Now().UnixNano()), // election name as current nano time
+			"--dial-timeout=10s",
+			"--endpoints", m.grpcAddr(),
+			"--total-client-connections=10",
+			"--rounds=0", // runs forever
+			"--req-rate", fmt.Sprintf("%v", reqRate),
+		}
+		return newRunnerStresser(sc.etcdRunnerPath, args, sc.rateLimiter, reqRate)
+	case "watch-runner":
+		reqRate := 100
+		args := []string{
+			"watcher",
+			"--prefix", fmt.Sprintf("%v", time.Now().UnixNano()), // prefix all keys with nano time
+			"--total-keys=1",
+			"--total-prefixes=1",
+			"--watch-per-prefix=1",
+			"--endpoints", m.grpcAddr(),
+			"--rounds=0", // runs forever
+			"--req-rate", fmt.Sprintf("%v", reqRate),
+		}
+		return newRunnerStresser(sc.etcdRunnerPath, args, sc.rateLimiter, reqRate)
+	case "lock-racer-runner":
+		reqRate := 100
+		args := []string{
+			"lock-racer",
+			fmt.Sprintf("%v", time.Now().UnixNano()), // locker name as current nano time
+			"--endpoints", m.grpcAddr(),
+			"--total-client-connections=10",
+			"--rounds=0", // runs forever
+			"--req-rate", fmt.Sprintf("%v", reqRate),
+		}
+		return newRunnerStresser(sc.etcdRunnerPath, args, sc.rateLimiter, reqRate)
+	case "lease-runner":
+		args := []string{
+			"lease-renewer",
+			"--ttl=30",
+			"--endpoints", m.grpcAddr(),
+		}
+		return newRunnerStresser(sc.etcdRunnerPath, args, sc.rateLimiter, 0)
+	default:
+		plog.Panicf("unknown stresser type: %s\n", s)
+	}
+	return nil // never reach here
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build go1.5
-
 package rafthttp
 
 import (
@@ -26,10 +24,13 @@ func (t *roundTripperBlocker) RoundTrip(req *http.Request) (*http.Response, erro
 	t.mu.Lock()
 	t.cancel[req] = c
 	t.mu.Unlock()
+	ctx := req.Context()
 	select {
 	case <-t.unblockc:
 		return &http.Response{StatusCode: http.StatusNoContent, Body: &nopReadCloser{}}, nil
 	case <-req.Cancel:
+		return nil, errors.New("request canceled")
+	case <-ctx.Done():
 		return nil, errors.New("request canceled")
 	case <-c:
 		return nil, errors.New("request canceled")

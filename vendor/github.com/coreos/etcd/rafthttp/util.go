@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 package rafthttp
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -24,11 +23,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/go-semver/semver"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/version"
+	"github.com/coreos/go-semver/semver"
 )
 
 var (
@@ -38,8 +36,8 @@ var (
 
 // NewListener returns a listener for raft message transfer between peers.
 // It uses timeout listener to identify broken streams promptly.
-func NewListener(u url.URL, tlsInfo transport.TLSInfo) (net.Listener, error) {
-	return transport.NewTimeoutListener(u.Host, u.Scheme, tlsInfo, ConnReadTimeout, ConnWriteTimeout)
+func NewListener(u url.URL, tlsinfo *transport.TLSInfo) (net.Listener, error) {
+	return transport.NewTimeoutListener(u.Host, u.Scheme, tlsinfo, ConnReadTimeout, ConnWriteTimeout)
 }
 
 // NewRoundTripper returns a roundTripper used to send requests
@@ -60,33 +58,8 @@ func newStreamRoundTripper(tlsInfo transport.TLSInfo, dialTimeout time.Duration)
 	return transport.NewTimeoutTransport(tlsInfo, dialTimeout, ConnReadTimeout, ConnWriteTimeout)
 }
 
-func writeEntryTo(w io.Writer, ent *raftpb.Entry) error {
-	size := ent.Size()
-	if err := binary.Write(w, binary.BigEndian, uint64(size)); err != nil {
-		return err
-	}
-	b, err := ent.Marshal()
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(b)
-	return err
-}
-
-func readEntryFrom(r io.Reader, ent *raftpb.Entry) error {
-	var l uint64
-	if err := binary.Read(r, binary.BigEndian, &l); err != nil {
-		return err
-	}
-	buf := make([]byte, int(l))
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return err
-	}
-	return ent.Unmarshal(buf)
-}
-
 // createPostRequest creates a HTTP POST request that sends raft message.
-func createPostRequest(u url.URL, path string, body io.Reader, ct string, from, cid types.ID) *http.Request {
+func createPostRequest(u url.URL, path string, body io.Reader, ct string, urls types.URLs, from, cid types.ID) *http.Request {
 	uu := u
 	uu.Path = path
 	req, err := http.NewRequest("POST", uu.String(), body)
@@ -98,6 +71,8 @@ func createPostRequest(u url.URL, path string, body io.Reader, ct string, from, 
 	req.Header.Set("X-Server-Version", version.Version)
 	req.Header.Set("X-Min-Cluster-Version", version.MinClusterVersion)
 	req.Header.Set("X-Etcd-Cluster-ID", cid.String())
+	setPeerURLsHeader(req, urls)
+
 	return req
 }
 
@@ -126,7 +101,7 @@ func checkPostResponse(resp *http.Response, body []byte, req *http.Request, to t
 	}
 }
 
-// reportErr reports the given error through sending it into
+// reportCriticalError reports the given error through sending it into
 // the given error channel.
 // If the error channel is filled up when sending error, it drops the error
 // because the fact that error has happened is reported, which is
@@ -186,4 +161,17 @@ func checkVersionCompability(name string, server, minCluster *semver.Version) er
 		return fmt.Errorf("local version is too low: remote[%s]=%s, local=%s", name, server, localServer)
 	}
 	return nil
+}
+
+// setPeerURLsHeader reports local urls for peer discovery
+func setPeerURLsHeader(req *http.Request, urls types.URLs) {
+	if urls == nil {
+		// often not set in unit tests
+		return
+	}
+	peerURLs := make([]string, urls.Len())
+	for i := range urls {
+		peerURLs[i] = urls[i].String()
+	}
+	req.Header.Set("X-PeerURLs", strings.Join(peerURLs, ","))
 }

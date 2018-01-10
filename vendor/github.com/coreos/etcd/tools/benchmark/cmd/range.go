@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,17 @@ package cmd
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/cheggaaa/pb"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/spf13/cobra"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/etcdserver/etcdserverpb"
+	v3 "github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/report"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
+	"golang.org/x/time/rate"
+	"gopkg.in/cheggaaa/pb.v1"
 )
 
 // rangeCmd represents the range command
@@ -34,12 +38,16 @@ var rangeCmd = &cobra.Command{
 }
 
 var (
-	rangeTotal int
+	rangeRate        int
+	rangeTotal       int
+	rangeConsistency string
 )
 
 func init() {
 	RootCmd.AddCommand(rangeCmd)
+	rangeCmd.Flags().IntVar(&rangeRate, "rate", 0, "Maximum range requests per second (0 is no limit)")
 	rangeCmd.Flags().IntVar(&rangeTotal, "total", 10000, "Total number of range requests")
+	rangeCmd.Flags().StringVar(&rangeConsistency, "consistency", "l", "Linearizable(l) or Serializable(s)")
 }
 
 func rangeFunc(cmd *cobra.Command, args []string) {
@@ -48,57 +56,64 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	k := []byte(args[0])
-	var end []byte
-	if len(args) == 1 {
-		end = []byte(args[1])
+	k := args[0]
+	end := ""
+	if len(args) == 2 {
+		end = args[1]
 	}
 
-	results = make(chan result)
-	requests := make(chan etcdserverpb.RangeRequest, totalClients)
-	bar = pb.New(rangeTotal)
+	if rangeConsistency == "l" {
+		fmt.Println("bench with linearizable range")
+	} else if rangeConsistency == "s" {
+		fmt.Println("bench with serializable range")
+	} else {
+		fmt.Fprintln(os.Stderr, cmd.Usage())
+		os.Exit(1)
+	}
 
+	if rangeRate == 0 {
+		rangeRate = math.MaxInt32
+	}
+	limit := rate.NewLimiter(rate.Limit(rangeRate), 1)
+
+	requests := make(chan v3.Op, totalClients)
 	clients := mustCreateClients(totalClients, totalConns)
 
+	bar = pb.New(rangeTotal)
 	bar.Format("Bom !")
 	bar.Start()
 
+	r := newReport()
 	for i := range clients {
 		wg.Add(1)
-		go doRange(clients[i].KV, requests)
-	}
+		go func(c *v3.Client) {
+			defer wg.Done()
+			for op := range requests {
+				limit.Wait(context.Background())
 
-	pdoneC := printReport(results)
+				st := time.Now()
+				_, err := c.Do(context.Background(), op)
+				r.Results() <- report.Result{Err: err, Start: st, End: time.Now()}
+				bar.Increment()
+			}
+		}(clients[i])
+	}
 
 	go func() {
 		for i := 0; i < rangeTotal; i++ {
-			requests <- etcdserverpb.RangeRequest{
-				Key:      k,
-				RangeEnd: end}
+			opts := []v3.OpOption{v3.WithRange(end)}
+			if rangeConsistency == "s" {
+				opts = append(opts, v3.WithSerializable())
+			}
+			op := v3.OpGet(k, opts...)
+			requests <- op
 		}
 		close(requests)
 	}()
 
+	rc := r.Run()
 	wg.Wait()
-
+	close(r.Results())
 	bar.Finish()
-
-	close(results)
-	<-pdoneC
-}
-
-func doRange(client etcdserverpb.KVClient, requests <-chan etcdserverpb.RangeRequest) {
-	defer wg.Done()
-
-	for req := range requests {
-		st := time.Now()
-		_, err := client.Range(context.Background(), &req)
-
-		var errStr string
-		if err != nil {
-			errStr = err.Error()
-		}
-		results <- result{errStr: errStr, duration: time.Since(st)}
-		bar.Increment()
-	}
+	fmt.Printf("%s", <-rc)
 }

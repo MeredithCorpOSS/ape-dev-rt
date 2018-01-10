@@ -252,11 +252,6 @@ type BatchUpdatePresentationRequest struct {
 	// Requests: A list of updates to apply to the presentation.
 	Requests []*Request `json:"requests,omitempty"`
 
-	// WriteControl: Provides control over how write requests are executed,
-	// such as
-	// conditionally updating the presentation.
-	WriteControl *WriteControl `json:"writeControl,omitempty"`
-
 	// ForceSendFields is a list of field names (e.g. "Requests") to
 	// unconditionally include in API requests. By default, fields with
 	// empty values are omitted from API requests. However, any non-pointer,
@@ -1245,13 +1240,6 @@ type CreateSlideRequest struct {
 	// If you don't specify an ID, a unique one is generated.
 	ObjectId string `json:"objectId,omitempty"`
 
-	// PlaceholderIdMappings: An optional list of object ID mappings from
-	// the placeholder(s) on the layout to the placeholder(s)
-	// that will be created on the new slide from that specified layout. Can
-	// only
-	// be used when `slide_layout_reference` is specified.
-	PlaceholderIdMappings []*LayoutPlaceholderIdMapping `json:"placeholderIdMappings,omitempty"`
-
 	// SlideLayoutReference: Layout reference of the slide to be inserted,
 	// based on the *current
 	// master*, which is one of the following:
@@ -1636,51 +1624,6 @@ type DeleteObjectRequest struct {
 
 func (s *DeleteObjectRequest) MarshalJSON() ([]byte, error) {
 	type noMethod DeleteObjectRequest
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// DeleteParagraphBulletsRequest: Deletes bullets from all of the
-// paragraphs that overlap with the given text
-// index range.
-//
-// The nesting level of each paragraph will be visually preserved by
-// adding
-// indent to the start of the corresponding paragraph.
-type DeleteParagraphBulletsRequest struct {
-	// CellLocation: The optional table cell location if the text to be
-	// modified is in a table
-	// cell. If present, the object_id must refer to a table.
-	CellLocation *TableCellLocation `json:"cellLocation,omitempty"`
-
-	// ObjectId: The object ID of the shape or table containing the text to
-	// delete bullets
-	// from.
-	ObjectId string `json:"objectId,omitempty"`
-
-	// TextRange: The range of text to delete bullets from, based on
-	// TextElement indexes.
-	TextRange *Range `json:"textRange,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "CellLocation") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "CellLocation") to include
-	// in API requests with the JSON null value. By default, fields with
-	// empty values are omitted from API requests. However, any field with
-	// an empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *DeleteParagraphBulletsRequest) MarshalJSON() ([]byte, error) {
-	type noMethod DeleteParagraphBulletsRequest
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
@@ -2287,63 +2230,6 @@ func (s *InsertTextRequest) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// LayoutPlaceholderIdMapping: The user-specified ID mapping for a
-// placeholder that will be created on a
-// slide from a specified layout.
-type LayoutPlaceholderIdMapping struct {
-	// LayoutPlaceholder: The placeholder on a layout that will be applied
-	// to a slide. Only type and index are needed. For example, a
-	// predefined `TITLE_AND_BODY` layout may usually have a TITLE
-	// placeholder
-	// with index 0 and a BODY placeholder with index 0.
-	LayoutPlaceholder *Placeholder `json:"layoutPlaceholder,omitempty"`
-
-	// LayoutPlaceholderObjectId: The object ID of the placeholder on a
-	// layout that will be applied
-	// to a slide.
-	LayoutPlaceholderObjectId string `json:"layoutPlaceholderObjectId,omitempty"`
-
-	// ObjectId: A user-supplied object ID for the placeholder identified
-	// above that to be
-	// created onto a slide.
-	//
-	// If you specify an ID, it must be unique among all pages and page
-	// elements
-	// in the presentation. The ID must start with an alphanumeric character
-	// or an
-	// underscore (matches regex `[a-zA-Z0-9_]`); remaining characters
-	// may include those as well as a hyphen or colon (matches
-	// regex
-	// `[a-zA-Z0-9_-:]`).
-	// The length of the ID must not be less than 5 or greater than 50.
-	//
-	// If you don't specify an ID, a unique one is generated.
-	ObjectId string `json:"objectId,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "LayoutPlaceholder")
-	// to unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "LayoutPlaceholder") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *LayoutPlaceholderIdMapping) MarshalJSON() ([]byte, error) {
-	type noMethod LayoutPlaceholderIdMapping
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // LayoutProperties: The properties of Page are only
 // relevant for pages with page_type LAYOUT.
 type LayoutProperties struct {
@@ -2750,46 +2636,6 @@ func (s *NestingLevel) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// NotesProperties: The properties of Page that are only
-// relevant for pages with page_type NOTES.
-type NotesProperties struct {
-	// SpeakerNotesObjectId: The object ID of the shape on this notes page
-	// that contains the speaker
-	// notes for the corresponding slide.
-	// The actual shape may not always exist on the notes page. Inserting
-	// text
-	// using this object ID will automatically create the shape. In this
-	// case, the
-	// actual shape may have different object ID. The `GetPresentation`
-	// or
-	// `GetPage` action will always return the latest object ID.
-	SpeakerNotesObjectId string `json:"speakerNotesObjectId,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g.
-	// "SpeakerNotesObjectId") to unconditionally include in API requests.
-	// By default, fields with empty values are omitted from API requests.
-	// However, any non-pointer, non-interface field appearing in
-	// ForceSendFields will be sent to the server regardless of whether the
-	// field is empty or not. This may be used to include empty fields in
-	// Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "SpeakerNotesObjectId") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *NotesProperties) MarshalJSON() ([]byte, error) {
-	type noMethod NotesProperties
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // OpaqueColor: A themeable solid color value.
 type OpaqueColor struct {
 	// RgbColor: An opaque RGB color.
@@ -3007,10 +2853,6 @@ type Page struct {
 	// LAYOUT.
 	LayoutProperties *LayoutProperties `json:"layoutProperties,omitempty"`
 
-	// NotesProperties: Notes specific properties. Only set if page_type =
-	// NOTES.
-	NotesProperties *NotesProperties `json:"notesProperties,omitempty"`
-
 	// ObjectId: The object ID for this page. Object IDs used by
 	// Page and
 	// PageElement share the same namespace.
@@ -3028,27 +2870,7 @@ type Page struct {
 	//   "SLIDE" - A slide page.
 	//   "MASTER" - A master slide page.
 	//   "LAYOUT" - A layout page.
-	//   "NOTES" - A notes page.
-	//   "NOTES_MASTER" - A notes master page.
 	PageType string `json:"pageType,omitempty"`
-
-	// RevisionId: The revision ID of the presentation containing this page.
-	// Can be used in
-	// update requests to assert that the presentation revision hasn't
-	// changed
-	// since the last read operation. Only populated if the user has edit
-	// access
-	// to the presentation.
-	//
-	// The format of the revision ID may change over time, so it should be
-	// treated
-	// opaquely. A returned revision ID is only guaranteed to be valid for
-	// 24
-	// hours after it has been returned and cannot be shared across
-	// users. Callers can assume that if two revision IDs are equal then
-	// the
-	// presentation has not changed.
-	RevisionId string `json:"revisionId,omitempty"`
 
 	// SlideProperties: Slide specific properties. Only set if page_type =
 	// SLIDE.
@@ -3362,7 +3184,8 @@ func (s *ParagraphMarker) MarshalJSON() ([]byte, error) {
 // Inherited paragraph styles are represented as unset fields in this
 // message.
 type ParagraphStyle struct {
-	// Alignment: The text alignment for this paragraph.
+	// Alignment: The text alignment for this paragraph. This property is
+	// read-only.
 	//
 	// Possible values:
 	//   "ALIGNMENT_UNSPECIFIED" - The paragraph alignment is inherited from
@@ -3377,10 +3200,8 @@ type ParagraphStyle struct {
 	//   "JUSTIFIED" - The paragraph is justified.
 	Alignment string `json:"alignment,omitempty"`
 
-	// Direction: The text direction of this paragraph. If unset, the value
-	// defaults to
-	// LEFT_TO_RIGHT
-	// since text direction is not inherited.
+	// Direction: The text direction of this paragraph. This property is
+	// read-only.
 	//
 	// Possible values:
 	//   "TEXT_DIRECTION_UNSPECIFIED" - The text direction is inherited from
@@ -3393,38 +3214,42 @@ type ParagraphStyle struct {
 	// corresponds to
 	// the end of the text, based on the current text direction. If unset,
 	// the
-	// value is inherited from the parent.
+	// value is inherited from the parent. This property is read-only.
 	IndentEnd *Dimension `json:"indentEnd,omitempty"`
 
 	// IndentFirstLine: The amount of indentation for the start of the first
 	// line of the paragraph.
-	// If unset, the value is inherited from the parent.
+	// If unset, the value is inherited from the parent. This property
+	// is
+	// read-only.
 	IndentFirstLine *Dimension `json:"indentFirstLine,omitempty"`
 
 	// IndentStart: The amount indentation for the paragraph on the side
 	// that corresponds to
 	// the start of the text, based on the current text direction. If unset,
 	// the
-	// value is inherited from the parent.
+	// value is inherited from the parent. This property is read-only.
 	IndentStart *Dimension `json:"indentStart,omitempty"`
 
 	// LineSpacing: The amount of space between lines, as a percentage of
 	// normal, where normal
 	// is represented as 100.0. If unset, the value is inherited from the
 	// parent.
+	// This property is read-only.
 	LineSpacing float64 `json:"lineSpacing,omitempty"`
 
 	// SpaceAbove: The amount of extra space above the paragraph. If unset,
 	// the value is
-	// inherited from the parent.
+	// inherited from the parent. This property is read-only.
 	SpaceAbove *Dimension `json:"spaceAbove,omitempty"`
 
 	// SpaceBelow: The amount of extra space above the paragraph. If unset,
 	// the value is
-	// inherited from the parent.
+	// inherited from the parent. This property is read-only.
 	SpaceBelow *Dimension `json:"spaceBelow,omitempty"`
 
-	// SpacingMode: The spacing mode for the paragraph.
+	// SpacingMode: The spacing mode for the paragraph. This property is
+	// read-only.
 	//
 	// Possible values:
 	//   "SPACING_MODE_UNSPECIFIED" - The spacing mode is inherited from the
@@ -3561,48 +3386,11 @@ type Presentation struct {
 	//   master, regardless of their layout.
 	Masters []*Page `json:"masters,omitempty"`
 
-	// NotesMaster: The notes master in the presentation. It serves three
-	// purposes:
-	//
-	// - Placeholder shapes on a notes master contain the default text
-	// styles and
-	//   shape properties of all placeholder shapes on notes pages.
-	// Specifically,
-	//   a `SLIDE_IMAGE` placeholder shape contains the slide thumbnail, and
-	// a
-	//   `BODY` placeholder shape contains the speaker notes.
-	// - The notes master page properties define the common page properties
-	//   inherited by all notes pages.
-	// - Any other shapes on the notes master will appear on all notes
-	// pages.
-	//
-	// The notes master is read-only.
-	NotesMaster *Page `json:"notesMaster,omitempty"`
-
 	// PageSize: The size of pages in the presentation.
 	PageSize *Size `json:"pageSize,omitempty"`
 
 	// PresentationId: The ID of the presentation.
 	PresentationId string `json:"presentationId,omitempty"`
-
-	// RevisionId: The revision ID of the presentation. Can be used in
-	// update requests
-	// to assert that the presentation revision hasn't changed since the
-	// last
-	// read operation. Only populated if the user has edit access to
-	// the
-	// presentation.
-	//
-	// The format of the revision ID may change over time, so it should be
-	// treated
-	// opaquely. A returned revision ID is only guaranteed to be valid for
-	// 24
-	// hours after it has been returned and cannot be shared across users.
-	// Callers
-	// can assume that if two revision IDs are equal then the presentation
-	// has not
-	// changed.
-	RevisionId string `json:"revisionId,omitempty"`
 
 	// Slides: The slides in the presentation.
 	// A slide inherits properties from a slide layout.
@@ -3694,99 +3482,12 @@ func (s *Range) MarshalJSON() ([]byte, error) {
 
 // Recolor: A recolor effect applied on an image.
 type Recolor struct {
-	// Name: The name of the recolor effect.
-	//
-	// The name is determined from the `recolor_stops` by matching the
-	// gradient
-	// against the colors in the page's current color scheme. This property
-	// is
-	// read-only.
-	//
-	// Possible values:
-	//   "NONE" - No recolor effect. The default value.
-	//   "LIGHT1" - A recolor effect that lightens the image using the
-	// page's first available
-	// color from its color scheme.
-	//   "LIGHT2" - A recolor effect that lightens the image using the
-	// page's second
-	// available color from its color scheme.
-	//   "LIGHT3" - A recolor effect that lightens the image using the
-	// page's third available
-	// color from its color scheme.
-	//   "LIGHT4" - A recolor effect that lightens the image using the
-	// page's forth available
-	// color from its color scheme.
-	//   "LIGHT5" - A recolor effect that lightens the image using the
-	// page's fifth available
-	// color from its color scheme.
-	//   "LIGHT6" - A recolor effect that lightens the image using the
-	// page's sixth available
-	// color from its color scheme.
-	//   "LIGHT7" - A recolor effect that lightens the image using the
-	// page's seventh
-	// available color from its color scheme.e.
-	//   "LIGHT8" - A recolor effect that lightens the image using the
-	// page's eighth
-	// available color from its color scheme.
-	//   "LIGHT9" - A recolor effect that lightens the image using the
-	// page's ninth available
-	// color from its color scheme.
-	//   "LIGHT10" - A recolor effect that lightens the image using the
-	// page's tenth available
-	// color from its color scheme.
-	//   "DARK1" - A recolor effect that darkens the image using the page's
-	// first available
-	// color from its color scheme.
-	//   "DARK2" - A recolor effect that darkens the image using the page's
-	// second available
-	// color from its color scheme.
-	//   "DARK3" - A recolor effect that darkens the image using the page's
-	// third available
-	// color from its color scheme.
-	//   "DARK4" - A recolor effect that darkens the image using the page's
-	// fourth available
-	// color from its color scheme.
-	//   "DARK5" - A recolor effect that darkens the image using the page's
-	// fifth available
-	// color from its color scheme.
-	//   "DARK6" - A recolor effect that darkens the image using the page's
-	// sixth available
-	// color from its color scheme.
-	//   "DARK7" - A recolor effect that darkens the image using the page's
-	// seventh
-	// available color from its color scheme.
-	//   "DARK8" - A recolor effect that darkens the image using the page's
-	// eighth available
-	// color from its color scheme.
-	//   "DARK9" - A recolor effect that darkens the image using the page's
-	// ninth available
-	// color from its color scheme.
-	//   "DARK10" - A recolor effect that darkens the image using the page's
-	// tenth available
-	// color from its color scheme.
-	//   "GRAYSCALE" - A recolor effect that recolors the image to
-	// grayscale.
-	//   "NEGATIVE" - A recolor effect that recolors the image to negative
-	// grayscale.
-	//   "SEPIA" - A recolor effect that recolors the image using the sepia
-	// color.
-	//   "CUSTOM" - Custom recolor effect. Refer to `recolor_stops` for the
-	// concrete
-	// gradient.
-	Name string `json:"name,omitempty"`
-
 	// RecolorStops: The recolor effect is represented by a gradient, which
 	// is a list of color
-	// stops.
-	//
-	// The colors in the gradient will replace the corresponding colors
-	// at
-	// the same position in the color palette and apply to the image.
-	// This
-	// property is read-only.
+	// stops. This property is read-only.
 	RecolorStops []*ColorStop `json:"recolorStops,omitempty"`
 
-	// ForceSendFields is a list of field names (e.g. "Name") to
+	// ForceSendFields is a list of field names (e.g. "RecolorStops") to
 	// unconditionally include in API requests. By default, fields with
 	// empty values are omitted from API requests. However, any non-pointer,
 	// non-interface field appearing in ForceSendFields will be sent to the
@@ -3794,10 +3495,10 @@ type Recolor struct {
 	// used to include empty fields in Patch requests.
 	ForceSendFields []string `json:"-"`
 
-	// NullFields is a list of field names (e.g. "Name") to include in API
-	// requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
+	// NullFields is a list of field names (e.g. "RecolorStops") to include
+	// in API requests with the JSON null value. By default, fields with
+	// empty values are omitted from API requests. However, any field with
+	// an empty value appearing in NullFields will be sent to the server as
 	// null. It is an error if a field in this list has a non-empty value.
 	// This may be used to include null fields in Patch requests.
 	NullFields []string `json:"-"`
@@ -3932,96 +3633,6 @@ func (s *ReplaceAllShapesWithImageResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// ReplaceAllShapesWithSheetsChartRequest: Replaces all shapes that
-// match the given criteria with the provided Google
-// Sheets chart. The chart will be scaled and centered to fit within the
-// bounds
-// of the original shape.
-//
-// NOTE: Replacing shapes with a chart requires at least one of
-// the
-// spreadsheets.readonly, spreadsheets, drive.readonly, or drive OAuth
-// scopes.
-type ReplaceAllShapesWithSheetsChartRequest struct {
-	// ChartId: The ID of the specific chart in the Google Sheets
-	// spreadsheet.
-	ChartId int64 `json:"chartId,omitempty"`
-
-	// ContainsText: The criteria that the shapes must match in order to be
-	// replaced. The
-	// request will replace all of the shapes that contain the given text.
-	ContainsText *SubstringMatchCriteria `json:"containsText,omitempty"`
-
-	// LinkingMode: The mode with which the chart is linked to the source
-	// spreadsheet. When
-	// not specified, the chart will be an image that is not linked.
-	//
-	// Possible values:
-	//   "NOT_LINKED_IMAGE" - The chart is not associated with the source
-	// spreadsheet and cannot be
-	// updated. A chart that is not linked will be inserted as an image.
-	//   "LINKED" - Linking the chart allows it to be updated, and other
-	// collaborators will
-	// see a link to the spreadsheet.
-	LinkingMode string `json:"linkingMode,omitempty"`
-
-	// SpreadsheetId: The ID of the Google Sheets spreadsheet that contains
-	// the chart.
-	SpreadsheetId string `json:"spreadsheetId,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "ChartId") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "ChartId") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *ReplaceAllShapesWithSheetsChartRequest) MarshalJSON() ([]byte, error) {
-	type noMethod ReplaceAllShapesWithSheetsChartRequest
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// ReplaceAllShapesWithSheetsChartResponse: The result of replacing
-// shapes with a Google Sheets chart.
-type ReplaceAllShapesWithSheetsChartResponse struct {
-	// OccurrencesChanged: The number of shapes replaced with charts.
-	OccurrencesChanged int64 `json:"occurrencesChanged,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "OccurrencesChanged")
-	// to unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "OccurrencesChanged") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *ReplaceAllShapesWithSheetsChartResponse) MarshalJSON() ([]byte, error) {
-	type noMethod ReplaceAllShapesWithSheetsChartResponse
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // ReplaceAllTextRequest: Replaces all instances of text matching a
 // criteria with replace text.
 type ReplaceAllTextRequest struct {
@@ -4113,9 +3724,6 @@ type Request struct {
 	// DeleteObject: Deletes a page or page element from the presentation.
 	DeleteObject *DeleteObjectRequest `json:"deleteObject,omitempty"`
 
-	// DeleteParagraphBullets: Deletes bullets from paragraphs.
-	DeleteParagraphBullets *DeleteParagraphBulletsRequest `json:"deleteParagraphBullets,omitempty"`
-
 	// DeleteTableColumn: Deletes a column from a table.
 	DeleteTableColumn *DeleteTableColumnRequest `json:"deleteTableColumn,omitempty"`
 
@@ -4144,10 +3752,6 @@ type Request struct {
 	// with an image.
 	ReplaceAllShapesWithImage *ReplaceAllShapesWithImageRequest `json:"replaceAllShapesWithImage,omitempty"`
 
-	// ReplaceAllShapesWithSheetsChart: Replaces all shapes matching some
-	// criteria with a Google Sheets chart.
-	ReplaceAllShapesWithSheetsChart *ReplaceAllShapesWithSheetsChartRequest `json:"replaceAllShapesWithSheetsChart,omitempty"`
-
 	// ReplaceAllText: Replaces all instances of specified text.
 	ReplaceAllText *ReplaceAllTextRequest `json:"replaceAllText,omitempty"`
 
@@ -4162,10 +3766,6 @@ type Request struct {
 
 	// UpdatePageProperties: Updates the properties of a Page.
 	UpdatePageProperties *UpdatePagePropertiesRequest `json:"updatePageProperties,omitempty"`
-
-	// UpdateParagraphStyle: Updates the styling of paragraphs within a
-	// Shape or Table.
-	UpdateParagraphStyle *UpdateParagraphStyleRequest `json:"updateParagraphStyle,omitempty"`
 
 	// UpdateShapeProperties: Updates the properties of a Shape.
 	UpdateShapeProperties *UpdateShapePropertiesRequest `json:"updateShapeProperties,omitempty"`
@@ -4236,11 +3836,6 @@ type Response struct {
 	// matching some criteria with an
 	// image.
 	ReplaceAllShapesWithImage *ReplaceAllShapesWithImageResponse `json:"replaceAllShapesWithImage,omitempty"`
-
-	// ReplaceAllShapesWithSheetsChart: The result of replacing all shapes
-	// matching some criteria with a Google
-	// Sheets chart.
-	ReplaceAllShapesWithSheetsChart *ReplaceAllShapesWithSheetsChartResponse `json:"replaceAllShapesWithSheetsChart,omitempty"`
 
 	// ReplaceAllText: The result of replacing text.
 	ReplaceAllText *ReplaceAllTextResponse `json:"replaceAllText,omitempty"`
@@ -5069,22 +4664,6 @@ type SlideProperties struct {
 	// on.
 	MasterObjectId string `json:"masterObjectId,omitempty"`
 
-	// NotesPage: The notes page that this slide is associated with. It
-	// defines the visual
-	// appearance of a notes page when printing or exporting slides with
-	// speaker
-	// notes. A notes page inherits properties from the
-	// notes master.
-	// The placeholder shape with type BODY on the notes page contains the
-	// speaker
-	// notes for this slide. The ID of this shape is identified by
-	// the
-	// speakerNotesObjectId field.
-	// The notes page is read-only except for the text content and styles of
-	// the
-	// speaker notes shape.
-	NotesPage *Page `json:"notesPage,omitempty"`
-
 	// ForceSendFields is a list of field names (e.g. "LayoutObjectId") to
 	// unconditionally include in API requests. By default, fields with
 	// empty values are omitted from API requests. However, any non-pointer,
@@ -5770,7 +5349,7 @@ type TextStyle struct {
 	//   "SUBSCRIPT" - The text is vertically offset downwards (subscript).
 	BaselineOffset string `json:"baselineOffset,omitempty"`
 
-	// Bold: Whether or not the text is rendered as bold.
+	// Bold: Whether or not the text is bold.
 	Bold bool `json:"bold,omitempty"`
 
 	// FontFamily: The font family of the text.
@@ -5841,19 +5420,6 @@ type TextStyle struct {
 
 	// Underline: Whether or not the text is underlined.
 	Underline bool `json:"underline,omitempty"`
-
-	// WeightedFontFamily: The font family and rendered weight of the text.
-	// This property is
-	// read-only.
-	//
-	// This field is an extension of `font_family` meant to support explicit
-	// font
-	// weights without breaking backwards compatibility. As such, when
-	// reading the
-	// style of a range of text, the value of
-	// `weighted_font_family.font_family`
-	// will always be equal to that of `font_family`.
-	WeightedFontFamily *WeightedFontFamily `json:"weightedFontFamily,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "BackgroundColor") to
 	// unconditionally include in API requests. By default, fields with
@@ -6121,67 +5687,6 @@ func (s *UpdatePagePropertiesRequest) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// UpdateParagraphStyleRequest: Updates the styling for all of the
-// paragraphs within a Shape or Table that
-// overlap with the given text index range.
-type UpdateParagraphStyleRequest struct {
-	// CellLocation: The location of the cell in the table containing the
-	// paragraph(s) to
-	// style. If `object_id` refers to a table, `cell_location` must have a
-	// value.
-	// Otherwise, it must not.
-	CellLocation *TableCellLocation `json:"cellLocation,omitempty"`
-
-	// Fields: The fields that should be updated.
-	//
-	// At least one field must be specified. The root `style` is implied
-	// and
-	// should not be specified. A single "*" can be used as short-hand
-	// for
-	// listing every field.
-	//
-	// For example, to update the paragraph alignment, set `fields`
-	// to
-	// "alignment".
-	//
-	// To reset a property to its default value, include its field name in
-	// the
-	// field mask but leave the field itself unset.
-	Fields string `json:"fields,omitempty"`
-
-	// ObjectId: The object ID of the shape or table with the text to be
-	// styled.
-	ObjectId string `json:"objectId,omitempty"`
-
-	// Style: The paragraph's style.
-	Style *ParagraphStyle `json:"style,omitempty"`
-
-	// TextRange: The range of text containing the paragraph(s) to style.
-	TextRange *Range `json:"textRange,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "CellLocation") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "CellLocation") to include
-	// in API requests with the JSON null value. By default, fields with
-	// empty values are omitted from API requests. However, any field with
-	// an empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *UpdateParagraphStyleRequest) MarshalJSON() ([]byte, error) {
-	type noMethod UpdateParagraphStyleRequest
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // UpdateShapePropertiesRequest: Update the properties of a Shape.
 type UpdateShapePropertiesRequest struct {
 	// Fields: The fields that should be updated.
@@ -6331,11 +5836,9 @@ func (s *UpdateTableCellPropertiesRequest) MarshalJSON() ([]byte, error) {
 // or
 // Table.
 type UpdateTextStyleRequest struct {
-	// CellLocation: The location of the cell in the table containing the
-	// text to style. If
-	// `object_id` refers to a table, `cell_location` must have a
-	// value.
-	// Otherwise, it must not.
+	// CellLocation: The optional table cell location if the text to be
+	// styled is in a table
+	// cell. If present, the object_id must refer to a table.
 	CellLocation *TableCellLocation `json:"cellLocation,omitempty"`
 
 	// Fields: The fields that should be updated.
@@ -6346,12 +5849,12 @@ type UpdateTextStyleRequest struct {
 	// for
 	// listing every field.
 	//
-	// For example, to update the text style to bold, set `fields` to
+	// For example to update the text style to bold, set `fields` to
 	// "bold".
 	//
-	// To reset a property to its default value, include its field name in
-	// the
-	// field mask but leave the field itself unset.
+	// To reset a property to its default value,
+	// include its field name in the field mask but leave the field itself
+	// unset.
 	Fields string `json:"fields,omitempty"`
 
 	// ObjectId: The object ID of the shape or table with the text to be
@@ -6524,57 +6027,6 @@ func (s *VideoProperties) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// WeightedFontFamily: Represents a font family and weight used to style
-// a TextRun.
-type WeightedFontFamily struct {
-	// FontFamily: The font family of the text.
-	//
-	// The font family can be any font from the Font menu in Slides or
-	// from
-	// [Google Fonts] (https://fonts.google.com/). If the font name
-	// is
-	// unrecognized, the text is rendered in `Arial`.
-	FontFamily string `json:"fontFamily,omitempty"`
-
-	// Weight: The rendered weight of the text. This field can have any
-	// value that is a
-	// multiple of 100 between 100 and 900, inclusive. This range
-	// corresponds to
-	// only the numerical values described in the "Cascading Style Sheets
-	// Level
-	// 2 Revision 1 (CSS 2.1) Specification",
-	// [section 15.6](https://www.w3.org/TR/CSS21/fonts.html#font-boldness).
-	// The
-	// non-numerical values in the specification are disallowed. Weights
-	// greater
-	// than or equal to 700 are considered bold, and weights less than 700
-	// are
-	// not bold. The default value is `400` ("normal").
-	Weight int64 `json:"weight,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "FontFamily") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "FontFamily") to include in
-	// API requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *WeightedFontFamily) MarshalJSON() ([]byte, error) {
-	type noMethod WeightedFontFamily
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // WordArt: A PageElement kind representing
 // word art.
 type WordArt struct {
@@ -6600,41 +6052,6 @@ type WordArt struct {
 
 func (s *WordArt) MarshalJSON() ([]byte, error) {
 	type noMethod WordArt
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// WriteControl: Provides control over how write requests are executed.
-type WriteControl struct {
-	// RequiredRevisionId: The revision ID of the presentation required for
-	// the write request. If
-	// specified and the `required_revision_id` doesn't exactly match
-	// the
-	// presentation's current `revision_id`, the request will not be
-	// processed and
-	// will return a 400 bad request error.
-	RequiredRevisionId string `json:"requiredRevisionId,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "RequiredRevisionId")
-	// to unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "RequiredRevisionId") to
-	// include in API requests with the JSON null value. By default, fields
-	// with empty values are omitted from API requests. However, any field
-	// with an empty value appearing in NullFields will be sent to the
-	// server as null. It is an error if a field in this list has a
-	// non-empty value. This may be used to include null fields in Patch
-	// requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *WriteControl) MarshalJSON() ([]byte, error) {
-	type noMethod WriteControl
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }

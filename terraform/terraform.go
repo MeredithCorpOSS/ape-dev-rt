@@ -13,14 +13,7 @@ import (
 	"strings"
 
 	"github.com/TimeInc/ape-dev-rt/ui"
-	"github.com/hashicorp/terraform/builtin/providers/aws"
-	"github.com/hashicorp/terraform/builtin/providers/consul"
-	"github.com/hashicorp/terraform/builtin/providers/null"
-	"github.com/hashicorp/terraform/builtin/providers/template"
-	tf "github.com/hashicorp/terraform/builtin/providers/terraform"
-	"github.com/hashicorp/terraform/builtin/provisioners/local-exec"
 	"github.com/hashicorp/terraform/command"
-	"github.com/hashicorp/terraform/terraform"
 	m_cli "github.com/mitchellh/cli"
 )
 
@@ -406,9 +399,8 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 	streamedUi.ErrorWriter = stderrW
 
 	meta := command.Meta{
-		Ui:          streamedUi,
-		Color:       true,
-		ContextOpts: ctxConfig(),
+		Ui:    streamedUi,
+		Color: true,
 	}
 
 	commands := map[string]m_cli.Command{
@@ -465,33 +457,6 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 		ExitCode: exitCode,
 		Warnings: warns,
 	}, nil
-}
-
-func ctxConfig() *terraform.ContextOpts {
-	return &terraform.ContextOpts{
-		Providers: map[string]terraform.ResourceProviderFactory{
-			"aws": func() (terraform.ResourceProvider, error) {
-				return aws.Provider(), nil
-			},
-			"consul": func() (terraform.ResourceProvider, error) {
-				return consul.Provider(), nil
-			},
-			"null": func() (terraform.ResourceProvider, error) {
-				return null.Provider(), nil
-			},
-			"terraform": func() (terraform.ResourceProvider, error) {
-				return tf.Provider(), nil
-			},
-			"template": func() (terraform.ResourceProvider, error) {
-				return template.Provider(), nil
-			},
-		},
-		Provisioners: map[string]terraform.ResourceProvisionerFactory{
-			"local-exec": func() (terraform.ResourceProvisioner, error) {
-				return localexec.Provisioner(), nil
-			},
-		},
-	}
 }
 
 func parseDiffFromPlanOutput(output string) (planDiff *PlanResourceDiff, err error) {

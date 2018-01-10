@@ -1,23 +1,19 @@
 package: github.com/TimeInc/ape-dev-rt
-ignore: 
+ignore:
 - github.com/coreos/ignition
 - github.com/Unknwon/macaron/inject
 - github.com/hashicorp/terraform-provider-opc/opc
 import:
 - package: github.com/hashicorp/terraform
-  version: v0.9.11
+  version: v0.10.8
   subpackages:
-  - builtin/providers/aws
-  - builtin/providers/null
-  - builtin/providers/template
-  - builtin/providers/terraform
   - builtin/provisioners/local-exec
   - command
   - terraform
 - package: github.com/RevH/ipinfo
   version: 09a74906140aa8a7eb40bdb3f750d77318912ed7
 - package: github.com/aws/aws-sdk-go
-  version: v1.6.25
+  version: v1.10.36
   subpackages:
   - aws
   - aws/awserr

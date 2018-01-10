@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"time"
 )
 
+// WaitSchedule briefly sleeps in order to invoke the go scheduler.
 // TODO: improve this when we are able to know the schedule or status of target go-routine.
 func WaitSchedule() {
 	time.Sleep(10 * time.Millisecond)
@@ -49,7 +50,7 @@ func MustNewURL(t *testing.T, s string) *url.URL {
 
 // FatalStack helps to fatal the test and print out the stacks of all running goroutines.
 func FatalStack(t *testing.T, s string) {
-	stackTrace := make([]byte, 8*1024)
+	stackTrace := make([]byte, 1024*1024)
 	n := runtime.Stack(stackTrace, true)
 	t.Error(string(stackTrace[:n]))
 	t.Fatalf(s)

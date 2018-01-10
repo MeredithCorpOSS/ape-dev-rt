@@ -763,7 +763,7 @@ type Creative struct {
 	AdvertiserId googleapi.Int64s `json:"advertiserId,omitempty"`
 
 	// AdvertiserName: The name of the company being advertised in the
-	// creative. The value provided must exist in the advertisers.txt file.
+	// creative.
 	AdvertiserName string `json:"advertiserName,omitempty"`
 
 	// AgencyId: The agency id for this creative.
@@ -775,9 +775,8 @@ type Creative struct {
 	// timestamp).
 	ApiUploadTimestamp string `json:"apiUploadTimestamp,omitempty"`
 
-	// Attribute: List of buyer selectable attributes for the ads that may
-	// be shown from this snippet. Each attribute is represented by an
-	// integer as defined in  buyer-declarable-creative-attributes.txt.
+	// Attribute: All attributes for the ads that may be shown from this
+	// snippet.
 	Attribute []int64 `json:"attribute,omitempty"`
 
 	// BuyerCreativeId: A buyer-specific id identifying the creative in this
@@ -834,21 +833,16 @@ type Creative struct {
 	// ServingRestrictions directly.
 	OpenAuctionStatus string `json:"openAuctionStatus,omitempty"`
 
-	// ProductCategories: Detected product categories, if any. Each category
-	// is represented by an integer as defined in
-	// ad-product-categories.txt. Read-only. This field should not be set in
-	// requests.
+	// ProductCategories: Detected product categories, if any. Read-only.
+	// This field should not be set in requests.
 	ProductCategories []int64 `json:"productCategories,omitempty"`
 
 	// RestrictedCategories: All restricted categories for the ads that may
-	// be shown from this snippet. Each category is represented by an
-	// integer as defined in the  ad-restricted-categories.txt.
+	// be shown from this snippet.
 	RestrictedCategories []int64 `json:"restrictedCategories,omitempty"`
 
-	// SensitiveCategories: Detected sensitive categories, if any. Each
-	// category is represented by an integer as defined in
-	// ad-sensitive-categories.txt. Read-only. This field should not be set
-	// in requests.
+	// SensitiveCategories: Detected sensitive categories, if any.
+	// Read-only. This field should not be set in requests.
 	SensitiveCategories []int64 `json:"sensitiveCategories,omitempty"`
 
 	// ServingRestrictions: The granular status of this ad in specific
@@ -858,9 +852,8 @@ type Creative struct {
 	// set in requests.
 	ServingRestrictions []*CreativeServingRestrictions `json:"servingRestrictions,omitempty"`
 
-	// VendorType: List of vendor types for the ads that may be shown from
-	// this snippet. Each vendor type is represented by an integer as
-	// defined in vendors.txt.
+	// VendorType: All vendor types for the ads that may be shown from this
+	// snippet.
 	VendorType []int64 `json:"vendorType,omitempty"`
 
 	// Version: The version for this creative. Read-only. This field should
@@ -1015,8 +1008,8 @@ type CreativeFilteringReasonsReasons struct {
 	// exchange.
 	FilteringCount int64 `json:"filteringCount,omitempty,string"`
 
-	// FilteringStatus: The filtering status code as defined in
-	// creative-status-codes.txt.
+	// FilteringStatus: The filtering status code. Please refer to the
+	// creative-status-codes.txt file for different statuses.
 	FilteringStatus int64 `json:"filteringStatus,omitempty"`
 
 	// ForceSendFields is a list of field names (e.g. "FilteringCount") to
@@ -1273,9 +1266,7 @@ type CreativeServingRestrictionsContexts struct {
 	ContextType string `json:"contextType,omitempty"`
 
 	// GeoCriteriaId: Only set when contextType=LOCATION. Represents the geo
-	// criterias this restriction applies to. Impressions are considered to
-	// match a context if either the user location or publisher location
-	// matches a given geoCriteriaId.
+	// criterias this restriction applies to.
 	GeoCriteriaId []int64 `json:"geoCriteriaId,omitempty"`
 
 	// Platform: Only set when contextType=PLATFORM. Represents the
@@ -1446,24 +1437,19 @@ func (s *CreativesList) MarshalJSON() ([]byte, error) {
 }
 
 type DealServingMetadata struct {
-	// AlcoholAdsAllowed: True if alcohol ads are allowed for this deal
-	// (read-only). This field is only populated when querying for finalized
-	// orders using the method GetFinalizedOrderDeals
-	AlcoholAdsAllowed bool `json:"alcoholAdsAllowed,omitempty"`
-
 	// DealPauseStatus: Tracks which parties (if any) have paused a deal.
 	// (readonly, except via PauseResumeOrderDeals action)
 	DealPauseStatus *DealServingMetadataDealPauseStatus `json:"dealPauseStatus,omitempty"`
 
-	// ForceSendFields is a list of field names (e.g. "AlcoholAdsAllowed")
-	// to unconditionally include in API requests. By default, fields with
+	// ForceSendFields is a list of field names (e.g. "DealPauseStatus") to
+	// unconditionally include in API requests. By default, fields with
 	// empty values are omitted from API requests. However, any non-pointer,
 	// non-interface field appearing in ForceSendFields will be sent to the
 	// server regardless of whether the field is empty or not. This may be
 	// used to include empty fields in Patch requests.
 	ForceSendFields []string `json:"-"`
 
-	// NullFields is a list of field names (e.g. "AlcoholAdsAllowed") to
+	// NullFields is a list of field names (e.g. "DealPauseStatus") to
 	// include in API requests with the JSON null value. By default, fields
 	// with empty values are omitted from API requests. However, any field
 	// with an empty value appearing in NullFields will be sent to the

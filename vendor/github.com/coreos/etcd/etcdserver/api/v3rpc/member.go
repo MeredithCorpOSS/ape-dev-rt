@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,89 +15,79 @@
 package v3rpc
 
 import (
+	"context"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc/codes"
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/etcdserver/membership"
 	"github.com/coreos/etcd/pkg/types"
 )
 
 type ClusterServer struct {
-	cluster   etcdserver.Cluster
-	server    etcdserver.Server
-	raftTimer etcdserver.RaftTimer
+	cluster api.Cluster
+	server  etcdserver.ServerV3
 }
 
-func NewClusterServer(s *etcdserver.EtcdServer) *ClusterServer {
+func NewClusterServer(s etcdserver.ServerV3) *ClusterServer {
 	return &ClusterServer{
-		cluster:   s.Cluster(),
-		server:    s,
-		raftTimer: s,
+		cluster: s.Cluster(),
+		server:  s,
 	}
 }
 
 func (cs *ClusterServer) MemberAdd(ctx context.Context, r *pb.MemberAddRequest) (*pb.MemberAddResponse, error) {
 	urls, err := types.NewURLs(r.PeerURLs)
 	if err != nil {
-		return nil, ErrMemberBadURLs
+		return nil, rpctypes.ErrGRPCMemberBadURLs
 	}
 
 	now := time.Now()
-	m := etcdserver.NewMember("", urls, "", &now)
-	err = cs.server.AddMember(ctx, *m)
-	switch {
-	case err == etcdserver.ErrIDExists:
-		return nil, ErrMemberExist
-	case err == etcdserver.ErrPeerURLexists:
-		return nil, ErrPeerURLExist
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	m := membership.NewMember("", urls, "", &now)
+	membs, merr := cs.server.AddMember(ctx, *m)
+	if merr != nil {
+		return nil, togRPCError(merr)
 	}
 
 	return &pb.MemberAddResponse{
-		Header: cs.header(),
-		Member: &pb.Member{ID: uint64(m.ID), PeerURLs: m.PeerURLs},
+		Header:  cs.header(),
+		Member:  &pb.Member{ID: uint64(m.ID), PeerURLs: m.PeerURLs},
+		Members: membersToProtoMembers(membs),
 	}, nil
 }
 
 func (cs *ClusterServer) MemberRemove(ctx context.Context, r *pb.MemberRemoveRequest) (*pb.MemberRemoveResponse, error) {
-	err := cs.server.RemoveMember(ctx, r.ID)
-	switch {
-	case err == etcdserver.ErrIDRemoved:
-		fallthrough
-	case err == etcdserver.ErrIDNotFound:
-		return nil, ErrMemberNotFound
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	membs, err := cs.server.RemoveMember(ctx, r.ID)
+	if err != nil {
+		return nil, togRPCError(err)
 	}
-
-	return &pb.MemberRemoveResponse{Header: cs.header()}, nil
+	return &pb.MemberRemoveResponse{Header: cs.header(), Members: membersToProtoMembers(membs)}, nil
 }
 
 func (cs *ClusterServer) MemberUpdate(ctx context.Context, r *pb.MemberUpdateRequest) (*pb.MemberUpdateResponse, error) {
-	m := etcdserver.Member{
+	m := membership.Member{
 		ID:             types.ID(r.ID),
-		RaftAttributes: etcdserver.RaftAttributes{PeerURLs: r.PeerURLs},
+		RaftAttributes: membership.RaftAttributes{PeerURLs: r.PeerURLs},
 	}
-	err := cs.server.UpdateMember(ctx, m)
-	switch {
-	case err == etcdserver.ErrPeerURLexists:
-		return nil, ErrPeerURLExist
-	case err == etcdserver.ErrIDNotFound:
-		return nil, ErrMemberNotFound
-	case err != nil:
-		return nil, grpc.Errorf(codes.Internal, err.Error())
+	membs, err := cs.server.UpdateMember(ctx, m)
+	if err != nil {
+		return nil, togRPCError(err)
 	}
-
-	return &pb.MemberUpdateResponse{Header: cs.header()}, nil
+	return &pb.MemberUpdateResponse{Header: cs.header(), Members: membersToProtoMembers(membs)}, nil
 }
 
 func (cs *ClusterServer) MemberList(ctx context.Context, r *pb.MemberListRequest) (*pb.MemberListResponse, error) {
-	membs := cs.cluster.Members()
+	membs := membersToProtoMembers(cs.cluster.Members())
+	return &pb.MemberListResponse{Header: cs.header(), Members: membs}, nil
+}
 
+func (cs *ClusterServer) header() *pb.ResponseHeader {
+	return &pb.ResponseHeader{ClusterId: uint64(cs.cluster.ID()), MemberId: uint64(cs.server.ID()), RaftTerm: cs.server.Term()}
+}
+
+func membersToProtoMembers(membs []*membership.Member) []*pb.Member {
 	protoMembs := make([]*pb.Member, len(membs))
 	for i := range membs {
 		protoMembs[i] = &pb.Member{
@@ -107,10 +97,5 @@ func (cs *ClusterServer) MemberList(ctx context.Context, r *pb.MemberListRequest
 			ClientURLs: membs[i].ClientURLs,
 		}
 	}
-
-	return &pb.MemberListResponse{Header: cs.header(), Members: protoMembs}, nil
-}
-
-func (cs *ClusterServer) header() *pb.ResponseHeader {
-	return &pb.ResponseHeader{ClusterId: uint64(cs.cluster.ID()), MemberId: uint64(cs.server.ID()), RaftTerm: cs.raftTimer.Term()}
+	return protoMembs
 }

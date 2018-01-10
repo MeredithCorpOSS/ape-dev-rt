@@ -1,5 +1,7 @@
+// +build go1.7
+
 package management
 
 var (
-	sdkVersion = "10.0.2-beta"
+	sdkVersion = "v10.3.0-beta"
 )

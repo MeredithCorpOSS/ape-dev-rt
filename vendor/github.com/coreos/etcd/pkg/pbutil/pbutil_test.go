@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ func TestMarshaler(t *testing.T) {
 	data := []byte("test data")
 	m := &fakeMarshaler{data: data}
 	if g := MustMarshal(m); !reflect.DeepEqual(g, data) {
-		t.Errorf("data = %s, want %s", g, m)
+		t.Errorf("data = %s, want %s", g, m.data)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestUnmarshaler(t *testing.T) {
 	m := &fakeUnmarshaler{}
 	MustUnmarshal(m, data)
 	if !reflect.DeepEqual(m.data, data) {
-		t.Errorf("data = %s, want %s", m.data, m)
+		t.Errorf("data = %s, want %s", m.data, data)
 	}
 }
 

@@ -1,4 +1,4 @@
-// Package ml provides access to the Google Cloud Machine Learning Engine.
+// Package ml provides access to the Google Cloud Machine Learning.
 //
 // See https://cloud.google.com/ml/
 //
@@ -218,40 +218,6 @@ func (s *GoogleApi__HttpBody) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
 
-// GoogleCloudMlV1__ManualScaling: Options for manually scaling a model.
-type GoogleCloudMlV1__ManualScaling struct {
-	// Nodes: The number of nodes to allocate for this model. These nodes
-	// are always up,
-	// starting from the time the model is deployed, so the cost of
-	// operating
-	// this model will be proportional to nodes * number of hours
-	// since
-	// deployment.
-	Nodes int64 `json:"nodes,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "Nodes") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "Nodes") to include in API
-	// requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *GoogleCloudMlV1__ManualScaling) MarshalJSON() ([]byte, error) {
-	type noMethod GoogleCloudMlV1__ManualScaling
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
 // GoogleCloudMlV1__OperationMetadata: Represents the metadata of the
 // long-running operation.
 type GoogleCloudMlV1__OperationMetadata struct {
@@ -356,19 +322,6 @@ type GoogleCloudMlV1__Version struct {
 	// LastUseTime: Output only. The time the version was last used for
 	// prediction.
 	LastUseTime string `json:"lastUseTime,omitempty"`
-
-	// ManualScaling: Optional. Manually select the number of nodes to use
-	// for serving the
-	// model. If unset (i.e., by default), the number of nodes used to
-	// serve
-	// the model automatically scales with traffic. However, care should
-	// be
-	// taken to ramp up traffic according to the model's ability to scale.
-	// If
-	// your model needs to handle bursts of traffic beyond it's ability
-	// to
-	// scale, it is recommended you set this field appropriately.
-	ManualScaling *GoogleCloudMlV1__ManualScaling `json:"manualScaling,omitempty"`
 
 	// Name: Required.The name specified for the version when it was
 	// created.
@@ -796,41 +749,6 @@ type GoogleCloudMlV1beta1__ListVersionsResponse struct {
 
 func (s *GoogleCloudMlV1beta1__ListVersionsResponse) MarshalJSON() ([]byte, error) {
 	type noMethod GoogleCloudMlV1beta1__ListVersionsResponse
-	raw := noMethod(*s)
-	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
-}
-
-// GoogleCloudMlV1beta1__ManualScaling: Options for manually scaling a
-// model.
-type GoogleCloudMlV1beta1__ManualScaling struct {
-	// Nodes: The number of nodes to allocate for this model. These nodes
-	// are always up,
-	// starting from the time the model is deployed, so the cost of
-	// operating
-	// this model will be proportional to nodes * number of hours
-	// since
-	// deployment.
-	Nodes int64 `json:"nodes,omitempty"`
-
-	// ForceSendFields is a list of field names (e.g. "Nodes") to
-	// unconditionally include in API requests. By default, fields with
-	// empty values are omitted from API requests. However, any non-pointer,
-	// non-interface field appearing in ForceSendFields will be sent to the
-	// server regardless of whether the field is empty or not. This may be
-	// used to include empty fields in Patch requests.
-	ForceSendFields []string `json:"-"`
-
-	// NullFields is a list of field names (e.g. "Nodes") to include in API
-	// requests with the JSON null value. By default, fields with empty
-	// values are omitted from API requests. However, any field with an
-	// empty value appearing in NullFields will be sent to the server as
-	// null. It is an error if a field in this list has a non-empty value.
-	// This may be used to include null fields in Patch requests.
-	NullFields []string `json:"-"`
-}
-
-func (s *GoogleCloudMlV1beta1__ManualScaling) MarshalJSON() ([]byte, error) {
-	type noMethod GoogleCloudMlV1beta1__ManualScaling
 	raw := noMethod(*s)
 	return gensupport.MarshalJSON(raw, s.ForceSendFields, s.NullFields)
 }
@@ -1363,9 +1281,8 @@ type GoogleCloudMlV1beta1__PredictionInput struct {
 	// such as when the model is specified by uri.
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 
-	// Uri: Use this field if you want to specify a Google Cloud Storage
-	// path for
-	// the model to use.
+	// Uri: Use this field if you want to specify a GCS path to the model to
+	// use.
 	Uri string `json:"uri,omitempty"`
 
 	// VersionName: Use this field if you want to specify a version of the
@@ -1469,13 +1386,13 @@ type GoogleCloudMlV1beta1__TrainingInput struct {
 	// Hyperparameters: Optional. The set of Hyperparameters to tune.
 	Hyperparameters *GoogleCloudMlV1beta1__HyperparameterSpec `json:"hyperparameters,omitempty"`
 
-	// JobDir: Optional. A Google Cloud Storage path in which to store
-	// training outputs
-	// and other data needed for training. This path is passed to your
-	// TensorFlow
-	// program as the 'job_dir' command-line argument. The benefit of
-	// specifying
-	// this field is that Cloud ML validates the path for use in training.
+	// JobDir: Optional. A GCS path in which to store training outputs and
+	// other data
+	// needed for training. This path will be passed to your TensorFlow
+	// program as
+	// the 'job_dir' command-line arg. The benefit of specifying this field
+	// is that
+	// Cloud ML will validate the path for use in training.
 	JobDir string `json:"jobDir,omitempty"`
 
 	// MasterType: Optional. Specifies the type of virtual machine to use
@@ -1518,21 +1435,6 @@ type GoogleCloudMlV1beta1__TrainingInput struct {
 	//   A machine with roughly twice the number of cores and roughly double
 	// the
 	//   memory of <code suppresswarning="true">complex_model_m</code>.
-	//   </dd>
-	//   <dt>standard_gpu</dt>
-	//   <dd>
-	//   A machine equivalent to <code
-	// suppresswarning="true">standard</code> that
-	//   also includes a
-	//   <a href="ml/docs/how-tos/using-gpus">
-	//   GPU that you can use in your trainer</a>.
-	//   </dd>
-	//   <dt>complex_model_m_gpu</dt>
-	//   <dd>
-	//   A machine equivalent to
-	//   <code suppresswarning="true">coplex_model_m</code> that also
-	// includes
-	//   four GPUs.
 	//   </dd>
 	// </dl>
 	//
@@ -1592,8 +1494,7 @@ type GoogleCloudMlV1beta1__TrainingInput struct {
 	//   "STANDARD_1" - Many workers and a few parameter servers.
 	//   "PREMIUM_1" - A large number of workers with many parameter
 	// servers.
-	//   "BASIC_GPU" - A single worker instance [with a
-	// GPU](ml/docs/how-tos/using-gpus).
+	//   "BASIC_GPU" - A single worker instance with a GPU.
 	//   "CUSTOM" - The CUSTOM tier is not a set tier, but rather enables
 	// you to use your
 	// own cluster specification. When you use this tier, set values
@@ -1783,19 +1684,6 @@ type GoogleCloudMlV1beta1__Version struct {
 	// LastUseTime: Output only. The time the version was last used for
 	// prediction.
 	LastUseTime string `json:"lastUseTime,omitempty"`
-
-	// ManualScaling: Optional. Manually select the number of nodes to use
-	// for serving the
-	// model. If unset (i.e., by default), the number of nodes used to
-	// serve
-	// the model automatically scales with traffic. However, care should
-	// be
-	// taken to ramp up traffic according to the model's ability to scale.
-	// If
-	// your model needs to handle bursts of traffic beyond it's ability
-	// to
-	// scale, it is recommended you set this field appropriately.
-	ManualScaling *GoogleCloudMlV1beta1__ManualScaling `json:"manualScaling,omitempty"`
 
 	// Name: Required.The name specified for the version when it was
 	// created.
