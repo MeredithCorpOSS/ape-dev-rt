@@ -1,6 +1,6 @@
 # Support
 
-Try [ape-pet-support](https://github.com/TimeInc/ape-pet-support) to get in touch or file a bug.
+Try [platform-engineering](https://github.com/TimeInc/platform-engineering) to get in touch or file a bug.
 
 # Troubleshooting
 

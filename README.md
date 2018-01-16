@@ -5,6 +5,7 @@ The Release Tool deploys apps (defined in [ape-dev-rt-apps](https://github.com/T
 Terraform version RT uses is: [v0.9.11](https://github.com/hashicorp/terraform/tree/v0.9.11/website/source/docs/)
 
 - [Installation](docs/install.md)
+- [About](docs/about.md)
 - [Internals](docs/internals.md)
 - [Usage](docs/usage.md)
 - [Help](docs/help.md)
