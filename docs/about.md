@@ -7,4 +7,4 @@ Ease of use around duplication, re-creation, lifecycle and disposal of applicati
 Both Application Infrastructure (DBs/compute) and Deployment (code) are defined in versioned configuration.
 Makes disaster recovery simpler by applying/deploying in second region.
 
-Encourages devops practices, specifically allowing developers to take control of their own infrastructure and lessen the burden on central team
+Encourages devops practices, specifically allowing developers to take control of their own infrastructure and lessen the burden on central team, but at the same time allowing for separation where needed - PCI or where skills/time are at a deficit
