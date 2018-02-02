@@ -1,0 +1,8 @@
+{
+	"variables": {
+		"Servers": {
+			"description": "The number of servers",
+			"default": 3
+		}
+	}
+}

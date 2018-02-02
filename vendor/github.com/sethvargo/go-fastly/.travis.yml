@@ -1,0 +1,13 @@
+sudo: false
+
+language: go
+
+go:
+  - 1.6
+
+branches:
+  only:
+    - master
+
+script: make test testrace
+

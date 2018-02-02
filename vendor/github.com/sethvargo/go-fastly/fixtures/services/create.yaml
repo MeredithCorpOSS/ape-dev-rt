@@ -1,0 +1,51 @@
+---
+version: 1
+interactions:
+- request:
+    body: comment=comment&name=test-service
+    form:
+      comment:
+      - comment
+      name:
+      - test-service
+    headers:
+      Content-Type:
+      - application/x-www-form-urlencoded
+      Fastly-Key:
+      - d631487398e146a8593ddd71d384c7e6
+      User-Agent:
+      - FastlyGo/0.2 (+github.com/sethvargo/go-fastly; go1.6.2)
+    url: https://api.fastly.com/service
+    method: POST
+  response:
+    body: '{"comment":"comment","name":"test-service","customer_id":"7Tdn3IoAG8ATIy3P3XTZrY","publish_key":"de4d301a440eb79b9181eba118deeba2f4213ca8","versions":[{"testing":false,"locked":false,"number":1,"active":false,"service_id":"5If2o28xCYTG5SGEsNyDC1","staging":false,"created_at":"2016-06-29T22:27:36+00:00","deleted_at":null,"comment":"","updated_at":"2016-06-29T22:27:36+00:00","deployed":false}],"deleted_at":null,"created_at":"2016-06-29T22:27:36+00:00","updated_at":"2016-06-29T22:27:36+00:00","id":"5If2o28xCYTG5SGEsNyDC1"}'
+    headers:
+      Accept-Ranges:
+      - bytes
+      Cache-Control:
+      - no-cache
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 29 Jun 2016 22:27:36 GMT
+      Fastly-Ratelimit-Remaining:
+      - "936"
+      Fastly-Ratelimit-Reset:
+      - "1467241200"
+      Status:
+      - 200 OK
+      Vary:
+      - Accept-Encoding
+      Via:
+      - 1.1 varnish
+      - 1.1 varnish
+      X-Cache:
+      - MISS, MISS
+      X-Cache-Hits:
+      - 0, 0
+      X-Served-By:
+      - app-slwdc9051-SL, cache-ord1747-ORD
+    status: 200 OK
+    code: 200

@@ -1,0 +1,15 @@
+### Go ###
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+
+## Directory-based project format:
+.idea/
+
+# custom IGNORES
+/pkg/
+/bin/
+/release/
+ape-dev-rt.debug
+.DS_Store

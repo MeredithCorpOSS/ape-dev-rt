@@ -1,0 +1,55 @@
+---
+version: 1
+interactions:
+- request:
+    body: Name=test-healthcheck&Service=7i6HN3TK9wS159v2gPAZ8A&Version=602&name=new-test-healthcheck
+    form:
+      Name:
+      - test-healthcheck
+      Service:
+      - 7i6HN3TK9wS159v2gPAZ8A
+      Version:
+      - "602"
+      name:
+      - new-test-healthcheck
+    headers:
+      Content-Type:
+      - application/x-www-form-urlencoded
+      Fastly-Key:
+      - d631487398e146a8593ddd71d384c7e6
+      User-Agent:
+      - FastlyGo/0.2 (+github.com/sethvargo/go-fastly; go1.6.2)
+    url: https://api.fastly.com/service/7i6HN3TK9wS159v2gPAZ8A/version/602/healthcheck/test-healthcheck
+    method: PUT
+  response:
+    body: '{"threshold":10,"window":5000,"service_id":"7i6HN3TK9wS159v2gPAZ8A","http_version":"1.1","timeout":1500,"method":"HEAD","updated_at":"2016-06-29T22:27:37+00:00","expected_response":200,"version":602,"name":"new-test-healthcheck","deleted_at":null,"path":"/foo","host":"example.com","created_at":"2016-06-29T22:27:37+00:00","comment":"","check_interval":2500,"initial":10}'
+    headers:
+      Accept-Ranges:
+      - bytes
+      Cache-Control:
+      - no-cache
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 29 Jun 2016 22:27:39 GMT
+      Fastly-Ratelimit-Remaining:
+      - "916"
+      Fastly-Ratelimit-Reset:
+      - "1467241200"
+      Status:
+      - 200 OK
+      Vary:
+      - Accept-Encoding
+      Via:
+      - 1.1 varnish
+      - 1.1 varnish
+      X-Cache:
+      - MISS, MISS
+      X-Cache-Hits:
+      - 0, 0
+      X-Served-By:
+      - app-slwdc9050-SL, cache-ord1729-ORD
+    status: 200 OK
+    code: 200

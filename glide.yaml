@@ -1,0 +1,86 @@
+package: github.com/TimeInc/ape-dev-rt
+import:
+- package: github.com/hashicorp/terraform
+  version: v0.8.0
+  subpackages:
+  - builtin/providers/aws
+  - builtin/providers/null
+  - builtin/providers/template
+  - builtin/providers/terraform
+  - builtin/provisioners/local-exec
+  - command
+  - terraform
+- package: github.com/RevH/ipinfo
+  version: 09a74906140aa8a7eb40bdb3f750d77318912ed7
+- package: github.com/aws/aws-sdk-go
+  version: v1.5.13
+  subpackages:
+  - aws
+  - aws/awserr
+  - aws/awsutil
+  - aws/client
+  - aws/client/metadata
+  - aws/corehandlers
+  - aws/credentials
+  - aws/credentials/ec2rolecreds
+  - aws/credentials/endpointcreds
+  - aws/credentials/stscreds
+  - aws/defaults
+  - aws/ec2metadata
+  - aws/request
+  - aws/session
+  - aws/signer/v4
+  - private/endpoints
+  - private/protocol
+  - private/protocol/ec2query
+  - private/protocol/query
+  - private/protocol/query/queryutil
+  - private/protocol/rest
+  - private/protocol/restxml
+  - private/protocol/xml/xmlutil
+  - private/waiter
+  - service/autoscaling
+  - service/ec2
+  - service/elb
+  - service/s3
+  - service/sts
+- package: github.com/briandowns/spinner
+  version: a00ac22c746220ee70a0891a0ec4aa6c56c6bb6a
+- package: github.com/fatih/color
+  version: dea9d3a26a087187530244679c1cfb3a42937794
+- package: github.com/hashicorp/go-multierror
+  version: 8c5f0ad9360406a3807ce7de6bc73269a91a6e51
+  subpackages:
+  - vendor/github.com/hashicorp/errwrap
+- package: github.com/hashicorp/go-version
+  version: deeb027c13a95d56c7585df3fe29207208c6706e
+- package: github.com/hashicorp/hcl
+  version: b97feebd3db0a834bb92535b0950e7d5d4527a58
+  subpackages:
+  - hcl/ast
+  - hcl/parser
+  - hcl/scanner
+  - hcl/strconv
+  - hcl/token
+  - json/parser
+  - json/scanner
+  - json/token
+- package: github.com/kr/text
+  version: 7cafcd837844e784b526369c9bce262804aebc60
+- package: github.com/mitchellh/cli
+  version: fcf521421aa29bde1d93b6920dfce826d7932208
+- package: github.com/mitchellh/go-homedir
+  version: 756f7b183b7ab78acdbbee5c7f392838ed459dda
+- package: github.com/ninibe/bigduration
+  version: 88d3399741b1dc65990e9b7c5580beaae3ec3e29
+- package: github.com/ttacon/chalk
+  version: 22c06c80ed312dcb6e1cf394f9634aa2c4676e22
+- package: github.com/urfave/cli
+  version: v1.18.0
+- package: golang.org/x/net
+  version: 04b9de9b512f58addf28c9853d50ebef61c3953e
+  subpackages:
+  - context
+- package: gopkg.in/ini.v1
+  version: 6e4869b434bd001f6983749881c7ead3545887d8
+- package: github.com/hashicorp/go-cleanhttp

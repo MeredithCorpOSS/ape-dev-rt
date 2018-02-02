@@ -1,0 +1,14 @@
+# builds
+/scaleway-cli
+/scw
+dist/
+
+# junk
+*~
+*#
+.#*
+profile.cov
+profile.out
+.vendor
+.goxc.local.json
+/.vscode

@@ -1,0 +1,55 @@
+---
+version: 1
+interactions:
+- request:
+    body: Service=7i6HN3TK9wS159v2gPAZ8A&Version=588&comment=comment&name=integ-test.go-fastly.com
+    form:
+      Service:
+      - 7i6HN3TK9wS159v2gPAZ8A
+      Version:
+      - "588"
+      comment:
+      - comment
+      name:
+      - integ-test.go-fastly.com
+    headers:
+      Content-Type:
+      - application/x-www-form-urlencoded
+      Fastly-Key:
+      - d631487398e146a8593ddd71d384c7e6
+      User-Agent:
+      - FastlyGo/0.2 (+github.com/sethvargo/go-fastly; go1.6.2)
+    url: https://api.fastly.com/service/7i6HN3TK9wS159v2gPAZ8A/version/588/domain
+    method: POST
+  response:
+    body: '{"comment":"comment","name":"integ-test.go-fastly.com","service_id":"7i6HN3TK9wS159v2gPAZ8A","version":588,"created_at":"2016-06-29T22:27:25+00:00","deleted_at":null,"updated_at":"2016-06-29T22:27:25+00:00"}'
+    headers:
+      Accept-Ranges:
+      - bytes
+      Cache-Control:
+      - no-cache
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 29 Jun 2016 22:27:25 GMT
+      Fastly-Ratelimit-Remaining:
+      - "997"
+      Fastly-Ratelimit-Reset:
+      - "1467241200"
+      Status:
+      - 200 OK
+      Vary:
+      - Accept-Encoding
+      Via:
+      - 1.1 varnish
+      - 1.1 varnish
+      X-Cache:
+      - MISS, MISS
+      X-Cache-Hits:
+      - 0, 0
+      X-Served-By:
+      - app-slwdc9051-SL, cache-ord1730-ORD
+    status: 200 OK
+    code: 200

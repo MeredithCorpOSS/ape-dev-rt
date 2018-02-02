@@ -1,0 +1,32 @@
+#cloud-config
+coreos:
+  etcd2:
+    initial-cluster-state: existing
+    advertise-client-urls: http://${etcd_dns}:2379
+    initial-advertise-peer-urls: http://${etcd_dns}:2380
+    listen-client-urls: http://${etcd_dns}:2379
+    listen-peer-urls: http://${etcd_dns}:2380
+    proxy: readonly
+  fleet:
+    etcd_servers: http://${etcd_dns}:2379
+    metadata: 'team_name=${team_name},env=${environment},app=${app_name},version=${app_version},instance_type=${aws_coreos_instance_type},provider=aws,region=${aws_region},role=docker'
+  units:
+    - name: etcd2.service
+      command: start
+    - name: fleet.service
+      command: start
+    - name: app.service
+      command: start
+      content: |
+        [Unit]
+        Description=${container_name}
+        After=docker.service
+        Requires=docker.service
+        [Service]
+        TimeoutStartSec=0
+        User=core
+        ExecStartPre=-/usr/bin/docker kill ${container_name}
+        ExecStartPre=-/usr/bin/docker rm ${container_name}
+        ExecStartPre=/usr/bin/docker pull ${image_url}
+        ExecStart=/usr/bin/docker run --rm -name ${container_name} -p 8080:2368 ${image_url}
+        ExecStop=/usr/bin/docker stop ${container_name}
