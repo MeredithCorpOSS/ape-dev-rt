@@ -413,9 +413,6 @@ func beforeAuthedCommand(c *cli.Context) error {
 	if c.String("env") == "" {
 		return errors.New("No environment defined. Please use -env flag")
 	}
-	if c.String("app") == "" {
-		return fmt.Errorf("No application name defined for environment '%s'. Please use -app flag", c.String("env"))
-	}
 
 	ds, err := loadDeploymentState(c.String("env"), c.String("app"), cfg.DeploymentState)
 	if err != nil {
@@ -509,6 +506,12 @@ func wrapCommand(cmd func(c *commons.Context) error) func(*cli.Context) error {
 
 		if cliContext.Command.Category == "DEPRECATED" {
 			fmt.Printf("%s %s\n", boldYellow("WARNING:"), boldYellow(cliContext.Command.Usage))
+		}
+
+		if !cliContext.Command.HasName("list-apps") {
+			if cliContext.String("app") == "" {
+				return fmt.Errorf("No application name defined for environment '%s'. Please use -app flag", cliContext.String("env"))
+			}
 		}
 
 		flags := append(cliContext.App.Flags, cliContext.Command.Flags...)
