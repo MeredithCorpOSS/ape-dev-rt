@@ -15,7 +15,7 @@ var GitCommit string
 var TerraformCommit string
 
 const TerraformVersion = tf_version.Version
-const Version = "0.10.0"
+const Version = "0.10.0-alpha"
 
 func GetVersion(c *commons.Context) error {
 	fmt.Printf("rt %s (%s)\n", Version, GitCommit)
