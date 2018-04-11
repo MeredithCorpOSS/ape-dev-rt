@@ -106,10 +106,6 @@ func dataSourceAwsAmi() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"root_snapshot_id": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
 			"sriov_net_support": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -169,7 +165,7 @@ func dataSourceAwsAmi() *schema.Resource {
 				Type:     schema.TypeMap,
 				Computed: true,
 			},
-			"tags": tagsSchemaComputed(),
+			"tags": dataSourceTagsSchema(),
 		},
 	}
 }
@@ -288,7 +284,6 @@ func amiDescriptionAttributes(d *schema.ResourceData, image *ec2.Image) error {
 		d.Set("root_device_name", image.RootDeviceName)
 	}
 	d.Set("root_device_type", image.RootDeviceType)
-	d.Set("root_snapshot_id", amiRootSnapshotId(image))
 	if image.SriovNetSupport != nil {
 		d.Set("sriov_net_support", image.SriovNetSupport)
 	}
@@ -304,7 +299,7 @@ func amiDescriptionAttributes(d *schema.ResourceData, image *ec2.Image) error {
 	if err := d.Set("state_reason", amiStateReason(image.StateReason)); err != nil {
 		return err
 	}
-	if err := d.Set("tags", tagsToMap(image.Tags)); err != nil {
+	if err := d.Set("tags", dataSourceTags(image.Tags)); err != nil {
 		return err
 	}
 	return nil
@@ -361,22 +356,6 @@ func amiProductCodes(m []*ec2.ProductCode) *schema.Set {
 		s.Add(code)
 	}
 	return s
-}
-
-// Returns the root snapshot ID for an image, if it has one
-func amiRootSnapshotId(image *ec2.Image) string {
-	if image.RootDeviceName == nil {
-		return ""
-	}
-	for _, bdm := range image.BlockDeviceMappings {
-		if bdm.DeviceName == nil || *bdm.DeviceName != *image.RootDeviceName {
-			continue
-		}
-		if bdm.Ebs != nil && bdm.Ebs.SnapshotId != nil {
-			return *bdm.Ebs.SnapshotId
-		}
-	}
-	return ""
 }
 
 // Returns the state reason.

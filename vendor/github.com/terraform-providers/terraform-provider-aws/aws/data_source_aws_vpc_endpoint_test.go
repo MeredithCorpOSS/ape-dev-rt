@@ -13,11 +13,10 @@ func TestAccDataSourceAwsVpcEndpoint_basic(t *testing.T) {
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
-			{
+			resource.TestStep{
 				Config: testAccDataSourceAwsVpcEndpointConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccDataSourceAwsVpcEndpointCheckExists("data.aws_vpc_endpoint.s3"),
-					resource.TestCheckResourceAttrSet("data.aws_vpc_endpoint.s3", "prefix_list_id"),
 				),
 				ExpectNonEmptyPlan: true,
 			},
@@ -30,7 +29,7 @@ func TestAccDataSourceAwsVpcEndpoint_withRouteTable(t *testing.T) {
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
-			{
+			resource.TestStep{
 				Config: testAccDataSourceAwsVpcEndpointWithRouteTableConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccDataSourceAwsVpcEndpointCheckExists("data.aws_vpc_endpoint.s3"),

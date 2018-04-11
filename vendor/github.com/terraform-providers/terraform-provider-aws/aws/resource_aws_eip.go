@@ -340,14 +340,8 @@ func disassociateEip(d *schema.ResourceData, meta interface{}) error {
 	var err error
 	switch resourceAwsEipDomain(d) {
 	case "vpc":
-		associationID := d.Get("association_id").(string)
-		if associationID == "" {
-			// If assiciationID is empty, it means there's no association.
-			// Hence this disassociation can be skipped.
-			return nil
-		}
 		_, err = ec2conn.DisassociateAddress(&ec2.DisassociateAddressInput{
-			AssociationId: aws.String(associationID),
+			AssociationId: aws.String(d.Get("association_id").(string)),
 		})
 	case "standard":
 		_, err = ec2conn.DisassociateAddress(&ec2.DisassociateAddressInput{

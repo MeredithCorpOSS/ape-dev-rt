@@ -193,7 +193,6 @@ func resourceAwsAmiRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("kernel_id", image.KernelId)
 	d.Set("ramdisk_id", image.RamdiskId)
 	d.Set("root_device_name", image.RootDeviceName)
-	d.Set("root_snapshot_id", amiRootSnapshotId(image))
 	d.Set("sriov_net_support", image.SriovNetSupport)
 	d.Set("virtualization_type", image.VirtualizationType)
 
@@ -441,10 +440,6 @@ func resourceAwsAmiCommonSchema(computed bool) map[string]*schema.Schema {
 			Optional: !computed,
 			Computed: computed,
 			ForceNew: !computed,
-		},
-		"root_snapshot_id": {
-			Type:     schema.TypeString,
-			Computed: true,
 		},
 		"sriov_net_support": {
 			Type:     schema.TypeString,

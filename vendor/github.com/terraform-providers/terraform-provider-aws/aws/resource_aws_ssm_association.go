@@ -17,9 +17,6 @@ func resourceAwsSsmAssociation() *schema.Resource {
 		Update: resourceAwsSsmAssocationUpdate,
 		Delete: resourceAwsSsmAssociationDelete,
 
-		MigrateState:  resourceAwsSsmAssociationMigrateState,
-		SchemaVersion: 1,
-
 		Schema: map[string]*schema.Schema{
 			"association_id": {
 				Type:     schema.TypeString,
@@ -132,7 +129,7 @@ func resourceAwsSsmAssociationCreate(d *schema.ResourceData, meta interface{}) e
 		return fmt.Errorf("[ERROR] AssociationDescription was nil")
 	}
 
-	d.SetId(*resp.AssociationDescription.AssociationId)
+	d.SetId(*resp.AssociationDescription.Name)
 	d.Set("association_id", resp.AssociationDescription.AssociationId)
 
 	return resourceAwsSsmAssociationRead(d, meta)
@@ -144,7 +141,7 @@ func resourceAwsSsmAssociationRead(d *schema.ResourceData, meta interface{}) err
 	log.Printf("[DEBUG] Reading SSM Association: %s", d.Id())
 
 	params := &ssm.DescribeAssociationInput{
-		AssociationId: aws.String(d.Id()),
+		AssociationId: aws.String(d.Get("association_id").(string)),
 	}
 
 	resp, err := ssmconn.DescribeAssociation(params)

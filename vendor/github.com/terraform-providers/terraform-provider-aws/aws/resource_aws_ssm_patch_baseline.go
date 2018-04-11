@@ -10,22 +10,6 @@ import (
 	"github.com/hashicorp/terraform/helper/validation"
 )
 
-var ssmPatchComplianceLevels = []string{
-	ssm.PatchComplianceLevelCritical,
-	ssm.PatchComplianceLevelHigh,
-	ssm.PatchComplianceLevelMedium,
-	ssm.PatchComplianceLevelLow,
-	ssm.PatchComplianceLevelInformational,
-	ssm.PatchComplianceLevelUnspecified,
-}
-
-var ssmPatchOSs = []string{
-	ssm.OperatingSystemWindows,
-	ssm.OperatingSystemAmazonLinux,
-	ssm.OperatingSystemUbuntu,
-	ssm.OperatingSystemRedhatEnterpriseLinux,
-}
-
 func resourceAwsSsmPatchBaseline() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceAwsSsmPatchBaselineCreate,
@@ -73,13 +57,6 @@ func resourceAwsSsmPatchBaseline() *schema.Resource {
 							Required: true,
 						},
 
-						"compliance_level": {
-							Type:         schema.TypeString,
-							Optional:     true,
-							Default:      ssm.PatchComplianceLevelUnspecified,
-							ValidateFunc: validation.StringInSlice(ssmPatchComplianceLevels, false),
-						},
-
 						"patch_filter": {
 							Type:     schema.TypeList,
 							Required: true,
@@ -120,15 +97,15 @@ func resourceAwsSsmPatchBaseline() *schema.Resource {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ForceNew:     true,
-				Default:      ssm.OperatingSystemWindows,
-				ValidateFunc: validation.StringInSlice(ssmPatchOSs, false),
+				Default:      "WINDOWS",
+				ValidateFunc: validation.StringInSlice([]string{"WINDOWS", "AMAZON_LINUX", "UBUNTU", "REDHAT_ENTERPRISE_LINUX"}, false),
 			},
 
 			"approved_patches_compliance_level": {
 				Type:         schema.TypeString,
 				Optional:     true,
-				Default:      ssm.PatchComplianceLevelUnspecified,
-				ValidateFunc: validation.StringInSlice(ssmPatchComplianceLevels, false),
+				Default:      "UNSPECIFIED",
+				ValidateFunc: validation.StringInSlice([]string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNSPECIFIED"}, false),
 			},
 		},
 	}
@@ -329,7 +306,6 @@ func expandAwsSsmPatchRuleGroup(d *schema.ResourceData) *ssm.PatchRuleGroup {
 		rule := &ssm.PatchRule{
 			ApproveAfterDays: aws.Int64(int64(rCfg["approve_after_days"].(int))),
 			PatchFilterGroup: filterGroup,
-			ComplianceLevel:  aws.String(rCfg["compliance_level"].(string)),
 		}
 
 		rules = append(rules, rule)
@@ -350,7 +326,6 @@ func flattenAwsSsmPatchRuleGroup(group *ssm.PatchRuleGroup) []map[string]interfa
 	for _, rule := range group.PatchRules {
 		r := make(map[string]interface{})
 		r["approve_after_days"] = *rule.ApproveAfterDays
-		r["compliance_level"] = *rule.ComplianceLevel
 		r["patch_filter"] = flattenAwsSsmPatchFilterGroup(rule.PatchFilterGroup)
 		result = append(result, r)
 	}

@@ -23,10 +23,14 @@ func TestAccAWSAPIGatewayRestApi_basic(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckAWSAPIGatewayRestAPIExists("aws_api_gateway_rest_api.test", &conf),
 					testAccCheckAWSAPIGatewayRestAPINameAttribute(&conf, "bar"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "name", "bar"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "description", ""),
-					resource.TestCheckResourceAttrSet("aws_api_gateway_rest_api.test", "created_date"),
-					resource.TestCheckNoResourceAttr("aws_api_gateway_rest_api.test", "binary_media_types"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "name", "bar"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "description", ""),
+					resource.TestCheckResourceAttrSet(
+						"aws_api_gateway_rest_api.test", "created_date"),
+					resource.TestCheckNoResourceAttr(
+						"aws_api_gateway_rest_api.test", "binary_media_types"),
 				),
 			},
 
@@ -36,11 +40,16 @@ func TestAccAWSAPIGatewayRestApi_basic(t *testing.T) {
 					testAccCheckAWSAPIGatewayRestAPIExists("aws_api_gateway_rest_api.test", &conf),
 					testAccCheckAWSAPIGatewayRestAPINameAttribute(&conf, "test"),
 					testAccCheckAWSAPIGatewayRestAPIDescriptionAttribute(&conf, "test"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "name", "test"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "description", "test"),
-					resource.TestCheckResourceAttrSet("aws_api_gateway_rest_api.test", "created_date"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "binary_media_types.#", "1"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "binary_media_types.0", "application/octet-stream"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "name", "test"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "description", "test"),
+					resource.TestCheckResourceAttrSet(
+						"aws_api_gateway_rest_api.test", "created_date"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "binary_media_types.#", "1"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "binary_media_types.0", "application/octet-stream"),
 				),
 			},
 		},
@@ -61,10 +70,14 @@ func TestAccAWSAPIGatewayRestApi_openapi(t *testing.T) {
 					testAccCheckAWSAPIGatewayRestAPIExists("aws_api_gateway_rest_api.test", &conf),
 					testAccCheckAWSAPIGatewayRestAPINameAttribute(&conf, "test"),
 					testAccCheckAWSAPIGatewayRestAPIRoutes(&conf, []string{"/", "/test"}),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "name", "test"),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "description", ""),
-					resource.TestCheckResourceAttrSet("aws_api_gateway_rest_api.test", "created_date"),
-					resource.TestCheckNoResourceAttr("aws_api_gateway_rest_api.test", "binary_media_types"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "name", "test"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "description", ""),
+					resource.TestCheckResourceAttrSet(
+						"aws_api_gateway_rest_api.test", "created_date"),
+					resource.TestCheckNoResourceAttr(
+						"aws_api_gateway_rest_api.test", "binary_media_types"),
 				),
 			},
 
@@ -74,8 +87,10 @@ func TestAccAWSAPIGatewayRestApi_openapi(t *testing.T) {
 					testAccCheckAWSAPIGatewayRestAPIExists("aws_api_gateway_rest_api.test", &conf),
 					testAccCheckAWSAPIGatewayRestAPINameAttribute(&conf, "test"),
 					testAccCheckAWSAPIGatewayRestAPIRoutes(&conf, []string{"/", "/update"}),
-					resource.TestCheckResourceAttr("aws_api_gateway_rest_api.test", "name", "test"),
-					resource.TestCheckResourceAttrSet("aws_api_gateway_rest_api.test", "created_date"),
+					resource.TestCheckResourceAttr(
+						"aws_api_gateway_rest_api.test", "name", "test"),
+					resource.TestCheckResourceAttrSet(
+						"aws_api_gateway_rest_api.test", "created_date"),
 				),
 			},
 		},

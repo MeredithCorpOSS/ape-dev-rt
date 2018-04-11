@@ -56,3 +56,4 @@ import:
   version: 22c06c80ed312dcb6e1cf394f9634aa2c4676e22
 - package: github.com/urfave/cli
   version: v1.18.0
+- package: github.com/mitchellh/prefixedio

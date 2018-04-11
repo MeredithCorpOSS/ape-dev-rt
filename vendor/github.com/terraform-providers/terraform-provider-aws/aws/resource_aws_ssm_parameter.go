@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -65,10 +66,8 @@ func resourceAwsSsmParameterRead(d *schema.ResourceData, meta interface{}) error
 		return errwrap.Wrapf("[ERROR] Error describing SSM parameter: {{err}}", err)
 	}
 
-	if len(resp.Parameters) == 0 {
-		log.Printf("[WARN] SSM Param %q not found, removing from state", d.Id())
-		d.SetId("")
-		return nil
+	if len(resp.InvalidParameters) > 0 {
+		return fmt.Errorf("[ERROR] SSM Parameter %s is invalid", d.Id())
 	}
 
 	param := resp.Parameters[0]

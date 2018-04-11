@@ -25,60 +25,57 @@ func resourceAwsDirectoryServiceDirectory() *schema.Resource {
 		Read:   resourceAwsDirectoryServiceDirectoryRead,
 		Update: resourceAwsDirectoryServiceDirectoryUpdate,
 		Delete: resourceAwsDirectoryServiceDirectoryDelete,
-		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
-		},
 
 		Schema: map[string]*schema.Schema{
-			"name": {
+			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
 			},
-			"password": {
+			"password": &schema.Schema{
 				Type:      schema.TypeString,
 				Required:  true,
 				ForceNew:  true,
 				Sensitive: true,
 			},
-			"size": {
+			"size": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "Large",
 				ForceNew: true,
 			},
-			"alias": {
+			"alias": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				Computed: true,
 				ForceNew: true,
 			},
-			"description": {
+			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
 			},
-			"short_name": {
+			"short_name": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				Computed: true,
 				ForceNew: true,
 			},
 			"tags": tagsSchema(),
-			"vpc_settings": {
+			"vpc_settings": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
 				ForceNew: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"subnet_ids": {
+						"subnet_ids": &schema.Schema{
 							Type:     schema.TypeSet,
 							Required: true,
 							ForceNew: true,
 							Elem:     &schema.Schema{Type: schema.TypeString},
 							Set:      schema.HashString,
 						},
-						"vpc_id": {
+						"vpc_id": &schema.Schema{
 							Type:     schema.TypeString,
 							Required: true,
 							ForceNew: true,
@@ -86,32 +83,32 @@ func resourceAwsDirectoryServiceDirectory() *schema.Resource {
 					},
 				},
 			},
-			"connect_settings": {
+			"connect_settings": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
 				ForceNew: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"customer_username": {
+						"customer_username": &schema.Schema{
 							Type:     schema.TypeString,
 							Required: true,
 							ForceNew: true,
 						},
-						"customer_dns_ips": {
+						"customer_dns_ips": &schema.Schema{
 							Type:     schema.TypeSet,
 							Required: true,
 							ForceNew: true,
 							Elem:     &schema.Schema{Type: schema.TypeString},
 							Set:      schema.HashString,
 						},
-						"subnet_ids": {
+						"subnet_ids": &schema.Schema{
 							Type:     schema.TypeSet,
 							Required: true,
 							ForceNew: true,
 							Elem:     &schema.Schema{Type: schema.TypeString},
 							Set:      schema.HashString,
 						},
-						"vpc_id": {
+						"vpc_id": &schema.Schema{
 							Type:     schema.TypeString,
 							Required: true,
 							ForceNew: true,
@@ -119,22 +116,22 @@ func resourceAwsDirectoryServiceDirectory() *schema.Resource {
 					},
 				},
 			},
-			"enable_sso": {
+			"enable_sso": &schema.Schema{
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  false,
 			},
-			"access_url": {
+			"access_url": &schema.Schema{
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"dns_ip_addresses": {
+			"dns_ip_addresses": &schema.Schema{
 				Type:     schema.TypeSet,
 				Elem:     &schema.Schema{Type: schema.TypeString},
 				Set:      schema.HashString,
 				Computed: true,
 			},
-			"type": {
+			"type": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "SimpleAD",

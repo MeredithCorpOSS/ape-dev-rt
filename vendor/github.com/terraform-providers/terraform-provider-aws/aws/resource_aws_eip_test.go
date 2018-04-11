@@ -21,7 +21,7 @@ func TestAccAWSEIP_importEc2Classic(t *testing.T) {
 	resourceName := "aws_eip.bar"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccEC2ClassicPreCheck(t) },
+		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSEIPDestroy,
 		Steps: []resource.TestStep{
@@ -186,7 +186,7 @@ func TestAccAWSEIP_associated_user_private_ip(t *testing.T) {
 // https://github.com/terraform-providers/terraform-provider-aws/issues/42)
 func TestAccAWSEIP_classic_disassociate(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccEC2ClassicPreCheck(t) },
+		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSEIPDestroy,
 		Steps: []resource.TestStep{
@@ -231,35 +231,6 @@ func TestAccAWSEIP_disappears(t *testing.T) {
 					testAccCheckAWSEIPDisappears(&conf),
 				),
 				ExpectNonEmptyPlan: true,
-			},
-		},
-	})
-}
-
-func TestAccAWSEIPAssociate_not_associated(t *testing.T) {
-	var conf ec2.Address
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_eip.bar",
-		Providers:     testAccProviders,
-		CheckDestroy:  testAccCheckAWSEIPDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccAWSEIPAssociate_not_associated,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckAWSEIPExists("aws_eip.bar", &conf),
-					testAccCheckAWSEIPAttributes(&conf),
-				),
-			},
-
-			resource.TestStep{
-				Config: testAccAWSEIPAssociate_associated,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckAWSEIPExists("aws_eip.bar", &conf),
-					testAccCheckAWSEIPAttributes(&conf),
-					testAccCheckAWSEIPAssociated(&conf),
-				),
 			},
 		},
 	})
@@ -715,26 +686,3 @@ resource "aws_route_table_association" "us-east-1b-public" {
   route_table_id = "${aws_route_table.us-east-1-public.id}"
 }`, ami)
 }
-
-const testAccAWSEIPAssociate_not_associated = `
-resource "aws_instance" "foo" {
-	# us-west-2
-	ami = "ami-4fccb37f"
-	instance_type = "m1.small"
-}
-
-resource "aws_eip" "bar" {
-}
-`
-
-const testAccAWSEIPAssociate_associated = `
-resource "aws_instance" "foo" {
-	# us-west-2
-	ami = "ami-4fccb37f"
-	instance_type = "m1.small"
-}
-
-resource "aws_eip" "bar" {
-	instance = "${aws_instance.foo.id}"
-}
-`

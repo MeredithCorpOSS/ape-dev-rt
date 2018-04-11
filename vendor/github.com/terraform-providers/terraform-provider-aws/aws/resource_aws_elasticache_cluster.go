@@ -157,6 +157,7 @@ func resourceAwsElasticacheCluster() *schema.Resource {
 		Type:     schema.TypeString,
 		Optional: true,
 		Computed: true,
+		ForceNew: true,
 	}
 
 	resourceSchema["availability_zone"] = &schema.Schema{
@@ -379,11 +380,6 @@ func resourceAwsElasticacheClusterRead(d *schema.ResourceData, meta interface{})
 			}
 		}
 		d.Set("availability_zone", c.PreferredAvailabilityZone)
-		if *c.PreferredAvailabilityZone == "Multiple" {
-			d.Set("az_mode", "cross-az")
-		} else {
-			d.Set("az_mode", "single-az")
-		}
 
 		if err := setCacheNodeData(d, c); err != nil {
 			return err
@@ -474,11 +470,6 @@ func resourceAwsElasticacheClusterUpdate(d *schema.ResourceData, meta interface{
 
 	if d.HasChange("snapshot_retention_limit") {
 		req.SnapshotRetentionLimit = aws.Int64(int64(d.Get("snapshot_retention_limit").(int)))
-		requestUpdate = true
-	}
-
-	if d.HasChange("az_mode") {
-		req.AZMode = aws.String(d.Get("az_mode").(string))
 		requestUpdate = true
 	}
 
