@@ -118,11 +118,10 @@ func resourceAwsRouteTableCreate(d *schema.ResourceData, meta interface{}) error
 		"[DEBUG] Waiting for route table (%s) to become available",
 		d.Id())
 	stateConf := &resource.StateChangeConf{
-		Pending:        []string{"pending"},
-		Target:         []string{"ready"},
-		Refresh:        resourceAwsRouteTableStateRefreshFunc(conn, d.Id()),
-		Timeout:        10 * time.Minute,
-		NotFoundChecks: 40,
+		Pending: []string{"pending"},
+		Target:  []string{"ready"},
+		Refresh: resourceAwsRouteTableStateRefreshFunc(conn, d.Id()),
+		Timeout: 10 * time.Minute,
 	}
 	if _, err := stateConf.WaitForState(); err != nil {
 		return fmt.Errorf(

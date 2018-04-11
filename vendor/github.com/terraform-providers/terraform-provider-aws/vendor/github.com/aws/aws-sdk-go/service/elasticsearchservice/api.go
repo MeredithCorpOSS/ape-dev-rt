@@ -37,6 +37,8 @@ const opAddTags = "AddTags"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AddTags
 func (c *ElasticsearchService) AddTagsRequest(input *AddTagsInput) (req *request.Request, output *AddTagsOutput) {
 	op := &request.Operation{
 		Name:       opAddTags,
@@ -85,6 +87,7 @@ func (c *ElasticsearchService) AddTagsRequest(input *AddTagsInput) (req *request
 //   or failure (the failure is internal to the service) . Gives http status code
 //   of 500.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AddTags
 func (c *ElasticsearchService) AddTags(input *AddTagsInput) (*AddTagsOutput, error) {
 	req, out := c.AddTagsRequest(input)
 	return out, req.Send()
@@ -130,6 +133,8 @@ const opCreateElasticsearchDomain = "CreateElasticsearchDomain"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/CreateElasticsearchDomain
 func (c *ElasticsearchService) CreateElasticsearchDomainRequest(input *CreateElasticsearchDomainInput) (req *request.Request, output *CreateElasticsearchDomainOutput) {
 	op := &request.Operation{
 		Name:       opCreateElasticsearchDomain,
@@ -188,6 +193,7 @@ func (c *ElasticsearchService) CreateElasticsearchDomainRequest(input *CreateEla
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/CreateElasticsearchDomain
 func (c *ElasticsearchService) CreateElasticsearchDomain(input *CreateElasticsearchDomainInput) (*CreateElasticsearchDomainOutput, error) {
 	req, out := c.CreateElasticsearchDomainRequest(input)
 	return out, req.Send()
@@ -233,6 +239,8 @@ const opDeleteElasticsearchDomain = "DeleteElasticsearchDomain"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DeleteElasticsearchDomain
 func (c *ElasticsearchService) DeleteElasticsearchDomainRequest(input *DeleteElasticsearchDomainInput) (req *request.Request, output *DeleteElasticsearchDomainOutput) {
 	op := &request.Operation{
 		Name:       opDeleteElasticsearchDomain,
@@ -278,6 +286,7 @@ func (c *ElasticsearchService) DeleteElasticsearchDomainRequest(input *DeleteEla
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DeleteElasticsearchDomain
 func (c *ElasticsearchService) DeleteElasticsearchDomain(input *DeleteElasticsearchDomainInput) (*DeleteElasticsearchDomainOutput, error) {
 	req, out := c.DeleteElasticsearchDomainRequest(input)
 	return out, req.Send()
@@ -323,6 +332,8 @@ const opDescribeElasticsearchDomain = "DescribeElasticsearchDomain"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomain
 func (c *ElasticsearchService) DescribeElasticsearchDomainRequest(input *DescribeElasticsearchDomainInput) (req *request.Request, output *DescribeElasticsearchDomainOutput) {
 	op := &request.Operation{
 		Name:       opDescribeElasticsearchDomain,
@@ -368,6 +379,7 @@ func (c *ElasticsearchService) DescribeElasticsearchDomainRequest(input *Describ
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomain
 func (c *ElasticsearchService) DescribeElasticsearchDomain(input *DescribeElasticsearchDomainInput) (*DescribeElasticsearchDomainOutput, error) {
 	req, out := c.DescribeElasticsearchDomainRequest(input)
 	return out, req.Send()
@@ -413,6 +425,8 @@ const opDescribeElasticsearchDomainConfig = "DescribeElasticsearchDomainConfig"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainConfig
 func (c *ElasticsearchService) DescribeElasticsearchDomainConfigRequest(input *DescribeElasticsearchDomainConfigInput) (req *request.Request, output *DescribeElasticsearchDomainConfigOutput) {
 	op := &request.Operation{
 		Name:       opDescribeElasticsearchDomainConfig,
@@ -459,6 +473,7 @@ func (c *ElasticsearchService) DescribeElasticsearchDomainConfigRequest(input *D
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainConfig
 func (c *ElasticsearchService) DescribeElasticsearchDomainConfig(input *DescribeElasticsearchDomainConfigInput) (*DescribeElasticsearchDomainConfigOutput, error) {
 	req, out := c.DescribeElasticsearchDomainConfigRequest(input)
 	return out, req.Send()
@@ -504,6 +519,8 @@ const opDescribeElasticsearchDomains = "DescribeElasticsearchDomains"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomains
 func (c *ElasticsearchService) DescribeElasticsearchDomainsRequest(input *DescribeElasticsearchDomainsInput) (req *request.Request, output *DescribeElasticsearchDomainsOutput) {
 	op := &request.Operation{
 		Name:       opDescribeElasticsearchDomains,
@@ -545,6 +562,7 @@ func (c *ElasticsearchService) DescribeElasticsearchDomainsRequest(input *Descri
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomains
 func (c *ElasticsearchService) DescribeElasticsearchDomains(input *DescribeElasticsearchDomainsInput) (*DescribeElasticsearchDomainsOutput, error) {
 	req, out := c.DescribeElasticsearchDomainsRequest(input)
 	return out, req.Send()
@@ -590,6 +608,8 @@ const opDescribeElasticsearchInstanceTypeLimits = "DescribeElasticsearchInstance
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchInstanceTypeLimits
 func (c *ElasticsearchService) DescribeElasticsearchInstanceTypeLimitsRequest(input *DescribeElasticsearchInstanceTypeLimitsInput) (req *request.Request, output *DescribeElasticsearchInstanceTypeLimitsOutput) {
 	op := &request.Operation{
 		Name:       opDescribeElasticsearchInstanceTypeLimits,
@@ -644,6 +664,7 @@ func (c *ElasticsearchService) DescribeElasticsearchInstanceTypeLimitsRequest(in
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchInstanceTypeLimits
 func (c *ElasticsearchService) DescribeElasticsearchInstanceTypeLimits(input *DescribeElasticsearchInstanceTypeLimitsInput) (*DescribeElasticsearchInstanceTypeLimitsOutput, error) {
 	req, out := c.DescribeElasticsearchInstanceTypeLimitsRequest(input)
 	return out, req.Send()
@@ -689,6 +710,8 @@ const opListDomainNames = "ListDomainNames"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListDomainNames
 func (c *ElasticsearchService) ListDomainNamesRequest(input *ListDomainNamesInput) (req *request.Request, output *ListDomainNamesOutput) {
 	op := &request.Operation{
 		Name:       opListDomainNames,
@@ -725,6 +748,7 @@ func (c *ElasticsearchService) ListDomainNamesRequest(input *ListDomainNamesInpu
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListDomainNames
 func (c *ElasticsearchService) ListDomainNames(input *ListDomainNamesInput) (*ListDomainNamesOutput, error) {
 	req, out := c.ListDomainNamesRequest(input)
 	return out, req.Send()
@@ -770,6 +794,8 @@ const opListElasticsearchInstanceTypes = "ListElasticsearchInstanceTypes"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchInstanceTypes
 func (c *ElasticsearchService) ListElasticsearchInstanceTypesRequest(input *ListElasticsearchInstanceTypesInput) (req *request.Request, output *ListElasticsearchInstanceTypesOutput) {
 	op := &request.Operation{
 		Name:       opListElasticsearchInstanceTypes,
@@ -820,6 +846,7 @@ func (c *ElasticsearchService) ListElasticsearchInstanceTypesRequest(input *List
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchInstanceTypes
 func (c *ElasticsearchService) ListElasticsearchInstanceTypes(input *ListElasticsearchInstanceTypesInput) (*ListElasticsearchInstanceTypesOutput, error) {
 	req, out := c.ListElasticsearchInstanceTypesRequest(input)
 	return out, req.Send()
@@ -915,6 +942,8 @@ const opListElasticsearchVersions = "ListElasticsearchVersions"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchVersions
 func (c *ElasticsearchService) ListElasticsearchVersionsRequest(input *ListElasticsearchVersionsInput) (req *request.Request, output *ListElasticsearchVersionsOutput) {
 	op := &request.Operation{
 		Name:       opListElasticsearchVersions,
@@ -965,6 +994,7 @@ func (c *ElasticsearchService) ListElasticsearchVersionsRequest(input *ListElast
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchVersions
 func (c *ElasticsearchService) ListElasticsearchVersions(input *ListElasticsearchVersionsInput) (*ListElasticsearchVersionsOutput, error) {
 	req, out := c.ListElasticsearchVersionsRequest(input)
 	return out, req.Send()
@@ -1060,6 +1090,8 @@ const opListTags = "ListTags"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListTags
 func (c *ElasticsearchService) ListTagsRequest(input *ListTagsInput) (req *request.Request, output *ListTagsOutput) {
 	op := &request.Operation{
 		Name:       opListTags,
@@ -1104,6 +1136,7 @@ func (c *ElasticsearchService) ListTagsRequest(input *ListTagsInput) (req *reque
 //   or failure (the failure is internal to the service) . Gives http status code
 //   of 500.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListTags
 func (c *ElasticsearchService) ListTags(input *ListTagsInput) (*ListTagsOutput, error) {
 	req, out := c.ListTagsRequest(input)
 	return out, req.Send()
@@ -1149,6 +1182,8 @@ const opRemoveTags = "RemoveTags"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/RemoveTags
 func (c *ElasticsearchService) RemoveTagsRequest(input *RemoveTagsInput) (req *request.Request, output *RemoveTagsOutput) {
 	op := &request.Operation{
 		Name:       opRemoveTags,
@@ -1191,6 +1226,7 @@ func (c *ElasticsearchService) RemoveTagsRequest(input *RemoveTagsInput) (req *r
 //   or failure (the failure is internal to the service) . Gives http status code
 //   of 500.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/RemoveTags
 func (c *ElasticsearchService) RemoveTags(input *RemoveTagsInput) (*RemoveTagsOutput, error) {
 	req, out := c.RemoveTagsRequest(input)
 	return out, req.Send()
@@ -1236,6 +1272,8 @@ const opUpdateElasticsearchDomainConfig = "UpdateElasticsearchDomainConfig"
 //    if err == nil { // resp is now filled
 //        fmt.Println(resp)
 //    }
+//
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/UpdateElasticsearchDomainConfig
 func (c *ElasticsearchService) UpdateElasticsearchDomainConfigRequest(input *UpdateElasticsearchDomainConfigInput) (req *request.Request, output *UpdateElasticsearchDomainConfigOutput) {
 	op := &request.Operation{
 		Name:       opUpdateElasticsearchDomainConfig,
@@ -1289,6 +1327,7 @@ func (c *ElasticsearchService) UpdateElasticsearchDomainConfigRequest(input *Upd
 //   An exception for missing / invalid input fields. Gives http status code of
 //   400.
 //
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/UpdateElasticsearchDomainConfig
 func (c *ElasticsearchService) UpdateElasticsearchDomainConfig(input *UpdateElasticsearchDomainConfigInput) (*UpdateElasticsearchDomainConfigOutput, error) {
 	req, out := c.UpdateElasticsearchDomainConfigRequest(input)
 	return out, req.Send()
@@ -1312,6 +1351,7 @@ func (c *ElasticsearchService) UpdateElasticsearchDomainConfigWithContext(ctx aw
 
 // The configured access rules for the domain's document and search endpoints,
 // and the current status of those rules.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AccessPoliciesStatus
 type AccessPoliciesStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -1354,6 +1394,7 @@ func (s *AccessPoliciesStatus) SetStatus(v *OptionStatus) *AccessPoliciesStatus 
 
 // Container for the parameters to the AddTags operation. Specify the tags that
 // you want to attach to the Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AddTagsRequest
 type AddTagsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1416,6 +1457,7 @@ func (s *AddTagsInput) SetTagList(v []*Tag) *AddTagsInput {
 	return s
 }
 
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AddTagsOutput
 type AddTagsOutput struct {
 	_ struct{} `type:"structure"`
 }
@@ -1432,6 +1474,7 @@ func (s AddTagsOutput) GoString() string {
 
 // List of limits that are specific to a given InstanceType and for each of
 // it's InstanceRole .
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AdditionalLimit
 type AdditionalLimit struct {
 	_ struct{} `type:"structure"`
 
@@ -1479,6 +1522,7 @@ func (s *AdditionalLimit) SetLimitValues(v []*string) *AdditionalLimit {
 //    * Option to specify the percentage of heap space that is allocated to
 //    field data. By default, this setting is unbounded.
 // For more information, see Configuring Advanced Options (http://docs.aws.amazon.com/elasticsearch-service/latest/developerguide/es-createupdatedomains.html#es-createdomain-configure-advanced-options).
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/AdvancedOptionsStatus
 type AdvancedOptionsStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -1517,6 +1561,7 @@ func (s *AdvancedOptionsStatus) SetStatus(v *OptionStatus) *AdvancedOptionsStatu
 	return s
 }
 
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/CreateElasticsearchDomainRequest
 type CreateElasticsearchDomainInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1625,6 +1670,7 @@ func (s *CreateElasticsearchDomainInput) SetSnapshotOptions(v *SnapshotOptions) 
 
 // The result of a CreateElasticsearchDomain operation. Contains the status
 // of the newly created Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/CreateElasticsearchDomainResponse
 type CreateElasticsearchDomainOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -1650,6 +1696,7 @@ func (s *CreateElasticsearchDomainOutput) SetDomainStatus(v *ElasticsearchDomain
 
 // Container for the parameters to the DeleteElasticsearchDomain operation.
 // Specifies the name of the Elasticsearch domain that you want to delete.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DeleteElasticsearchDomainRequest
 type DeleteElasticsearchDomainInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1694,6 +1741,7 @@ func (s *DeleteElasticsearchDomainInput) SetDomainName(v string) *DeleteElastics
 // The result of a DeleteElasticsearchDomain request. Contains the status of
 // the pending deletion, or no status if the domain and all of its resources
 // have been deleted.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DeleteElasticsearchDomainResponse
 type DeleteElasticsearchDomainOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -1719,6 +1767,7 @@ func (s *DeleteElasticsearchDomainOutput) SetDomainStatus(v *ElasticsearchDomain
 
 // Container for the parameters to the DescribeElasticsearchDomainConfig operation.
 // Specifies the domain name for which you want configuration information.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainConfigRequest
 type DescribeElasticsearchDomainConfigInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1762,6 +1811,7 @@ func (s *DescribeElasticsearchDomainConfigInput) SetDomainName(v string) *Descri
 
 // The result of a DescribeElasticsearchDomainConfig request. Contains the configuration
 // information of the requested domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainConfigResponse
 type DescribeElasticsearchDomainConfigOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -1789,6 +1839,7 @@ func (s *DescribeElasticsearchDomainConfigOutput) SetDomainConfig(v *Elasticsear
 }
 
 // Container for the parameters to the DescribeElasticsearchDomain operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainRequest
 type DescribeElasticsearchDomainInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1832,6 +1883,7 @@ func (s *DescribeElasticsearchDomainInput) SetDomainName(v string) *DescribeElas
 
 // The result of a DescribeElasticsearchDomain request. Contains the status
 // of the domain specified in the request.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainResponse
 type DescribeElasticsearchDomainOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -1859,6 +1911,7 @@ func (s *DescribeElasticsearchDomainOutput) SetDomainStatus(v *ElasticsearchDoma
 
 // Container for the parameters to the DescribeElasticsearchDomains operation.
 // By default, the API returns the status of all Elasticsearch domains.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainsRequest
 type DescribeElasticsearchDomainsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1899,6 +1952,7 @@ func (s *DescribeElasticsearchDomainsInput) SetDomainNames(v []*string) *Describ
 
 // The result of a DescribeElasticsearchDomains request. Contains the status
 // of the specified domains or all domains owned by the account.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchDomainsResponse
 type DescribeElasticsearchDomainsOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -1925,6 +1979,7 @@ func (s *DescribeElasticsearchDomainsOutput) SetDomainStatusList(v []*Elasticsea
 }
 
 // Container for the parameters to DescribeElasticsearchInstanceTypeLimits operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchInstanceTypeLimitsRequest
 type DescribeElasticsearchInstanceTypeLimitsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -1994,6 +2049,7 @@ func (s *DescribeElasticsearchInstanceTypeLimitsInput) SetInstanceType(v string)
 
 // Container for the parameters received from DescribeElasticsearchInstanceTypeLimits
 // operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DescribeElasticsearchInstanceTypeLimitsResponse
 type DescribeElasticsearchInstanceTypeLimitsOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -2020,6 +2076,7 @@ func (s *DescribeElasticsearchInstanceTypeLimitsOutput) SetLimitsByRole(v map[st
 	return s
 }
 
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/DomainInfo
 type DomainInfo struct {
 	_ struct{} `type:"structure"`
 
@@ -2045,6 +2102,7 @@ func (s *DomainInfo) SetDomainName(v string) *DomainInfo {
 
 // Options to enable, disable, and specify the properties of EBS storage volumes.
 // For more information, see  Configuring EBS-based Storage (http://docs.aws.amazon.com/elasticsearch-service/latest/developerguide/es-createupdatedomains.html#es-createdomain-configure-ebs).
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/EBSOptions
 type EBSOptions struct {
 	_ struct{} `type:"structure"`
 
@@ -2096,6 +2154,7 @@ func (s *EBSOptions) SetVolumeType(v string) *EBSOptions {
 }
 
 // Status of the EBS options for the specified Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/EBSOptionsStatus
 type EBSOptionsStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -2134,6 +2193,7 @@ func (s *EBSOptionsStatus) SetStatus(v *OptionStatus) *EBSOptionsStatus {
 
 // Specifies the configuration for the domain cluster, such as the type and
 // number of instances.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ElasticsearchClusterConfig
 type ElasticsearchClusterConfig struct {
 	_ struct{} `type:"structure"`
 
@@ -2207,6 +2267,7 @@ func (s *ElasticsearchClusterConfig) SetZoneAwarenessEnabled(v bool) *Elasticsea
 }
 
 // Specifies the configuration status for the specified Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ElasticsearchClusterConfigStatus
 type ElasticsearchClusterConfigStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -2245,6 +2306,7 @@ func (s *ElasticsearchClusterConfigStatus) SetStatus(v *OptionStatus) *Elasticse
 }
 
 // The configuration of an Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ElasticsearchDomainConfig
 type ElasticsearchDomainConfig struct {
 	_ struct{} `type:"structure"`
 
@@ -2316,6 +2378,7 @@ func (s *ElasticsearchDomainConfig) SetSnapshotOptions(v *SnapshotOptionsStatus)
 }
 
 // The current status of an Elasticsearch domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ElasticsearchDomainStatus
 type ElasticsearchDomainStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -2470,6 +2533,7 @@ func (s *ElasticsearchDomainStatus) SetSnapshotOptions(v *SnapshotOptions) *Elas
 
 // Status of the Elasticsearch version options for the specified Elasticsearch
 // domain.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ElasticsearchVersionStatus
 type ElasticsearchVersionStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -2509,6 +2573,7 @@ func (s *ElasticsearchVersionStatus) SetStatus(v *OptionStatus) *ElasticsearchVe
 
 // InstanceCountLimits represents the limits on number of instances that be
 // created in Amazon Elasticsearch for given InstanceType.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/InstanceCountLimits
 type InstanceCountLimits struct {
 	_ struct{} `type:"structure"`
 
@@ -2543,6 +2608,7 @@ func (s *InstanceCountLimits) SetMinimumInstanceCount(v int64) *InstanceCountLim
 
 // InstanceLimits represents the list of instance related attributes that are
 // available for given InstanceType.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/InstanceLimits
 type InstanceLimits struct {
 	_ struct{} `type:"structure"`
 
@@ -2568,6 +2634,7 @@ func (s *InstanceLimits) SetInstanceCountLimits(v *InstanceCountLimits) *Instanc
 }
 
 // Limits for given InstanceType and for each of it's role. Limits contains following StorageTypes,   InstanceLimitsand AdditionalLimits
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/Limits
 type Limits struct {
 	_ struct{} `type:"structure"`
 
@@ -2612,6 +2679,7 @@ func (s *Limits) SetStorageTypes(v []*StorageType) *Limits {
 	return s
 }
 
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListDomainNamesInput
 type ListDomainNamesInput struct {
 	_ struct{} `type:"structure"`
 }
@@ -2628,6 +2696,7 @@ func (s ListDomainNamesInput) GoString() string {
 
 // The result of a ListDomainNames operation. Contains the names of all Elasticsearch
 // domains owned by this account.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListDomainNamesResponse
 type ListDomainNamesOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -2652,6 +2721,7 @@ func (s *ListDomainNamesOutput) SetDomainNames(v []*DomainInfo) *ListDomainNames
 }
 
 // Container for the parameters to the ListElasticsearchInstanceTypes operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchInstanceTypesRequest
 type ListElasticsearchInstanceTypesInput struct {
 	_ struct{} `type:"structure"`
 
@@ -2726,6 +2796,7 @@ func (s *ListElasticsearchInstanceTypesInput) SetNextToken(v string) *ListElasti
 }
 
 // Container for the parameters returned by ListElasticsearchInstanceTypes operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchInstanceTypesResponse
 type ListElasticsearchInstanceTypesOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -2767,6 +2838,7 @@ func (s *ListElasticsearchInstanceTypesOutput) SetNextToken(v string) *ListElast
 //
 //  Use NextToken in response to retrieve more results. If the received response
 // does not contain a NextToken, then there are no more results to retrieve.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchVersionsRequest
 type ListElasticsearchVersionsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -2804,6 +2876,7 @@ func (s *ListElasticsearchVersionsInput) SetNextToken(v string) *ListElasticsear
 
 // Container for the parameters for response received from ListElasticsearchVersions
 // operation.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListElasticsearchVersionsResponse
 type ListElasticsearchVersionsOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -2841,6 +2914,7 @@ func (s *ListElasticsearchVersionsOutput) SetNextToken(v string) *ListElasticsea
 // Container for the parameters to the ListTags operation. Specify the ARN for
 // the Elasticsearch domain to which the tags are attached that you want to
 // view are attached.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListTagsRequest
 type ListTagsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -2882,6 +2956,7 @@ func (s *ListTagsInput) SetARN(v string) *ListTagsInput {
 
 // The result of a ListTags operation. Contains tags for all requested Elasticsearch
 // domains.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/ListTagsResponse
 type ListTagsOutput struct {
 	_ struct{} `type:"structure"`
 
@@ -2906,6 +2981,7 @@ func (s *ListTagsOutput) SetTagList(v []*Tag) *ListTagsOutput {
 }
 
 // Provides the current status of the entity.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/OptionStatus
 type OptionStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -2974,6 +3050,7 @@ func (s *OptionStatus) SetUpdateVersion(v int64) *OptionStatus {
 // Container for the parameters to the RemoveTags operation. Specify the ARN
 // for the Elasticsearch domain from which you want to remove the specified
 // TagKey.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/RemoveTagsRequest
 type RemoveTagsInput struct {
 	_ struct{} `type:"structure"`
 
@@ -3028,6 +3105,7 @@ func (s *RemoveTagsInput) SetTagKeys(v []*string) *RemoveTagsInput {
 	return s
 }
 
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/RemoveTagsOutput
 type RemoveTagsOutput struct {
 	_ struct{} `type:"structure"`
 }
@@ -3044,6 +3122,7 @@ func (s RemoveTagsOutput) GoString() string {
 
 // Specifies the time, in UTC format, when the service takes a daily automated
 // snapshot of the specified Elasticsearch domain. Default value is 0 hours.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/SnapshotOptions
 type SnapshotOptions struct {
 	_ struct{} `type:"structure"`
 
@@ -3069,6 +3148,7 @@ func (s *SnapshotOptions) SetAutomatedSnapshotStartHour(v int64) *SnapshotOption
 }
 
 // Status of a daily automated snapshot.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/SnapshotOptionsStatus
 type SnapshotOptionsStatus struct {
 	_ struct{} `type:"structure"`
 
@@ -3107,6 +3187,7 @@ func (s *SnapshotOptionsStatus) SetStatus(v *OptionStatus) *SnapshotOptionsStatu
 
 // StorageTypes represents the list of storage related types and their attributes
 // that are available for given InstanceType.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/StorageType
 type StorageType struct {
 	_ struct{} `type:"structure"`
 
@@ -3156,6 +3237,7 @@ func (s *StorageType) SetStorageTypeName(v string) *StorageType {
 }
 
 // Limits that are applicable for given storage type.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/StorageTypeLimit
 type StorageTypeLimit struct {
 	_ struct{} `type:"structure"`
 
@@ -3198,6 +3280,7 @@ func (s *StorageTypeLimit) SetLimitValues(v []*string) *StorageTypeLimit {
 }
 
 // Specifies a key value pair for a resource tag.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/Tag
 type Tag struct {
 	_ struct{} `type:"structure"`
 
@@ -3259,6 +3342,7 @@ func (s *Tag) SetValue(v string) *Tag {
 
 // Container for the parameters to the UpdateElasticsearchDomain operation.
 // Specifies the type and number of instances in the domain cluster.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/UpdateElasticsearchDomainConfigRequest
 type UpdateElasticsearchDomainConfigInput struct {
 	_ struct{} `type:"structure"`
 
@@ -3351,6 +3435,7 @@ func (s *UpdateElasticsearchDomainConfigInput) SetSnapshotOptions(v *SnapshotOpt
 
 // The result of an UpdateElasticsearchDomain request. Contains the status of
 // the Elasticsearch domain being updated.
+// Please also see https://docs.aws.amazon.com/goto/WebAPI/es-2015-01-01/UpdateElasticsearchDomainConfigResponse
 type UpdateElasticsearchDomainConfigOutput struct {
 	_ struct{} `type:"structure"`
 

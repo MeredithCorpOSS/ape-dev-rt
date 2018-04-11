@@ -42,7 +42,6 @@ The following arguments are supported:
 
 * `name` - (Required) A region-unique name for the AMI.
 * `description` - (Optional) A longer, human-readable description for the AMI.
-* `root_device_name` - (Optional) The name of the root device (for example, `/dev/sda1`, or `/dev/xvda`).
 * `virtualization_type` - (Optional) Keyword to choose what virtualization mode created instances
   will use. Can be either "paravirtual" (the default) or "hvm". The choice of virtualization type
   changes the set of further arguments that are required, as described below.
@@ -99,4 +98,3 @@ Nested `ephemeral_block_device` blocks have the following structure:
 The following attributes are exported:
 
 * `id` - The ID of the created AMI.
-* `root_snapshot_id` - The Snapshot ID for the root volume (for EBS-backed AMIs)

@@ -96,18 +96,9 @@ func resourceAwsRDSCluster() *schema.Resource {
 			},
 
 			"engine": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				Default:      "aurora",
-				ForceNew:     true,
-				ValidateFunc: validateRdsEngine,
-			},
-
-			"engine_version": {
 				Type:     schema.TypeString,
 				Optional: true,
-				ForceNew: true,
-				Computed: true,
+				Default:  "aurora",
 			},
 
 			"storage_encrypted": {
@@ -380,10 +371,6 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 			createOpts.DBClusterParameterGroupName = aws.String(attr.(string))
 		}
 
-		if attr, ok := d.GetOk("engine_version"); ok {
-			createOpts.EngineVersion = aws.String(attr.(string))
-		}
-
 		if attr := d.Get("vpc_security_group_ids").(*schema.Set); attr.Len() > 0 {
 			createOpts.VpcSecurityGroupIds = expandStringList(attr.List())
 		}
@@ -573,7 +560,6 @@ func resourceAwsRDSClusterRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("db_cluster_parameter_group_name", dbc.DBClusterParameterGroup)
 	d.Set("endpoint", dbc.Endpoint)
 	d.Set("engine", dbc.Engine)
-	d.Set("engine_version", dbc.EngineVersion)
 	d.Set("master_username", dbc.MasterUsername)
 	d.Set("port", dbc.Port)
 	d.Set("storage_encrypted", dbc.StorageEncrypted)

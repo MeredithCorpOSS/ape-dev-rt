@@ -67,7 +67,7 @@ data "aws_ami" "stable_coreos" {
 
   filter {
     name   = "description"
-    values = ["CoreOS Container Linux stable *"]
+    values = ["CoreOS stable *"]
   }
 
   filter {
@@ -248,7 +248,7 @@ EOF
 }
 
 resource "aws_iam_instance_profile" "app" {
-  name = "tf-ecs-instprofile"
+  name  = "tf-ecs-instprofile"
   role = "${aws_iam_role.app_instance.name}"
 }
 

@@ -16,7 +16,7 @@ properties without having to hard code ARNs as input.
 
 ```hcl
 data "aws_iam_role" "example" {
-  name = "an_example_role_name"
+  role_name = "an_example_role_name"
 }
 ```
 

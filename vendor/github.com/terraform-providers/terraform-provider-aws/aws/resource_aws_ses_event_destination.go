@@ -176,8 +176,6 @@ func validateMatchingTypes(v interface{}, k string) (ws []string, errors []error
 		"bounce":    true,
 		"complaint": true,
 		"delivery":  true,
-		"open":      true,
-		"click":     true,
 	}
 
 	if !matchingTypes[value] {

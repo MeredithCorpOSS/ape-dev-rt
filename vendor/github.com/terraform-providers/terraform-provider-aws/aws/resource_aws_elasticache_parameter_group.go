@@ -174,16 +174,7 @@ func resourceAwsElasticacheParameterGroupUpdate(d *schema.ResourceData, meta int
 			}
 
 			log.Printf("[DEBUG] Reset Cache Parameter Group: %s", resetOpts)
-			err := resource.Retry(15*time.Second, func() *resource.RetryError {
-				_, err = conn.ResetCacheParameterGroup(&resetOpts)
-				if err != nil {
-					if isAWSErr(err, "InvalidCacheParameterGroupState", " has pending changes") {
-						resource.RetryableError(err)
-					}
-					return resource.NonRetryableError(err)
-				}
-				return nil
-			})
+			_, err = conn.ResetCacheParameterGroup(&resetOpts)
 			if err != nil {
 				return fmt.Errorf("Error resetting Cache Parameter Group: %s", err)
 			}

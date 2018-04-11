@@ -36,7 +36,7 @@ func testSweepAutoscalingGroups(region string) error {
 
 	resp, err := conn.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{})
 	if err != nil {
-		return fmt.Errorf("Error retrieving AutoScaling Groups in Sweeper: %s", err)
+		return fmt.Errorf("Error retrieving launch configuration: %s", err)
 	}
 
 	if len(resp.AutoScalingGroups) == 0 {
@@ -46,10 +46,9 @@ func testSweepAutoscalingGroups(region string) error {
 
 	for _, asg := range resp.AutoScalingGroups {
 		var testOptGroup bool
-		for _, testName := range []string{"foobar", "terraform-", "tf-test"} {
+		for _, testName := range []string{"foobar", "terraform-"} {
 			if strings.HasPrefix(*asg.AutoScalingGroupName, testName) {
 				testOptGroup = true
-				break
 			}
 		}
 
@@ -510,7 +509,7 @@ func TestAccAWSAutoScalingGroup_ALB_TargetGroups(t *testing.T) {
 				Config: testAccAWSAutoScalingGroupConfig_ALB_TargetGroup_pre,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
-					testAccCheckAWSLBTargetGroupExists("aws_lb_target_group.test", &tg),
+					testAccCheckAWSALBTargetGroupExists("aws_alb_target_group.test", &tg),
 					resource.TestCheckResourceAttr(
 						"aws_autoscaling_group.bar", "target_group_arns.#", "0"),
 				),
@@ -520,8 +519,8 @@ func TestAccAWSAutoScalingGroup_ALB_TargetGroups(t *testing.T) {
 				Config: testAccAWSAutoScalingGroupConfig_ALB_TargetGroup_post_duo,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
-					testAccCheckAWSLBTargetGroupExists("aws_lb_target_group.test", &tg),
-					testAccCheckAWSLBTargetGroupExists("aws_lb_target_group.test_more", &tg2),
+					testAccCheckAWSALBTargetGroupExists("aws_alb_target_group.test", &tg),
+					testAccCheckAWSALBTargetGroupExists("aws_alb_target_group.test_more", &tg2),
 					testCheck([]*elbv2.TargetGroup{&tg, &tg2}),
 					resource.TestCheckResourceAttr(
 						"aws_autoscaling_group.bar", "target_group_arns.#", "2"),
@@ -532,7 +531,7 @@ func TestAccAWSAutoScalingGroup_ALB_TargetGroups(t *testing.T) {
 				Config: testAccAWSAutoScalingGroupConfig_ALB_TargetGroup_post,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
-					testAccCheckAWSLBTargetGroupExists("aws_lb_target_group.test", &tg),
+					testAccCheckAWSALBTargetGroupExists("aws_alb_target_group.test", &tg),
 					testCheck([]*elbv2.TargetGroup{&tg}),
 					resource.TestCheckResourceAttr(
 						"aws_autoscaling_group.bar", "target_group_arns.#", "1"),
@@ -588,7 +587,7 @@ func TestAccAWSAutoScalingGroup_ALB_TargetGroups_ELBCapacity(t *testing.T) {
 				Config: testAccAWSAutoScalingGroupConfig_ALB_TargetGroup_ELBCapacity(rInt),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
-					testAccCheckAWSLBTargetGroupExists("aws_lb_target_group.test", &tg),
+					testAccCheckAWSALBTargetGroupExists("aws_alb_target_group.test", &tg),
 					testAccCheckAWSALBTargetGroupHealthy(&tg),
 				),
 			},
@@ -1342,7 +1341,7 @@ resource "aws_vpc" "default" {
   }
 }
 
-resource "aws_lb_target_group" "test" {
+resource "aws_alb_target_group" "test" {
   name     = "tf-example-alb-tg"
   port     = 80
   protocol = "HTTP"
@@ -1424,7 +1423,7 @@ resource "aws_vpc" "default" {
   }
 }
 
-resource "aws_lb_target_group" "test" {
+resource "aws_alb_target_group" "test" {
   name     = "tf-example-alb-tg"
   port     = 80
   protocol = "HTTP"
@@ -1464,7 +1463,7 @@ resource "aws_autoscaling_group" "bar" {
     "${aws_subnet.alt.id}",
   ]
 
-	target_group_arns = ["${aws_lb_target_group.test.arn}"]
+	target_group_arns = ["${aws_alb_target_group.test.arn}"]
 
   max_size                  = 2
   min_size                  = 0
@@ -1508,14 +1507,14 @@ resource "aws_vpc" "default" {
   }
 }
 
-resource "aws_lb_target_group" "test" {
+resource "aws_alb_target_group" "test" {
   name     = "tf-example-alb-tg"
   port     = 80
   protocol = "HTTP"
   vpc_id   = "${aws_vpc.default.id}"
 }
 
-resource "aws_lb_target_group" "test_more" {
+resource "aws_alb_target_group" "test_more" {
   name     = "tf-example-alb-tg-more"
   port     = 80
   protocol = "HTTP"
@@ -1556,8 +1555,8 @@ resource "aws_autoscaling_group" "bar" {
   ]
 
 	target_group_arns = [
-		"${aws_lb_target_group.test.arn}",
-		"${aws_lb_target_group.test_more.arn}",
+		"${aws_alb_target_group.test.arn}",
+		"${aws_alb_target_group.test_more.arn}",
 	]
 
   max_size                  = 2
@@ -1634,7 +1633,7 @@ resource "aws_vpc" "default" {
   }
 }
 
-resource "aws_lb" "test_lb" {
+resource "aws_alb" "test_lb" {
   subnets = ["${aws_subnet.main.id}", "${aws_subnet.alt.id}"]
 
   tags {
@@ -1642,17 +1641,17 @@ resource "aws_lb" "test_lb" {
   }
 }
 
-resource "aws_lb_listener" "test_listener" {
-  load_balancer_arn = "${aws_lb.test_lb.arn}"
+resource "aws_alb_listener" "test_listener" {
+  load_balancer_arn = "${aws_alb.test_lb.arn}"
   port              = "80"
 
   default_action {
-    target_group_arn = "${aws_lb_target_group.test.arn}"
+    target_group_arn = "${aws_alb_target_group.test.arn}"
     type             = "forward"
   }
 }
 
-resource "aws_lb_target_group" "test" {
+resource "aws_alb_target_group" "test" {
   name     = "tf-alb-test-%d"
   port     = 80
   protocol = "HTTP"
@@ -1748,7 +1747,7 @@ resource "aws_autoscaling_group" "bar" {
     "${aws_subnet.alt.id}",
   ]
 
-  target_group_arns = ["${aws_lb_target_group.test.arn}"]
+  target_group_arns = ["${aws_alb_target_group.test.arn}"]
 
   max_size                  = 2
   min_size                  = 2

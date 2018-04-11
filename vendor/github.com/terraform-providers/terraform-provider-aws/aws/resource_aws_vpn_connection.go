@@ -119,9 +119,8 @@ func resourceAwsVpnConnection() *schema.Resource {
 			},
 
 			"tunnel1_preshared_key": {
-				Type:      schema.TypeString,
-				Sensitive: true,
-				Computed:  true,
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 			"tunnel1_bgp_asn": {
 				Type:     schema.TypeString,
@@ -147,9 +146,8 @@ func resourceAwsVpnConnection() *schema.Resource {
 			},
 
 			"tunnel2_preshared_key": {
-				Type:      schema.TypeString,
-				Sensitive: true,
-				Computed:  true,
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 			"tunnel2_bgp_asn": {
 				Type:     schema.TypeString,
@@ -276,7 +274,7 @@ func resourceAwsVpnConnectionCreate(d *schema.ResourceData, meta interface{}) er
 		Pending:    []string{"pending"},
 		Target:     []string{"available"},
 		Refresh:    vpnConnectionRefreshFunc(conn, *vpnConnection.VpnConnectionId),
-		Timeout:    40 * time.Minute,
+		Timeout:    30 * time.Minute,
 		Delay:      10 * time.Second,
 		MinTimeout: 10 * time.Second,
 	}
@@ -285,7 +283,7 @@ func resourceAwsVpnConnectionCreate(d *schema.ResourceData, meta interface{}) er
 	if stateErr != nil {
 		return fmt.Errorf(
 			"Error waiting for VPN connection (%s) to become ready: %s",
-			*vpnConnection.VpnConnectionId, stateErr)
+			*vpnConnection.VpnConnectionId, err)
 	}
 
 	// Create tags.

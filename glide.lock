@@ -1,5 +1,5 @@
-hash: 3bf92ba33e0d1e23b3eae351ec6a484d13d76c77fae54e74759b5352df6d7c7d
-updated: 2018-01-10T11:50:22.009007606-05:00
+hash: 092faee1b130b88361bc38ad98909a0dbaf11572e530041bfc00031ddc5a7037
+updated: 2018-04-11T16:43:19.643380743+01:00
 imports:
 - name: cloud.google.com/go
   version: 81b7822b1e798e8f17bf64b59512a5be4097e966
@@ -68,7 +68,6 @@ imports:
   - service/apigateway
   - service/applicationautoscaling
   - service/autoscaling
-  - service/batch
   - service/cloudformation
   - service/cloudfront
   - service/cloudtrail
@@ -277,7 +276,7 @@ imports:
 - name: github.com/hashicorp/go-cleanhttp
   version: 3573b8b52aa7b37b9358d966a898feb387f62437
 - name: github.com/hashicorp/go-getter
-  version: 961f56d2e93379b7d9c578e998d09257509a6f97
+  version: b345bfcec894fb7ff3fdf9b21baf2f56ea423d98
   subpackages:
   - helper/url
 - name: github.com/hashicorp/go-hclog
@@ -290,6 +289,8 @@ imports:
   version: 6e85be8fee1dcaa02c0eaaac2df5a8fbecf94145
 - name: github.com/hashicorp/go-rootcerts
   version: 6bb64b370b90e7ef1fa532be9e591a81c3493e00
+- name: github.com/hashicorp/go-safetemp
+  version: b1a1dbde6fdc11e3ae79efd9039009e22d4ae240
 - name: github.com/hashicorp/go-uuid
   version: 36289988d83ca270bc07c234c36f364b0dd9c9a7
 - name: github.com/hashicorp/go-version
@@ -476,6 +477,8 @@ imports:
   version: 53818660ed4955e899c0bcafa97299a388bd7c8e
 - name: github.com/mitchellh/panicwrap
   version: ba9e1a65e0f7975f055d50a2c0201c50d941c24c
+- name: github.com/mitchellh/prefixedio
+  version: 6e6954073784f7ee67b28f2d22749d6479151ed7
 - name: github.com/mitchellh/reflectwalk
   version: 92573fe8d000a145bfebc03a16bc22b34945867f
 - name: github.com/ninibe/bigduration
@@ -501,33 +504,17 @@ imports:
 - name: github.com/satori/uuid
   version: b061729afc07e77a8aa4fad0a2fd840958f1942a
 - name: github.com/terraform-providers/terraform-provider-aws
-  version: 0baded96c0ffe4b823c0a6c3db4b0b16bbc4ed8a
+  version: 669207b8fee698ccc3fc47a7b99f812078b7ef87
   subpackages:
   - aws
-- name: github.com/terraform-providers/terraform-provider-consul
-  version: 5786e963095ef3f3675ad918cf609e6cc86080cd
-  subpackages:
-  - consul
-- name: github.com/terraform-providers/terraform-provider-null
-  version: f8d6f708f077f8836be7b0517a48f9ad97018167
-  subpackages:
-  - "null"
 - name: github.com/terraform-providers/terraform-provider-openstack
   version: 4080a521c6ea4872f38bae658ac17b774eefcfe1
   subpackages:
   - openstack
-- name: github.com/terraform-providers/terraform-provider-template
-  version: d8fb0821ebc320ff3750c982f14eca1e7249660d
-  subpackages:
-  - template
-- name: github.com/terraform-providers/terraform-provider-terraform
-  version: 5a4e09036867dba96a2df94757d1b3a18b99aeab
-  subpackages:
-  - terraform
 - name: github.com/ttacon/chalk
   version: 22c06c80ed312dcb6e1cf394f9634aa2c4676e22
 - name: github.com/ugorji/go
-  version: faddd6128c66c4708f45fdc007f575f75e592a3c
+  version: ded73eae5db7e7a0ef6f55aace87a2873c5d2b74
   subpackages:
   - codec
 - name: github.com/ulikunitz/xz
@@ -594,7 +581,7 @@ imports:
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 810d7000345868fc619eb81f46307107118f4ae1
+  version: 3b87a42e500a6dc65dae1a55d0b641295971163e
   subpackages:
   - unix
 - name: golang.org/x/text

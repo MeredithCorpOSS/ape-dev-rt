@@ -32,9 +32,8 @@ func resourceAwsSsmDocument() *schema.Resource {
 				Computed: true,
 			},
 			"name": {
-				Type:         schema.TypeString,
-				Required:     true,
-				ValidateFunc: validateAwsSSMName,
+				Type:     schema.TypeString,
+				Required: true,
 			},
 			"content": {
 				Type:     schema.TypeString,
