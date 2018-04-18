@@ -34,8 +34,6 @@ func ProcessTemplatesAndDelete(path, fileSuffix string, vars interface{}) ([]str
 	return processTemplates(path, fileSuffix, vars, true)
 }
 
-// TODO: Replace by TF variables (upstream change necessary)
-// See https://github.com/hashicorp/terraform/issues/1964
 func processTemplates(path, fileSuffix string, vars interface{}, deleteTpl bool) ([]string, error) {
 	matches, err := filepath.Glob(filepath.Join(path, "*."+fileSuffix))
 	if err != nil {
@@ -70,7 +68,8 @@ func processTemplate(sourcePath, targetPath string, vars interface{}) error {
 	if err != nil {
 		return err
 	}
-	t, err := template.New(sourcePath).Parse(string(bytes))
+	funcMap := map[string]interface{}{"mkSlice": mkSlice}
+	t, err := template.New(sourcePath).Funcs(template.FuncMap(funcMap)).Parse(string(bytes))
 	if err != nil {
 		return err
 	}
@@ -91,6 +90,10 @@ func processTemplate(sourcePath, targetPath string, vars interface{}) error {
 	log.Printf("Written output into %s", targetPath)
 
 	return nil
+}
+
+func mkSlice(args ...interface{}) []interface{} {
+    return args
 }
 
 func InferSlotIdFromVersionId(slotId, version string) string {
