@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TimeInc/ape-dev-rt/aws"
-	"github.com/TimeInc/ape-dev-rt/clippy"
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
-	"github.com/TimeInc/ape-dev-rt/hcl"
-	"github.com/TimeInc/ape-dev-rt/terraform"
+	"github.com/TimeIncOSS/ape-dev-rt/aws"
+	"github.com/TimeIncOSS/ape-dev-rt/clippy"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/hcl"
+	"github.com/TimeIncOSS/ape-dev-rt/terraform"
 )
 
 func ApplyInfra(c *commons.Context) error {

@@ -18,7 +18,7 @@ resource "template_file" "cloud_config" {
 }
 
 module "app-version" {
-  source = "git@github.com:TimeInc/ape-dev-tf-aws-app-version.git?ref=v0.1.1"
+  source = "git@github.com:TimeIncOSS/ape-dev-tf-aws-app-version.git?ref=v0.1.1"
 
   aws_region = "us-east-1"
   aws_availability_zones = "us-east-1b,us-east-1c,us-east-1d,us-east-1e"

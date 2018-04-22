@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TimeInc/ape-dev-rt/aws"
+	"github.com/TimeIncOSS/ape-dev-rt/aws"
 )
 
 func TestDecorateAndPrintSortedVersions(t *testing.T) {

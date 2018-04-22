@@ -15,12 +15,12 @@ Assuming you've got a working golang environment.
 
 **Install**
 ```
-go get github.com/TimeInc/ape-dev-rt
+go get github.com/TimeIncOSS/ape-dev-rt
 ```
 
 **Compile**
 ```
-cd $GOPATH/src/github.com/TimeInc/ape-dev-rt
+cd $GOPATH/src/github.com/TimeIncOSS/ape-dev-rt
 make installdeps
 make dev
 ```
@@ -35,7 +35,7 @@ There's a bunch of unit tests, keep adding those & keep existing ones up to date
 
 **Run**
 ```
-cd $GOPATH/src/github.com/TimeInc/ape-dev-rt
+cd $GOPATH/src/github.com/TimeIncOSS/ape-dev-rt
 ./bin/ape-dev-rt
 ```
 
@@ -63,20 +63,20 @@ If you want to see what's happening under the hood, set environment variable `RT
 
 Terraform now uses godeps, so dependencies are updated separately:
 ```sh
-cd $GOPATH/src/github.com/TimeInc/ape-dev-rt
+cd $GOPATH/src/github.com/TimeIncOSS/ape-dev-rt
 make installdeps
 ```
 
 1. Make sure you have the ti-devops-test AWS profile set as default as you'll be copying artefacts to S3 bucket in that account
-2. Update the [CHANGELOG](https://github.com/TimeInc/ape-dev-rt/blob/master/CHANGELOG.md)
+2. Update the [CHANGELOG](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/CHANGELOG.md)
 3. Bump version in `/rt/version.go`
 4. Commit the changes (commit message is fine as the new version number), e.g. `git commit -m "v0.0.6"`
 5. Create tag, eg. `v0.0.6`: `git tag -a v0.0.6`
 6. Generate & upload artifacts: `make release`
 7. Push new tag: `git push origin master --tags`
-8. Update cask in [the brewcask tap repository](https://github.com/TimeInc/homebrew-cask-tap/blob/master/Casks/ape-dev-rt.rb) - specify the version number, the build script will give you the sha of the zipped file
+8. Update cask in [the brewcask tap repository](https://github.com/TimeIncOSS/homebrew-cask-tap/blob/master/Casks/ape-dev-rt.rb) - specify the version number, the build script will give you the sha of the zipped file
 9. Install the new version locally from the Casks repo cloned: E.g. `brew cask install ./Casks/ape-dev-rt.rb`
 10. Commit and push the changes made to the Casks repo
 11. Announce the release via Slack in #platform-engineering, example below
 
-> RT `0.3.13` is available for download - update via `brew update && brew cask install ape-dev-rt`, changelog here: https://github.com/TimeInc/ape-dev-rt/blob/master/CHANGELOG.md#0313-march-2-2016
+> RT `0.3.13` is available for download - update via `brew update && brew cask install ape-dev-rt`, changelog here: https://github.com/TimeIncOSS/ape-dev-rt/blob/master/CHANGELOG.md#0313-march-2-2016

@@ -3,8 +3,8 @@ package command
 import (
 	"fmt"
 
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
 )
 
 var whitelistedOutputs = map[string]bool{

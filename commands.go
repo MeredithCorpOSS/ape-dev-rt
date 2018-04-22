@@ -7,12 +7,12 @@ import (
 	"os"
 
 	"github.com/RevH/ipinfo"
-	"github.com/TimeInc/ape-dev-rt/aws"
-	"github.com/TimeInc/ape-dev-rt/command"
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
-	"github.com/TimeInc/ape-dev-rt/hcl"
-	"github.com/TimeInc/ape-dev-rt/rt"
+	"github.com/TimeIncOSS/ape-dev-rt/aws"
+	"github.com/TimeIncOSS/ape-dev-rt/command"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/hcl"
+	"github.com/TimeIncOSS/ape-dev-rt/rt"
 	"github.com/mitchellh/go-homedir"
 	"github.com/ttacon/chalk"
 	"github.com/urfave/cli"
@@ -404,7 +404,7 @@ func beforeAuthedCommand(c *cli.Context) error {
 		return err
 	}
 	if cfg.RemoteState == nil {
-		url := "https://github.com/TimeInc/ape-dev-rt/blob/master/docs/remote_state.md"
+		url := "https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/remote_state.md"
 		return fmt.Errorf("No 'remote_state' block found in %q. See %s for more details.",
 			cfgPath, url)
 	}

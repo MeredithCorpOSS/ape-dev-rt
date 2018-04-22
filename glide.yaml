@@ -1,4 +1,4 @@
-package: github.com/TimeInc/ape-dev-rt
+package: github.com/TimeIncOSS/ape-dev-rt
 ignore: 
 - github.com/coreos/ignition
 - github.com/Unknwon/macaron/inject

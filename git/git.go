@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TimeInc/ape-dev-rt/ui"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"github.com/mitchellh/go-homedir"
 )
 
 var dateLayout = "2006-01-02 15:04:05 -0700"
 
-const AppConfigOrgName = "TimeInc"
+const AppConfigOrgName = "TimeIncOSS"
 const AppConfigRepoName = "ape-dev-rt-apps"
 const AppConfigRepoUrl = "git@github.com:" + AppConfigOrgName + "/" + AppConfigRepoName + ".git"
 const GitLogTimezone = "Local"

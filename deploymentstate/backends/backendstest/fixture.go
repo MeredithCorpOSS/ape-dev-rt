@@ -3,7 +3,7 @@ package backendstest
 import (
 	"errors"
 
-	"github.com/TimeInc/ape-dev-rt/deploymentstate/schema"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
 )
 
 type FixtureBackend struct{}

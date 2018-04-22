@@ -40,7 +40,7 @@ echo "==> Building..."
 gox \
     -os="${XC_OS}" \
     -arch="${XC_ARCH}" \
-    -ldflags "-X github.com/TimeInc/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY} -X github.com/TimeInc/ape-dev-rt/rt.TerraformCommit=${TF_GIT_COMMIT}${TF_GIT_DIRTY}" \
+    -ldflags "-X github.com/TimeIncOSS/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY} -X github.com/TimeIncOSS/ape-dev-rt/rt.TerraformCommit=${TF_GIT_COMMIT}${TF_GIT_DIRTY}" \
     -output "pkg/{{.OS}}_{{.Arch}}/{{.Dir}}" \
     $(go list ./... | grep -v /vendor/)
 

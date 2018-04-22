@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate/schema"
-	"github.com/TimeInc/ape-dev-rt/hcl"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
+	"github.com/TimeIncOSS/ape-dev-rt/hcl"
 	awsSDK "github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"

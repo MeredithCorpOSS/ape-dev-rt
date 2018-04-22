@@ -49,7 +49,7 @@ RT will process any files named `*.tf.tpl` and `deployment-state.hcl.tpl` as Go 
 
 ### Why?
 
-The main reason we use this extra templating layer is because [`deploymentstate`](https://github.com/TimeInc/ape-dev-rt/blob/master/docs/deployment-state.md) exists outside of Terraform and as a result cannot use any variable logic within Terraform.
+The main reason we use this extra templating layer is because [`deploymentstate`](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/deployment-state.md) exists outside of Terraform and as a result cannot use any variable logic within Terraform.
 
 ### Outcome
 
