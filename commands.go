@@ -197,6 +197,7 @@ var Commands = []cli.Command{
 			flags.Namespace,
 		},
 		Before: beforeAuthedCommand,
+		Category: "app-not-required",
 	},
 	{
 		Name:   "list-slots",
@@ -322,6 +323,7 @@ var Commands = []cli.Command{
 		Flags: []cli.Flag{
 			flags.AwsProfile,
 		},
+		Category: "app-not-required",
 	},
 	{
 		Name:   "output",
@@ -508,7 +510,7 @@ func wrapCommand(cmd func(c *commons.Context) error) func(*cli.Context) error {
 			fmt.Printf("%s %s\n", boldYellow("WARNING:"), boldYellow(cliContext.Command.Usage))
 		}
 
-		if !cliContext.Command.HasName("list-apps") {
+		if !(cliContext.Command.Category == "app-not-required") {
 			if cliContext.String("app") == "" {
 				return fmt.Errorf("No application name defined for environment '%s'. Please use -app flag", cliContext.String("env"))
 			}
