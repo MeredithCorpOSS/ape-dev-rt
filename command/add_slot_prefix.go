@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TimeInc/ape-dev-rt/clippy"
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate/schema"
+	"github.com/TimeIncOSS/ape-dev-rt/clippy"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
 )
 
 func AddSlotPrefix(c *commons.Context) error {

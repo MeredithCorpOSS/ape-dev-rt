@@ -45,7 +45,7 @@ BREAKING CHANGES:
  - Previously deprecated flags (`-version` & `-legacy-behaviour`) and deprecated commands (`*-app` & `*-version`) removed [GH-271]
  - Deprecated logic that previously allowed you to work with apps in the central repository is now gone.
    This version does NOT perform any git operations and **will not work with apps that are in the central repo**. :wave:
- - `remote_state` block is now required, see https://github.com/TimeInc/ape-dev-rt/blob/master/docs/remote_state.md for more
+ - `remote_state` block is now required, see https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/remote_state.md for more
 
 IMPROVEMENTS:
  - Added check for active slots to destroy-infra [GH-270]
@@ -89,7 +89,7 @@ IMPROVEMENTS:
 BREAKING CHANGES:
 
  - Terraform upgraded to `0.7.6` (from `0.6.16`).
-   Please read the official [Terraform Upgrade Guide](https://www.terraform.io/upgrade-guides/0-7.html) and feel free to use [upgrade shell script](https://github.com/TimeInc/ape-dev-rt/blob/master/_0.6.0/tf-upgrade.sh) before upgrading RT to this version. It is very likely you will need to change some of your terraform configs (`.tf`).
+   Please read the official [Terraform Upgrade Guide](https://www.terraform.io/upgrade-guides/0-7.html) and feel free to use [upgrade shell script](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/_0.6.0/tf-upgrade.sh) before upgrading RT to this version. It is very likely you will need to change some of your terraform configs (`.tf`).
 
 
 ## 0.5.3 (October 13, 2016)

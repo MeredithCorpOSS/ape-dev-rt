@@ -50,9 +50,9 @@ GLOBAL OPTIONS:
 
 # Examples - apply & destroy
 
-This expects the shared stack to be [already deployed](https://github.com/TimeInc/ape-dev-terraform/tree/master/401279337454-timeinc-damproject-test) outside of RT via Terraform and have the TF state stored in [a specific S3 bucket & path](https://github.com/TimeInc/ape-dev-terraform/tree/master/401279337454-timeinc-damproject-test#how-to-setup-key) by convention and the app `example` to de defined like:  [ape-dev-rt-apps](https://github.com/TimeInc/ape-dev-rt-apps/tree/master/example)
+This expects the shared stack to be [already deployed](https://github.com/TimeIncOSS/ape-dev-terraform/tree/master/401279337454-TimeIncOSS-damproject-test) outside of RT via Terraform and have the TF state stored in [a specific S3 bucket & path](https://github.com/TimeIncOSS/ape-dev-terraform/tree/master/401279337454-TimeIncOSS-damproject-test#how-to-setup-key) by convention and the app `example` to de defined like:  [ape-dev-rt-apps](https://github.com/TimeIncOSS/ape-dev-rt-apps/tree/master/example)
 
-Expected valid environment names are currently `test` and `prod`. These are then injected [as a template variable](https://github.com/TimeInc/ape-dev-rt-apps/blob/master/shared-services.tf#L5) so that RT & TF know where to look for the `*.tfstate` files which are stored separately for each environment.
+Expected valid environment names are currently `test` and `prod`. These are then injected [as a template variable](https://github.com/TimeIncOSS/ape-dev-rt-apps/blob/master/shared-services.tf#L5) so that RT & TF know where to look for the `*.tfstate` files which are stored separately for each environment.
 
 ```
 # Test environment
@@ -79,7 +79,7 @@ ape-dev-rt --aws-profile=ti-dam-prod destroy-infra --env=prod --app=example
 
 # Traffic Management
 
-Release Tool [v0.4.0](https://github.com/TimeInc/ape-dev-rt/blob/master/CHANGELOG.md#040-march-10th-2016) introduces __Traffic Management__ to control the relationship between Auto Scaling Groups and Elastic Load Balancers.
+Release Tool [v0.4.0](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/CHANGELOG.md#040-march-10th-2016) introduces __Traffic Management__ to control the relationship between Auto Scaling Groups and Elastic Load Balancers.
 
 A typical RT application will receive traffic on a number of Elastic Load Balancers. These ELBs become attached to the Auto Scaling Group for a single version of the application.
 
@@ -139,7 +139,7 @@ watch-traffic test example
 
 **This is probably an area of RT that could be improved.**
 
-In the example above, RT will try and get credentials from all default providers [defined in the code](https://github.com/TimeInc/ape-dev-rt/blob/master/aws/aws.go#L162-L168):
+In the example above, RT will try and get credentials from all default providers [defined in the code](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/aws/aws.go#L162-L168):
 
  - `~/.aws/credentials`
  - Environment variables `AWS_*`

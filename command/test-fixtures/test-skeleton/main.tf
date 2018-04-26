@@ -1,5 +1,5 @@
 module "aws-app" {
-  source = "git@github.com:TimeInc/ape-dev-tf-aws-app.git?ref=v0.1.2"
+  source = "git@github.com:TimeIncOSS/ape-dev-tf-aws-app.git?ref=v0.1.2"
 
   # TODO: Needs debugging to find out why aws_region can't be passed as var
   aws_region = "us-east-1"

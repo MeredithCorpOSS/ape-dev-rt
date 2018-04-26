@@ -1,7 +1,7 @@
 # Assumptions
 
 What assumptions RT makes about the **git repository** which contains Terraform configs
-(currently https://github.com/TimeInc/ape-dev-rt-apps)?
+(currently https://github.com/TimeIncOSS/ape-dev-rt-apps)?
 
 ## 1. Directory inside root == unique application
 

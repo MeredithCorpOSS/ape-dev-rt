@@ -4,7 +4,7 @@ RT `0.5.0` was silently released.
 
 ## Good news
 
-It contains some new cool features, highlights include commit-less deployment, ability to recreate resources via `taint`. See full changelog at https://github.com/TimeInc/ape-dev-rt/blob/master/CHANGELOG.md#050-september-12-2016
+It contains some new cool features, highlights include commit-less deployment, ability to recreate resources via `taint`. See full changelog at https://github.com/TimeIncOSS/ape-dev-rt/blob/master/CHANGELOG.md#050-september-12-2016
 
 ## Bad news
 
@@ -16,7 +16,7 @@ Even though we have some basic protection in place, I'd like to get all applicat
 The migration requires a bit of cooperation as the team operating the app knows best whether the app works fine after fresh deployment.
 
 Here are some details about the deployment state (metadata) we save alongside each app in `0.5.0`:
-https://github.com/TimeInc/ape-dev-rt/blob/master/docs/deployment-state.md
+https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/deployment-state.md
 
 ### Up To Date Users
 
@@ -26,7 +26,7 @@ it is highly unlikely you will run into any problems during/after this migration
 ### Naughty Users
 
 I'm aware of people using some ancient old versions of RT which bundle old version of Terraform
-and to address this **I will be looking at your Terraform configs in https://github.com/TimeInc/ape-dev-rt-apps
+and to address this **I will be looking at your Terraform configs in https://github.com/TimeIncOSS/ape-dev-rt-apps
 in the following weeks** and possibly **send you PRs** to address any incompatibilities w/ TF `0.6.16`.
 
 ## Migration plan - Your Cooperation needed
@@ -36,7 +36,7 @@ After Terraform `0.6.16` incompatibilities are addressed I will book a short ses
 to do the migration to RT `0.5.0` and **lock out `< 0.5.0` users**.
 
 Here is the migration plan divided into phases:
-https://github.com/TimeInc/ape-dev-rt/blob/master/_0.5.0-migration/migration-plan.md
+https://github.com/TimeIncOSS/ape-dev-rt/blob/master/_0.5.0-migration/migration-plan.md
 
 To make this easy I'd appreciate if you wouldn't create any new apps
 that are incompatible with Terraform 0.6.16 (i.e. RT 0.4.7).

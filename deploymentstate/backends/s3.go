@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	rtAWS "github.com/TimeInc/ape-dev-rt/aws"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate/schema"
+	rtAWS "github.com/TimeIncOSS/ape-dev-rt/aws"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/TimeInc/ape-dev-rt/ui"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"github.com/hashicorp/terraform/builtin/providers/aws"
 	"github.com/hashicorp/terraform/builtin/providers/consul"
 	"github.com/hashicorp/terraform/builtin/providers/null"

@@ -19,7 +19,7 @@ We persist the following things in deployment state:
    - variables + outputs
    - errors + warnings
  
-For full list see the [full schema](https://github.com/TimeInc/ape-dev-rt/blob/master/deploymentstate/schema/schema.go).
+For full list see the [full schema](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/deploymentstate/schema/schema.go).
 The initial release only contains S3 backend, but future releases may support other backends, e.g. DynamoDB or Consul.
 Backend may also at some point provide locking mechanism for releases to prevent an app from being deployed
 by two people at the same time.
@@ -53,7 +53,7 @@ RT does **not** check who owns a given app and neither it cares about where is t
 
 ## Old apps in central git repository :older_man:
 
-To avoid extra commits & diffs in [the central repository](https://github.com/TimeInc/ape-dev-rt-apps) and
+To avoid extra commits & diffs in [the central repository](https://github.com/TimeIncOSS/ape-dev-rt-apps) and
 also to get application off that central place to their own we enforce default backend for those.
 
 The default backend is now S3, but may change in the future - hopefully we won't have any central repo by that time.
@@ -156,7 +156,7 @@ Previously `$RELEASE_NUM` was a git hash in the central git repository. It is up
 that will increment or otherwise be unique in long term.
 
 **If you choose to deploy from your laptop, you may need to check a global counter 1st.**
-Deployment state may provide such counter [in the future](https://github.com/TimeInc/ape-dev-rt/issues/207), but it doesn't yet.
+Deployment state may provide such counter [in the future](https://github.com/TimeIncOSS/ape-dev-rt/issues/207), but it doesn't yet.
 
 ```sh
 $ ape-dev-rt -aws-profile=ti-devops-test list-slots

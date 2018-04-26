@@ -16,7 +16,7 @@ Otto aims to solve much wider range of problems (as opposed to RT):
 RT needs (or will need) to cater a few specific needs that are not currently covered by Otto:
 
  - deployment of multiple versions (A/B testing, safe rollback)
- - [Terraform "workarounds" via Go Templates](https://github.com/TimeInc/ape-dev-rt/blob/master/docs/internals.md#go-templates)
+ - [Terraform "workarounds" via Go Templates](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/internals.md#go-templates)
  - custom functionality
    - `*-traffic` commands
    - (`wait-for-*` commands)

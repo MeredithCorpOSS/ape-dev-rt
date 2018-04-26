@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/git"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/git"
 )
 
 type Config struct {
