@@ -93,7 +93,7 @@ func processTemplate(sourcePath, targetPath string, vars interface{}) error {
 }
 
 func mkSlice(args ...interface{}) []interface{} {
-    return args
+	return args
 }
 
 func InferSlotIdFromVersionId(slotId, version string) string {
