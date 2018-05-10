@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"github.com/hashicorp/terraform/command"
-	"github.com/hashicorp/terraform/helper/logging"
 	m_cli "github.com/mitchellh/cli"
-	"github.com/mitchellh/panicwrap"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,7 +14,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 const AppName = "app"
