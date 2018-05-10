@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/TimeInc/ape-dev-rt/ui"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"github.com/hashicorp/terraform/command"
 	m_cli "github.com/mitchellh/cli"
 )
