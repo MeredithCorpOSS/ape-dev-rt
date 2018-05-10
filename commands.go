@@ -196,7 +196,7 @@ var Commands = []cli.Command{
 			flags.Refresh,
 			flags.Namespace,
 		},
-		Before: beforeAuthedCommand,
+		Before:   beforeAuthedCommand,
 		Category: "app-not-required",
 	},
 	{

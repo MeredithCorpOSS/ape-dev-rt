@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hashicorp/terraform/helper/logging"
 	"github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/panicwrap"
 	"github.com/ttacon/chalk"
 	"github.com/urfave/cli"
-	"github.com/hashicorp/terraform/helper/logging"
-	"github.com/mitchellh/panicwrap"
 	"syscall"
 )
 
@@ -78,7 +78,7 @@ func realMain() int {
 	return wrappedMain()
 }
 
-func wrappedMain() int{
+func wrappedMain() int {
 	app := cli.NewApp()
 	app.Name = "release tool"
 	app.Usage = "For amazing releases"
