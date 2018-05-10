@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
 	"github.com/ninibe/bigduration"
 )
 

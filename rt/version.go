@@ -5,8 +5,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/git"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/git"
 	tf_version "github.com/hashicorp/terraform/version"
 )
 

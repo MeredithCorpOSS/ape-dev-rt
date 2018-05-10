@@ -3,7 +3,7 @@ package backends
 import (
 	"fmt"
 
-	"github.com/TimeInc/ape-dev-rt/deploymentstate/schema"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
 )
 
 type BackendFactory struct {

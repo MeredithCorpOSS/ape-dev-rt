@@ -1,6 +1,6 @@
 # Support
 
-Try [platform-engineering](https://github.com/TimeInc/platform-engineering) to get in touch or file a bug.
+Please open an issue if you feel you have discovered a valid bug.
 
 # Troubleshooting
 

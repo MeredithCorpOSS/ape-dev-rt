@@ -7,12 +7,12 @@ import (
 	"os"
 
 	"github.com/RevH/ipinfo"
-	"github.com/TimeInc/ape-dev-rt/aws"
-	"github.com/TimeInc/ape-dev-rt/command"
-	"github.com/TimeInc/ape-dev-rt/commons"
-	"github.com/TimeInc/ape-dev-rt/deploymentstate"
-	"github.com/TimeInc/ape-dev-rt/hcl"
-	"github.com/TimeInc/ape-dev-rt/rt"
+	"github.com/TimeIncOSS/ape-dev-rt/aws"
+	"github.com/TimeIncOSS/ape-dev-rt/command"
+	"github.com/TimeIncOSS/ape-dev-rt/commons"
+	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/TimeIncOSS/ape-dev-rt/hcl"
+	"github.com/TimeIncOSS/ape-dev-rt/rt"
 	"github.com/mitchellh/go-homedir"
 	"github.com/ttacon/chalk"
 	"github.com/urfave/cli"
@@ -196,7 +196,8 @@ var Commands = []cli.Command{
 			flags.Refresh,
 			flags.Namespace,
 		},
-		Before: beforeAuthedCommand,
+		Before:   beforeAuthedCommand,
+		Category: "app-not-required",
 	},
 	{
 		Name:   "list-slots",
@@ -322,6 +323,7 @@ var Commands = []cli.Command{
 		Flags: []cli.Flag{
 			flags.AwsProfile,
 		},
+		Category: "app-not-required",
 	},
 	{
 		Name:   "output",
@@ -404,7 +406,7 @@ func beforeAuthedCommand(c *cli.Context) error {
 		return err
 	}
 	if cfg.RemoteState == nil {
-		url := "https://github.com/TimeInc/ape-dev-rt/blob/master/docs/remote_state.md"
+		url := "https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/remote_state.md"
 		return fmt.Errorf("No 'remote_state' block found in %q. See %s for more details.",
 			cfgPath, url)
 	}
@@ -508,7 +510,7 @@ func wrapCommand(cmd func(c *commons.Context) error) func(*cli.Context) error {
 			fmt.Printf("%s %s\n", boldYellow("WARNING:"), boldYellow(cliContext.Command.Usage))
 		}
 
-		if !cliContext.Command.HasName("list-apps") {
+		if !(cliContext.Command.Category == "app-not-required") {
 			if cliContext.String("app") == "" {
 				return fmt.Errorf("No application name defined for environment '%s'. Please use -app flag", cliContext.String("env"))
 			}
