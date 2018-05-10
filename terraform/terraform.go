@@ -3,6 +3,11 @@ package terraform
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
+	"github.com/hashicorp/terraform/command"
+	"github.com/hashicorp/terraform/helper/logging"
+	m_cli "github.com/mitchellh/cli"
+	"github.com/mitchellh/panicwrap"
 	"io"
 	"io/ioutil"
 	"log"
@@ -11,10 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
-	"github.com/hashicorp/terraform/command"
-	m_cli "github.com/mitchellh/cli"
+	"syscall"
 )
 
 const AppName = "app"
@@ -387,6 +389,40 @@ func Validate(rootpath string) (*CmdOutput, error) {
 }
 
 func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Writer) (*CmdOutput, error) {
+	var wrapConfig panicwrap.WrapConfig
+
+	// Determine where logs should go in general (requested by the user)
+	logWriter, err := logging.LogOutput()
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't setup log output: %s", err)
+	}
+
+	// We always send logs to a temporary file that we use in case
+	// there is a panic. Otherwise, we delete it.
+	logTempFile, err := ioutil.TempFile("", "terraform-log")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(logTempFile.Name())
+	defer logTempFile.Close()
+
+	// Setup the prefixed readers that send data properly to
+	// stdout/stderr.
+	doneCh := make(chan struct{})
+	outR, outW := io.Pipe()
+	go copyOutput(outR, doneCh)
+
+	// Create the configuration for panicwrap and wrap our executable
+	wrapConfig.Handler = panicHandler(logTempFile)
+	wrapConfig.Writer = io.MultiWriter(logTempFile, logWriter)
+	wrapConfig.Stdout = outW
+	wrapConfig.IgnoreSignals = []os.Signal{os.Interrupt}
+	wrapConfig.ForwardSignals = []os.Signal{syscall.SIGTERM}
+	_, err = panicwrap.Wrap(&wrapConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
