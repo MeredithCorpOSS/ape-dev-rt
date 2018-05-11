@@ -14,3 +14,10 @@ module "aws-app" {
   aws_hosted_zone_id = "${terraform_remote_state.shared-service.output.aws_hosted_zone_id}"
   dns_domain = "{{.AppName}}"
 }
+{{ $slice := mkSlice "bucket1" "bucket2" "bucket3" }}
+{{ range $index, $path := $slice }}
+resource "aws_s3_bucket" "{{$index}}_pixel_bucket" {
+bucket = "{{$path}}-pixel-bucket"
+acl = "private"
+}
+{{ end }}

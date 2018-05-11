@@ -47,6 +47,19 @@ Deprecated for applications migrated out of the central repository as part of rt
 
 RT will process any files named `*.tf.tpl` and `deployment-state.hcl.tpl` as Go templates prior to handing such files over to Terraform.
 
+### mkSlice function
+A helper mkSlice function was added to allow slices to be created and used in `*.tf.tpl` templates.
+- Example usage
+```
+	{{ $slice := mkSlice "bucket1" "bucket2" "bucket3" }}
+	{{ range $index, $path := $slice }}
+	resource "aws_s3_bucket" "{{$index}}_pixel_bucket" {
+	bucket = "{{$path}}-pixel-bucket"
+	acl = "private"
+	}
+	{{ end }}
+```
+
 ### Why?
 
 The main reason we use this extra templating layer is because [`deploymentstate`](https://github.com/TimeIncOSS/ape-dev-rt/blob/master/docs/deployment-state.md) exists outside of Terraform and as a result cannot use any variable logic within Terraform.
@@ -148,7 +161,7 @@ ELBs to/from Autoscaling Groups.
 
 ### Why
 
-We distinguish between two contexts/layers (application and slot). These are typically enough to build 
+We distinguish between two contexts/layers (application and slot). These are typically enough to build
 the whole infrastructure for each application and its slots.
 
 Sometimes changes need to be done out of these contexts though - i.e. the state of a slot may change
@@ -184,4 +197,3 @@ Applications in the Release Tool are bicameral as we distinguish between the "in
 **Infra configuration** describes resources whose lifecycle match that of the whole application. There is a single "infra configuration" for each app and changes are **incremental** - they can be modified and updated like a normal Terraform configuration.
 
 **Slot configuration** describes resources whose lifecycle match that of a single application slot. There will be multiple slot configurations for a single app. Each slot represent a repository snapshot, so slot changes are **immutable** - slots may only be created or destroyed.
-
