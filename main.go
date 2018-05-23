@@ -20,10 +20,22 @@ import (
 var errorStyle = chalk.Red.NewStyle().WithTextStyle(chalk.Bold).Style
 
 func main() {
-	os.Exit(realMain())
+	tempOutputFilename := "rt_output"
+	rtOutput, err := os.Create(filepath.Join(os.TempDir(), tempOutputFilename))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Couldn't setup rt tempfile: %s", err)
+		os.Exit(1)
+	}
+	defer rtOutput.Close()
+	defer os.Remove(rtOutput.Name())
+
+	exit_code := realMain(rtOutput)
+
+	checkOutput(os.TempDir(), tempOutputFilename)
+	os.Exit(exit_code)
 }
 
-func realMain() int {
+func realMain(output *os.File) int {
 	var wrapConfig panicwrap.WrapConfig
 	if !panicwrap.Wrapped(&wrapConfig) {
 		// Determine where logs should go in general (requested by the user)
@@ -57,7 +69,7 @@ func realMain() int {
 		wrapConfig.ForwardSignals = []os.Signal{syscall.SIGTERM}
 		exitStatus, err := panicwrap.Wrap(&wrapConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Couldn't start Terraform: %s", err)
+			fmt.Fprintf(os.Stderr, "Failure with Terraform: %s", err)
 			return 1
 		}
 		// If >= 0, we're the parent, so just exit
@@ -75,10 +87,15 @@ func realMain() int {
 		// save file handles since the tempfile is only used by the parent.
 		logTempFile.Close()
 	}
-	return wrappedMain()
+	mainError := wrappedMain()
+	if mainError != nil {
+		fmt.Fprintf(output, errorStyle("[ERROR] " + mainError.Error()))
+		return 1
+	}
+	return 0
 }
 
-func wrappedMain() int {
+func wrappedMain() error {
 	app := cli.NewApp()
 	app.Name = "release tool"
 	app.Usage = "For amazing releases"
@@ -115,12 +132,14 @@ func wrappedMain() int {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		// Since logging setup can fail too, we just use stderr
-		fmt.Fprintln(os.Stderr, errorStyle("[ERROR] "+err.Error()))
-		return 1
+		errorStr := errorStyle("[ERROR] " + err.Error())
+		log.Printf(errorStr)
+		// Since logging setup can fail too, we also write to stderr
+		fmt.Fprintln(os.Stderr, errorStr) // will end up in terraform.log
+		return err
 	}
 
-	return 0
+	return nil
 }
 
 func createLogFile() (*os.File, error) {
@@ -144,4 +163,14 @@ func createLogFile() (*os.File, error) {
 	}
 
 	return logFile, nil
+}
+
+func checkOutput(dir string, fileName string) {
+	fullPath := filepath.Join(dir, fileName)
+	bytes, err := ioutil.ReadFile(fullPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Couldn't read file %s: %s", fullPath, err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, string(bytes))
 }
