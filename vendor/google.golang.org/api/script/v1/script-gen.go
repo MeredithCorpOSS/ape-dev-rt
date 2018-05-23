@@ -47,7 +47,7 @@ const basePath = "https://script.googleapis.com/"
 
 // OAuth2 scopes used by this API.
 const (
-	// Read, send, delete, and manage your email
+	// View and manage your mail
 	MailGoogleComScope = "https://mail.google.com/"
 
 	// Manage your calendars

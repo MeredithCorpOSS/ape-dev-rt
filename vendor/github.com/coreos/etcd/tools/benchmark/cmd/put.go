@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,18 @@ package cmd
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/cheggaaa/pb"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/spf13/cobra"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/etcdserver/etcdserverpb"
+	v3 "github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/report"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
+	"golang.org/x/time/rate"
+	"gopkg.in/cheggaaa/pb.v1"
 )
 
 // putCmd represents the put command
@@ -40,18 +44,26 @@ var (
 	valSize int
 
 	putTotal int
+	putRate  int
 
 	keySpaceSize int
 	seqKeys      bool
+
+	compactInterval   time.Duration
+	compactIndexDelta int64
 )
 
 func init() {
 	RootCmd.AddCommand(putCmd)
 	putCmd.Flags().IntVar(&keySize, "key-size", 8, "Key size of put request")
 	putCmd.Flags().IntVar(&valSize, "val-size", 8, "Value size of put request")
+	putCmd.Flags().IntVar(&putRate, "rate", 0, "Maximum puts per second (0 is no limit)")
+
 	putCmd.Flags().IntVar(&putTotal, "total", 10000, "Total number of put requests")
 	putCmd.Flags().IntVar(&keySpaceSize, "key-space-size", 1, "Maximum possible keys")
 	putCmd.Flags().BoolVar(&seqKeys, "sequential-keys", false, "Use sequential keys")
+	putCmd.Flags().DurationVar(&compactInterval, "compact-interval", 0, `Interval to compact database (do not duplicate this with etcd's 'auto-compaction-retention' flag) (e.g. --compact-interval=5m compacts every 5-minute)`)
+	putCmd.Flags().Int64Var(&compactIndexDelta, "compact-index-delta", 1000, "Delta between current revision and compact revision (e.g. current revision 10000, compact at 9000)")
 }
 
 func putFunc(cmd *cobra.Command, args []string) {
@@ -60,23 +72,33 @@ func putFunc(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	results = make(chan result)
-	requests := make(chan etcdserverpb.PutRequest, totalClients)
-	bar = pb.New(putTotal)
-
-	k, v := make([]byte, keySize), mustRandBytes(valSize)
-
+	requests := make(chan v3.Op, totalClients)
+	if putRate == 0 {
+		putRate = math.MaxInt32
+	}
+	limit := rate.NewLimiter(rate.Limit(putRate), 1)
 	clients := mustCreateClients(totalClients, totalConns)
+	k, v := make([]byte, keySize), string(mustRandBytes(valSize))
 
+	bar = pb.New(putTotal)
 	bar.Format("Bom !")
 	bar.Start()
 
+	r := newReport()
 	for i := range clients {
 		wg.Add(1)
-		go doPut(context.Background(), clients[i].KV, requests)
-	}
+		go func(c *v3.Client) {
+			defer wg.Done()
+			for op := range requests {
+				limit.Wait(context.Background())
 
-	pdoneC := printReport(results)
+				st := time.Now()
+				_, err := c.Do(context.Background(), op)
+				r.Results() <- report.Result{Err: err, Start: st, End: time.Now()}
+				bar.Increment()
+			}
+		}(clients[i])
+	}
 
 	go func() {
 		for i := 0; i < putTotal; i++ {
@@ -85,31 +107,46 @@ func putFunc(cmd *cobra.Command, args []string) {
 			} else {
 				binary.PutVarint(k, int64(rand.Intn(keySpaceSize)))
 			}
-			requests <- etcdserverpb.PutRequest{Key: k, Value: v}
+			requests <- v3.OpPut(string(k), v)
 		}
 		close(requests)
 	}()
 
+	if compactInterval > 0 {
+		go func() {
+			for {
+				time.Sleep(compactInterval)
+				compactKV(clients)
+			}
+		}()
+	}
+
+	rc := r.Run()
 	wg.Wait()
-
+	close(r.Results())
 	bar.Finish()
-
-	close(results)
-	<-pdoneC
+	fmt.Println(<-rc)
 }
 
-func doPut(ctx context.Context, client etcdserverpb.KVClient, requests <-chan etcdserverpb.PutRequest) {
-	defer wg.Done()
-
-	for r := range requests {
-		st := time.Now()
-		_, err := client.Put(ctx, &r)
-
-		var errStr string
-		if err != nil {
-			errStr = err.Error()
-		}
-		results <- result{errStr: errStr, duration: time.Since(st)}
-		bar.Increment()
+func compactKV(clients []*v3.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	resp, err := clients[0].KV.Get(ctx, "foo")
+	cancel()
+	if err != nil {
+		panic(err)
 	}
+	revToCompact := max(0, resp.Header.Revision-compactIndexDelta)
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	_, err = clients[0].KV.Compact(ctx, revToCompact)
+	cancel()
+	if err != nil {
+		panic(err)
+	}
+}
+
+func max(n1, n2 int64) int64 {
+	if n1 > n2 {
+		return n1
+	}
+	return n2
 }

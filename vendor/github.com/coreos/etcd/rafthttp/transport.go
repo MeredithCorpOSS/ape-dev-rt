@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,11 @@
 package rafthttp
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/xiang90/probing"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/logutil"
 	"github.com/coreos/etcd/pkg/transport"
@@ -29,6 +27,10 @@ import (
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
+
+	"github.com/coreos/pkg/capnslog"
+	"github.com/xiang90/probing"
+	"golang.org/x/time/rate"
 )
 
 var plog = logutil.NewMergeLogger(capnslog.NewPackageLogger("github.com/coreos/etcd", "rafthttp"))
@@ -94,23 +96,27 @@ type Transporter interface {
 // User needs to call Start before calling other functions, and call
 // Stop when the Transport is no longer used.
 type Transport struct {
-	DialTimeout time.Duration     // maximum duration before timing out dial of the request
-	TLSInfo     transport.TLSInfo // TLS information used when creating connection
+	DialTimeout time.Duration // maximum duration before timing out dial of the request
+	// DialRetryFrequency defines the frequency of streamReader dial retrial attempts;
+	// a distinct rate limiter is created per every peer (default value: 10 events/sec)
+	DialRetryFrequency rate.Limit
 
-	ID          types.ID // local member ID
-	ClusterID   types.ID // raft cluster ID for request validation
-	Raft        Raft     // raft state machine, to which the Transport forwards received messages and reports status
+	TLSInfo transport.TLSInfo // TLS information used when creating connection
+
+	ID          types.ID   // local member ID
+	URLs        types.URLs // local peer URLs
+	ClusterID   types.ID   // raft cluster ID for request validation
+	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
 	Snapshotter *snap.Snapshotter
 	ServerStats *stats.ServerStats // used to record general transportation statistics
 	// used to record transportation statistics with followers when
 	// performing as leader in raft protocol
 	LeaderStats *stats.LeaderStats
-	// error channel used to report detected critical error, e.g.,
+	// ErrorC is used to report detected critical errors, e.g.,
 	// the member has been permanently removed from the cluster
 	// When an error is received from ErrorC, user should stop raft state
 	// machine and thus stop the Transport.
 	ErrorC chan error
-	V3demo bool
 
 	streamRt   http.RoundTripper // roundTripper used by streams
 	pipelineRt http.RoundTripper // roundTripper used by pipelines
@@ -135,13 +141,20 @@ func (t *Transport) Start() error {
 	t.remotes = make(map[types.ID]*remote)
 	t.peers = make(map[types.ID]Peer)
 	t.prober = probing.NewProber(t.pipelineRt)
+
+	// If client didn't provide dial retry frequence, use the default
+	// (100ms backoff between attempts to create a new stream),
+	// so it doesn't bring too much overhead when retry.
+	if t.DialRetryFrequency == 0 {
+		t.DialRetryFrequency = rate.Every(100 * time.Millisecond)
+	}
 	return nil
 }
 
 func (t *Transport) Handler() http.Handler {
-	pipelineHandler := newPipelineHandler(t.Raft, t.ClusterID)
-	streamHandler := newStreamHandler(t, t.Raft, t.ID, t.ClusterID)
-	snapHandler := newSnapshotHandler(t.Raft, t.Snapshotter, t.ClusterID)
+	pipelineHandler := newPipelineHandler(t, t.Raft, t.ClusterID)
+	streamHandler := newStreamHandler(t, t, t.Raft, t.ID, t.ClusterID)
+	snapHandler := newSnapshotHandler(t, t.Raft, t.Snapshotter, t.ClusterID)
 	mux := http.NewServeMux()
 	mux.Handle(RaftPrefix, pipelineHandler)
 	mux.Handle(RaftStreamPrefix+"/", streamHandler)
@@ -165,10 +178,11 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		to := types.ID(m.To)
 
 		t.mu.RLock()
-		p, ok := t.peers[to]
+		p, pok := t.peers[to]
+		g, rok := t.remotes[to]
 		t.mu.RUnlock()
 
-		if ok {
+		if pok {
 			if m.Type == raftpb.MsgApp {
 				t.ServerStats.SendAppendReq(m.Size())
 			}
@@ -176,8 +190,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			continue
 		}
 
-		g, ok := t.remotes[to]
-		if ok {
+		if rok {
 			g.send(m)
 			continue
 		}
@@ -187,6 +200,8 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 }
 
 func (t *Transport) Stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for _, r := range t.remotes {
 		r.stop()
 	}
@@ -200,11 +215,52 @@ func (t *Transport) Stop() {
 	if tr, ok := t.pipelineRt.(*http.Transport); ok {
 		tr.CloseIdleConnections()
 	}
+	t.peers = nil
+	t.remotes = nil
+}
+
+// CutPeer drops messages to the specified peer.
+func (t *Transport) CutPeer(id types.ID) {
+	t.mu.RLock()
+	p, pok := t.peers[id]
+	g, gok := t.remotes[id]
+	t.mu.RUnlock()
+
+	if pok {
+		p.(Pausable).Pause()
+	}
+	if gok {
+		g.Pause()
+	}
+}
+
+// MendPeer recovers the message dropping behavior of the given peer.
+func (t *Transport) MendPeer(id types.ID) {
+	t.mu.RLock()
+	p, pok := t.peers[id]
+	g, gok := t.remotes[id]
+	t.mu.RUnlock()
+
+	if pok {
+		p.(Pausable).Resume()
+	}
+	if gok {
+		g.Resume()
+	}
 }
 
 func (t *Transport) AddRemote(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.remotes == nil {
+		// there's no clean way to shutdown the golang http server
+		// (see: https://github.com/golang/go/issues/4674) before
+		// stopping the transport; ignore any new connections.
+		return
+	}
+	if _, ok := t.peers[id]; ok {
+		return
+	}
 	if _, ok := t.remotes[id]; ok {
 		return
 	}
@@ -212,12 +268,16 @@ func (t *Transport) AddRemote(id types.ID, us []string) {
 	if err != nil {
 		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
 	}
-	t.remotes[id] = startRemote(t.pipelineRt, urls, t.ID, id, t.ClusterID, t.Raft, t.ErrorC)
+	t.remotes[id] = startRemote(t, urls, id)
 }
 
 func (t *Transport) AddPeer(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	if t.peers == nil {
+		panic("transport stopped")
+	}
 	if _, ok := t.peers[id]; ok {
 		return
 	}
@@ -226,8 +286,10 @@ func (t *Transport) AddPeer(id types.ID, us []string) {
 		plog.Panicf("newURLs %+v should never fail: %+v", us, err)
 	}
 	fs := t.LeaderStats.Follower(id.String())
-	t.peers[id] = startPeer(t.streamRt, t.pipelineRt, urls, t.ID, id, t.ClusterID, t.Raft, fs, t.ErrorC, t.V3demo)
+	t.peers[id] = startPeer(t, urls, id, fs)
 	addPeerToProber(t.prober, id.String(), us)
+
+	plog.Infof("added peer %s", id)
 }
 
 func (t *Transport) RemovePeer(id types.ID) {
@@ -254,6 +316,7 @@ func (t *Transport) removePeer(id types.ID) {
 	delete(t.peers, id)
 	delete(t.LeaderStats.Followers, id.String())
 	t.prober.Remove(id.String())
+	plog.Infof("removed peer %s", id)
 }
 
 func (t *Transport) UpdatePeer(id types.ID, us []string) {
@@ -271,6 +334,7 @@ func (t *Transport) UpdatePeer(id types.ID, us []string) {
 
 	t.prober.Remove(id.String())
 	addPeerToProber(t.prober, id.String(), us)
+	plog.Infof("updated peer %s", id)
 }
 
 func (t *Transport) ActiveSince(id types.ID) time.Time {
@@ -283,6 +347,8 @@ func (t *Transport) ActiveSince(id types.ID) time.Time {
 }
 
 func (t *Transport) SendSnapshot(m snap.Message) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	p := t.peers[types.ID(m.To)]
 	if p == nil {
 		m.CloseWithError(errMemberNotFound)
@@ -291,12 +357,12 @@ func (t *Transport) SendSnapshot(m snap.Message) {
 	p.sendSnap(m)
 }
 
+// Pausable is a testing interface for pausing transport traffic.
 type Pausable interface {
 	Pause()
 	Resume()
 }
 
-// for testing
 func (t *Transport) Pause() {
 	for _, p := range t.peers {
 		p.(Pausable).Pause()

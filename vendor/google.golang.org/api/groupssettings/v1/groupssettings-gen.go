@@ -47,7 +47,7 @@ const basePath = "https://www.googleapis.com/groups/v1/groups/"
 
 // OAuth2 scopes used by this API.
 const (
-	// View and manage the settings of a G Suite group
+	// View and manage the settings of a Google Apps Group
 	AppsGroupsSettingsScope = "https://www.googleapis.com/auth/apps.groups.settings"
 )
 

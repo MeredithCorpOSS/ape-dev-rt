@@ -558,6 +558,25 @@ func (p *provisioner) configureVaultsFunc(gemCmd string, knifeCmd string, confDi
 			path.Join(confDir, p.UserName+".pem"),
 		)
 
+		// if client gets recreated, remove (old) client (with old keys) from vaults/items
+		// otherwise, the (new) client (with new keys) will not be able to decrypt the vault
+		if p.RecreateClient {
+			for vault, items := range p.Vaults {
+				for _, item := range items {
+					deleteCmd := fmt.Sprintf("%s vault remove %s %s -C \"%s\" -M client %s",
+						knifeCmd,
+						vault,
+						item,
+						p.NodeName,
+						options,
+					)
+					if err := p.runCommand(o, comm, deleteCmd); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
 		for vault, items := range p.Vaults {
 			for _, item := range items {
 				updateCmd := fmt.Sprintf("%s vault update %s %s -C %s -M client %s",
@@ -782,18 +801,18 @@ func decodeConfig(d *schema.ResourceData) (*provisioner, error) {
 }
 
 func getStringList(v interface{}) []string {
-	if v == nil {
-		return nil
-	}
-	switch l := v.(type) {
-	case []string:
-		return l
+	var result []string
+
+	switch v := v.(type) {
+	case nil:
+		return result
 	case []interface{}:
-		arr := make([]string, len(l))
-		for i, x := range l {
-			arr[i] = x.(string)
+		for _, vv := range v {
+			if vv, ok := vv.(string); ok {
+				result = append(result, vv)
+			}
 		}
-		return arr
+		return result
 	default:
 		panic(fmt.Sprintf("Unsupported type: %T", v))
 	}

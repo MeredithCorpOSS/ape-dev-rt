@@ -8,8 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/masterzen/winrm/soap"
-	"github.com/masterzen/xmlpath"
+	"github.com/antchfx/xquery/xml"
 	"github.com/satori/go.uuid"
 )
 
@@ -39,15 +38,12 @@ func Test_creating_a_shell(t *testing.T) {
 		t.Errorf("Expected ContentType application/soap+xml was %s.\n", contentType)
 	}
 
-	env, err := xmlpath.Parse(res.Body)
+	doc, err := xmlquery.Parse(res.Body)
 	if err != nil {
-		t.Error("Couldn't compile the SOAP response.")
+		t.Errorf("Couldn't parse XML: %s", err)
 	}
-
-	xpath, _ := xmlpath.CompileWithNamespace(
-		"//rsp:ShellId", soap.GetAllNamespaces())
-
-	if _, found := xpath.String(env); !found {
+	result := xmlquery.FindOne(doc, "//rsp:ShellId").InnerText()
+	if result == "" {
 		t.Error("Expected a Shell identifier.")
 	}
 }
@@ -71,20 +67,17 @@ func Test_executing_a_command(t *testing.T) {
 
 	w.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK but was %d.\n", res.Code)
+		t.Fatalf("Expected 200 OK but was %d.\n", res.Code)
 	}
 
-	env, err := xmlpath.Parse(res.Body)
+	doc, err := xmlquery.Parse(res.Body)
 	if err != nil {
-		t.Error("Couldn't compile the SOAP response.")
+		t.Errorf("Couldn't compile the SOAP response: %s", err)
 	}
+	result := xmlquery.FindOne(doc, "//rsp:CommandId").InnerText()
 
-	xpath, _ := xmlpath.CompileWithNamespace(
-		"//rsp:CommandId", soap.GetAllNamespaces())
-
-	result, _ := xpath.String(env)
 	if result != id {
-		t.Errorf("Expected CommandId=%s but was \"%s\"", id, result)
+		t.Errorf("Expected CommandId=%s but was %q", id, result)
 	}
 }
 
@@ -107,20 +100,17 @@ func Test_executing_a_regex_command(t *testing.T) {
 
 	w.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK but was %d.\n", res.Code)
+		t.Fatalf("Expected 200 OK but was %d.\n", res.Code)
 	}
 
-	env, err := xmlpath.Parse(res.Body)
+	doc, err := xmlquery.Parse(res.Body)
 	if err != nil {
-		t.Error("Couldn't compile the SOAP response.")
+		t.Errorf("Couldn't compile the SOAP response.")
 	}
+	result := xmlquery.FindOne(doc, "//rsp:CommandId").InnerText()
 
-	xpath, _ := xmlpath.CompileWithNamespace(
-		"//rsp:CommandId", soap.GetAllNamespaces())
-
-	result, _ := xpath.String(env)
 	if result != id {
-		t.Errorf("Expected CommandId=%s but was \"%s\"", id, result)
+		t.Errorf("Expected CommandId=%s, but was %q", id, result)
 	}
 }
 
@@ -144,48 +134,56 @@ func Test_receiving_command_results(t *testing.T) {
 
 	w.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK but was %d.\n", res.Code)
+		t.Fatalf("Expected 200 OK but was %d.\n", res.Code)
 	}
 
-	env, err := xmlpath.Parse(res.Body)
+	doc, err := xmlquery.Parse(res.Body)
 	if err != nil {
-		t.Error("Couldn't compile the SOAP response.")
+		t.Errorf("Couldn't compile the SOAP response: %s", err)
 	}
 
-	xpath, _ := xmlpath.CompileWithNamespace("//rsp:ReceiveResponse", soap.GetAllNamespaces())
-	iter := xpath.Iter(env)
-	if !iter.Next() {
+	result := xmlquery.FindOne(doc, "//rsp:ReceiveResponse")
+	iter := xmlquery.CreateXPathNavigator(result)
+	if !iter.MoveToChild() {
 		t.Error("Expected a ReceiveResponse element.")
 	}
 
-	xresp := iter.Node()
-	xpath, _ = xmlpath.CompileWithNamespace(
-		fmt.Sprintf("rsp:Stream[@CommandId='%s']", id), soap.GetAllNamespaces())
-	iter = xpath.Iter(xresp)
+	xresp := iter.Current()
+	result = xmlquery.FindOne(xresp, fmt.Sprintf("rsp:Stream[@CommandId='%s']", id))
+	iter = xmlquery.CreateXPathNavigator(xresp)
 
-	if !iter.Next() || !nodeHasAttribute(iter.Node(), "Name", "stdout") || iter.Node().String() != "dGFjb3M=" {
-		t.Error("Expected an stdout Stream with the text \"dGFjb3M=\".")
+	testText := "dGFjb3M="
+	if !iter.MoveToNext() ||
+		iter.Current().SelectAttr("Name") != "stdout" ||
+		iter.Current().InnerText() != testText {
+		t.Errorf("Expected an stdout Stream with the text %q", testText)
 	}
 
-	if !iter.Next() || !nodeHasAttribute(iter.Node(), "Name", "stdout") || !nodeHasAttribute(iter.Node(), "End", "true") {
-		t.Error("Expected an stdout Stream with an \"End\" attribute.")
+	if !iter.MoveToNext() ||
+		iter.Current().SelectAttr("Name") != "stdout" ||
+		iter.Current().SelectAttr("End") != "true" {
+		t.Errorf("Expected an stdout Stream with an %q attribute", "end")
 	}
 
-	if !iter.Next() || !nodeHasAttribute(iter.Node(), "Name", "stderr") || !nodeHasAttribute(iter.Node(), "End", "true") {
-		t.Error("Expected an stderr Stream with an \"End\" attribute.")
+	if !iter.MoveToNext() ||
+		iter.Current().SelectAttr("Name") != "stderr" ||
+		iter.Current().SelectAttr("End") != "true" {
+		t.Errorf("Expected an stderr Stream with an %q attribute", "end")
 	}
 
-	xpath, _ = xmlpath.CompileWithNamespace(
-		"//rsp:CommandState[@State='http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done']",
-		soap.GetAllNamespaces())
-
-	if _, found := xpath.String(env); !found {
-		t.Error("Expected CommandState=\"Done\"")
+	result = xmlquery.FindOne(doc, "//rsp:CommandState")
+	if result == nil {
+		t.Errorf("Expected CommandState=%q, got: nil", "Done")
 	}
 
-	xpath, _ = xmlpath.CompileWithNamespace("//rsp:CommandState/rsp:ExitCode", soap.GetAllNamespaces())
-	if code, _ := xpath.String(env); code != "0" {
-		t.Errorf("Expected ExitCode=0 but found \"%s\"\n", code)
+	if result.SelectAttr("State") != "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done" {
+		t.Errorf("Expected CommandState=%q", "Done")
+	}
+
+	result = xmlquery.FindOne(doc,
+		"//rsp:CommandState/rsp:ExitCode")
+	if result.InnerText() != "0" {
+		t.Errorf("Expected ExitCode=0 but found %q", result.InnerText())
 	}
 }
 
@@ -202,19 +200,10 @@ func Test_deleting_a_shell(t *testing.T) {
 
 	w.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Errorf("Expected 200 OK but was %d.\n", res.Code)
+		t.Fatalf("Expected 200 OK but was %d.\n", res.Code)
 	}
 
 	if res.Body.Len() != 0 {
 		t.Errorf("Expected body to be empty but was \"%v\".", res.Body)
 	}
-}
-
-func nodeHasAttribute(n *xmlpath.Node, name, value string) bool {
-	xpath := xmlpath.MustCompile("attribute::" + name)
-	if result, found := xpath.String(n); found {
-		return result == value
-	}
-
-	return false
 }

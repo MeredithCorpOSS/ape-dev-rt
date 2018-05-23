@@ -180,17 +180,17 @@ func TestLoadFileBasic(t *testing.T) {
 	}
 
 	if c.Dir != "" {
-		t.Fatalf("bad: %#v", c.Dir)
+		t.Fatalf("wrong dir %#v; want %#v", c.Dir, "")
 	}
 
 	expectedTF := &Terraform{RequiredVersion: "foo"}
 	if !reflect.DeepEqual(c.Terraform, expectedTF) {
-		t.Fatalf("bad: %#v", c.Terraform)
+		t.Fatalf("wrong terraform block %#v; want %#v", c.Terraform, expectedTF)
 	}
 
 	expectedAtlas := &AtlasConfig{Name: "mitchellh/foo"}
 	if !reflect.DeepEqual(c.Atlas, expectedAtlas) {
-		t.Fatalf("bad: %#v", c.Atlas)
+		t.Fatalf("wrong atlas config %#v; want %#v", c.Atlas, expectedAtlas)
 	}
 
 	actual := variablesStr(c.Variables)
@@ -206,6 +206,10 @@ func TestLoadFileBasic(t *testing.T) {
 	actual = resourcesStr(c.Resources)
 	if actual != strings.TrimSpace(basicResourcesStr) {
 		t.Fatalf("bad:\n%s", actual)
+	}
+
+	if actual, want := localsStr(c.Locals), strings.TrimSpace(basicLocalsStr); actual != want {
+		t.Fatalf("wrong locals:\n%s\nwant:\n%s", actual, want)
 	}
 
 	actual = outputsStr(c.Outputs)
@@ -286,6 +290,10 @@ func TestLoadFileBasic_json(t *testing.T) {
 	actual = resourcesStr(c.Resources)
 	if actual != strings.TrimSpace(basicResourcesStr) {
 		t.Fatalf("bad:\n%s", actual)
+	}
+
+	if actual, want := localsStr(c.Locals), strings.TrimSpace(basicLocalsStr); actual != want {
+		t.Fatalf("wrong locals:\n%s\nwant:\n%s", actual, want)
 	}
 
 	actual = outputsStr(c.Outputs)
@@ -1014,6 +1022,22 @@ func TestLoad_jsonAttributes(t *testing.T) {
 	}
 }
 
+func TestLoad_onlyOverride(t *testing.T) {
+	c, err := LoadDir(filepath.Join(fixtureDir, "dir-only-override"))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if c == nil {
+		t.Fatal("config should not be nil")
+	}
+
+	actual := variablesStr(c.Variables)
+	if actual != strings.TrimSpace(dirOnlyOverrideVariablesStr) {
+		t.Fatalf("bad:\n%s", actual)
+	}
+}
+
 const jsonAttributeStr = `
 cloudstack_firewall.test (x1)
   ipaddress
@@ -1050,6 +1074,23 @@ aws_instance.test (x1)
 `
 
 const basicOutputsStr = `
+web_id
+  vars
+    resource: aws_instance.web.id
+  description
+    The ID
+web_ip
+  vars
+    resource: aws_instance.web.private_ip
+`
+
+const basicLocalsStr = `
+literal
+literal_list
+literal_map
+security_group_ids
+  vars
+    resource: aws_security_group.firewall.*.id
 web_ip
   vars
     resource: aws_instance.web.private_ip
@@ -1201,6 +1242,12 @@ foo
 const dirOverrideVarsVariablesStr = `
 foo
   baz
+  bar
+`
+
+const dirOnlyOverrideVariablesStr = `
+foo
+  bar
   bar
 `
 

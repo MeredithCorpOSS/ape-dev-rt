@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -23,8 +24,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 )
 
 func TestV2KeysURLHelper(t *testing.T) {
@@ -356,6 +355,18 @@ func TestSetAction(t *testing.T) {
 			wantURL:  "http://example.com/foo",
 			wantBody: "ttl=180&value=",
 		},
+
+		// Refresh is set
+		{
+			act: setAction{
+				Key:     "foo",
+				TTL:     3 * time.Minute,
+				Refresh: true,
+			},
+			wantURL:  "http://example.com/foo",
+			wantBody: "refresh=true&ttl=180&value=",
+		},
+
 		// Dir is set
 		{
 			act: setAction{
@@ -394,6 +405,15 @@ func TestSetAction(t *testing.T) {
 			},
 			wantURL:  "http://example.com/foo?dir=true",
 			wantBody: "",
+		},
+		// NoValueOnSuccess is set
+		{
+			act: setAction{
+				Key:              "foo",
+				NoValueOnSuccess: true,
+			},
+			wantURL:  "http://example.com/foo?noValueOnSuccess=true",
+			wantBody: "value=",
 		},
 	}
 
@@ -633,15 +653,14 @@ func assertRequest(got http.Request, wantMethod string, wantURL *url.URL, wantHe
 	} else {
 		if wantBody == nil {
 			return fmt.Errorf("want.Body=%v got.Body=%s", wantBody, got.Body)
-		} else {
-			gotBytes, err := ioutil.ReadAll(got.Body)
-			if err != nil {
-				return err
-			}
+		}
+		gotBytes, err := ioutil.ReadAll(got.Body)
+		if err != nil {
+			return err
+		}
 
-			if !reflect.DeepEqual(wantBody, gotBytes) {
-				return fmt.Errorf("want.Body=%s got.Body=%s", wantBody, gotBytes)
-			}
+		if !reflect.DeepEqual(wantBody, gotBytes) {
+			return fmt.Errorf("want.Body=%s got.Body=%s", wantBody, gotBytes)
 		}
 	}
 
@@ -653,23 +672,24 @@ func TestUnmarshalSuccessfulResponse(t *testing.T) {
 	expiration.UnmarshalText([]byte("2015-04-07T04:40:23.044979686Z"))
 
 	tests := []struct {
-		hdr     string
-		body    string
-		wantRes *Response
-		wantErr bool
+		indexHdr     string
+		clusterIDHdr string
+		body         string
+		wantRes      *Response
+		wantErr      bool
 	}{
 		// Neither PrevNode or Node
 		{
-			hdr:     "1",
-			body:    `{"action":"delete"}`,
-			wantRes: &Response{Action: "delete", Index: 1},
-			wantErr: false,
+			indexHdr: "1",
+			body:     `{"action":"delete"}`,
+			wantRes:  &Response{Action: "delete", Index: 1},
+			wantErr:  false,
 		},
 
 		// PrevNode
 		{
-			hdr:  "15",
-			body: `{"action":"delete", "prevNode": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10}}`,
+			indexHdr: "15",
+			body:     `{"action":"delete", "prevNode": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10}}`,
 			wantRes: &Response{
 				Action: "delete",
 				Index:  15,
@@ -686,8 +706,8 @@ func TestUnmarshalSuccessfulResponse(t *testing.T) {
 
 		// Node
 		{
-			hdr:  "15",
-			body: `{"action":"get", "node": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10, "ttl": 10, "expiration": "2015-04-07T04:40:23.044979686Z"}}`,
+			indexHdr: "15",
+			body:     `{"action":"get", "node": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10, "ttl": 10, "expiration": "2015-04-07T04:40:23.044979686Z"}}`,
 			wantRes: &Response{
 				Action: "get",
 				Index:  15,
@@ -706,8 +726,9 @@ func TestUnmarshalSuccessfulResponse(t *testing.T) {
 
 		// Node Dir
 		{
-			hdr:  "15",
-			body: `{"action":"get", "node": {"key": "/foo", "dir": true, "modifiedIndex": 12, "createdIndex": 10}}`,
+			indexHdr:     "15",
+			clusterIDHdr: "abcdef",
+			body:         `{"action":"get", "node": {"key": "/foo", "dir": true, "modifiedIndex": 12, "createdIndex": 10}}`,
 			wantRes: &Response{
 				Action: "get",
 				Index:  15,
@@ -717,15 +738,16 @@ func TestUnmarshalSuccessfulResponse(t *testing.T) {
 					ModifiedIndex: 12,
 					CreatedIndex:  10,
 				},
-				PrevNode: nil,
+				PrevNode:  nil,
+				ClusterID: "abcdef",
 			},
 			wantErr: false,
 		},
 
 		// PrevNode and Node
 		{
-			hdr:  "15",
-			body: `{"action":"update", "prevNode": {"key": "/foo", "value": "baz", "modifiedIndex": 10, "createdIndex": 10}, "node": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10}}`,
+			indexHdr: "15",
+			body:     `{"action":"update", "prevNode": {"key": "/foo", "value": "baz", "modifiedIndex": 10, "createdIndex": 10}, "node": {"key": "/foo", "value": "bar", "modifiedIndex": 12, "createdIndex": 10}}`,
 			wantRes: &Response{
 				Action: "update",
 				Index:  15,
@@ -747,24 +769,24 @@ func TestUnmarshalSuccessfulResponse(t *testing.T) {
 
 		// Garbage in body
 		{
-			hdr:     "",
-			body:    `garbage`,
-			wantRes: nil,
-			wantErr: true,
+			indexHdr: "",
+			body:     `garbage`,
+			wantRes:  nil,
+			wantErr:  true,
 		},
 
 		// non-integer index
 		{
-			hdr:     "poo",
-			body:    `{}`,
-			wantRes: nil,
-			wantErr: true,
+			indexHdr: "poo",
+			body:     `{}`,
+			wantRes:  nil,
+			wantErr:  true,
 		},
 	}
 
 	for i, tt := range tests {
 		h := make(http.Header)
-		h.Add("X-Etcd-Index", tt.hdr)
+		h.Add("X-Etcd-Index", tt.indexHdr)
 		res, err := unmarshalSuccessfulKeysResponse(h, []byte(tt.body))
 		if tt.wantErr != (err != nil) {
 			t.Errorf("#%d: wantErr=%t, err=%v", i, tt.wantErr, err)
@@ -1234,7 +1256,6 @@ func TestHTTPKeysAPIGetResponse(t *testing.T) {
 func TestHTTPKeysAPIDeleteAction(t *testing.T) {
 	tests := []struct {
 		key        string
-		value      string
 		opts       *DeleteOptions
 		wantAction httpAction
 	}{
