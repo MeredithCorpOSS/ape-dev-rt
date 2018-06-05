@@ -194,6 +194,18 @@
         {"shape":"InvalidTargetException"}
       ]
     },
+    "DescribeAccountLimits":{
+      "name":"DescribeAccountLimits",
+      "http":{
+        "method":"POST",
+        "requestUri":"/"
+      },
+      "input":{"shape":"DescribeAccountLimitsInput"},
+      "output":{
+        "shape":"DescribeAccountLimitsOutput",
+        "resultWrapper":"DescribeAccountLimitsResult"
+      }
+    },
     "DescribeListeners":{
       "name":"DescribeListeners",
       "http":{
@@ -394,7 +406,9 @@
         {"shape":"TargetGroupAssociationLimitException"},
         {"shape":"RuleNotFoundException"},
         {"shape":"OperationNotPermittedException"},
-        {"shape":"TooManyRegistrationsForTargetIdException"}
+        {"shape":"TooManyRegistrationsForTargetIdException"},
+        {"shape":"TooManyTargetsException"},
+        {"shape":"TargetGroupNotFoundException"}
       ]
     },
     "ModifyTargetGroup":{
@@ -706,7 +720,8 @@
         "HealthCheckTimeoutSeconds":{"shape":"HealthCheckTimeoutSeconds"},
         "HealthyThresholdCount":{"shape":"HealthCheckThresholdCount"},
         "UnhealthyThresholdCount":{"shape":"HealthCheckThresholdCount"},
-        "Matcher":{"shape":"Matcher"}
+        "Matcher":{"shape":"Matcher"},
+        "TargetType":{"shape":"TargetTypeEnum"}
       }
     },
     "CreateTargetGroupOutput":{
@@ -781,6 +796,20 @@
       "members":{
       }
     },
+    "DescribeAccountLimitsInput":{
+      "type":"structure",
+      "members":{
+        "Marker":{"shape":"Marker"},
+        "PageSize":{"shape":"PageSize"}
+      }
+    },
+    "DescribeAccountLimitsOutput":{
+      "type":"structure",
+      "members":{
+        "Limits":{"shape":"Limits"},
+        "NextMarker":{"shape":"Marker"}
+      }
+    },
     "DescribeListenersInput":{
       "type":"structure",
       "members":{
@@ -830,13 +859,16 @@
       "type":"structure",
       "members":{
         "ListenerArn":{"shape":"ListenerArn"},
-        "RuleArns":{"shape":"RuleArns"}
+        "RuleArns":{"shape":"RuleArns"},
+        "Marker":{"shape":"Marker"},
+        "PageSize":{"shape":"PageSize"}
       }
     },
     "DescribeRulesOutput":{
       "type":"structure",
       "members":{
-        "Rules":{"shape":"Rules"}
+        "Rules":{"shape":"Rules"},
+        "NextMarker":{"shape":"Marker"}
       }
     },
     "DescribeSSLPoliciesInput":{
@@ -1057,6 +1089,17 @@
       ]
     },
     "IsDefault":{"type":"boolean"},
+    "Limit":{
+      "type":"structure",
+      "members":{
+        "Name":{"shape":"Name"},
+        "Max":{"shape":"Max"}
+      }
+    },
+    "Limits":{
+      "type":"list",
+      "member":{"shape":"Limit"}
+    },
     "ListOfString":{
       "type":"list",
       "member":{"shape":"StringValue"}
@@ -1190,6 +1233,7 @@
         "HttpCode":{"shape":"HttpCode"}
       }
     },
+    "Max":{"type":"string"},
     "ModifyListenerInput":{
       "type":"structure",
       "required":["ListenerArn"],
@@ -1278,6 +1322,7 @@
         "TargetGroups":{"shape":"TargetGroups"}
       }
     },
+    "Name":{"type":"string"},
     "OperationNotPermittedException":{
       "type":"structure",
       "members":{
@@ -1593,7 +1638,8 @@
       "required":["Id"],
       "members":{
         "Id":{"shape":"TargetId"},
-        "Port":{"shape":"Port"}
+        "Port":{"shape":"Port"},
+        "AvailabilityZone":{"shape":"ZoneName"}
       }
     },
     "TargetDescriptions":{
@@ -1616,7 +1662,8 @@
         "UnhealthyThresholdCount":{"shape":"HealthCheckThresholdCount"},
         "HealthCheckPath":{"shape":"Path"},
         "Matcher":{"shape":"Matcher"},
-        "LoadBalancerArns":{"shape":"LoadBalancerArns"}
+        "LoadBalancerArns":{"shape":"LoadBalancerArns"},
+        "TargetType":{"shape":"TargetTypeEnum"}
       }
     },
     "TargetGroupArn":{"type":"string"},
@@ -1704,6 +1751,7 @@
         "Target.NotInUse",
         "Target.DeregistrationInProgress",
         "Target.InvalidState",
+        "Target.IpUnusable",
         "Elb.InternalError"
       ]
     },
@@ -1718,6 +1766,13 @@
       ]
     },
     "TargetId":{"type":"string"},
+    "TargetTypeEnum":{
+      "type":"string",
+      "enum":[
+        "instance",
+        "ip"
+      ]
+    },
     "TooManyCertificatesException":{
       "type":"structure",
       "members":{

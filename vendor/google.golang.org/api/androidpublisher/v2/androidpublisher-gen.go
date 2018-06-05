@@ -2058,11 +2058,6 @@ type SubscriptionPurchase struct {
 	// milliseconds since the Epoch.
 	StartTimeMillis int64 `json:"startTimeMillis,omitempty,string"`
 
-	// UserCancellationTimeMillis: The time at which the subscription was
-	// canceled by the user, in milliseconds since the epoch. Only present
-	// if cancelReason is 0.
-	UserCancellationTimeMillis int64 `json:"userCancellationTimeMillis,omitempty,string"`
-
 	// ServerResponse contains the HTTP response code and headers from the
 	// server.
 	googleapi.ServerResponse `json:"-"`
@@ -11308,8 +11303,7 @@ type ReviewsListCall struct {
 	header_       http.Header
 }
 
-// List: Returns a list of reviews. Only reviews from last week will be
-// returned.
+// List: Returns a list of reviews.
 func (r *ReviewsService) List(packageNameid string) *ReviewsListCall {
 	c := &ReviewsListCall{s: r.s, urlParams_: make(gensupport.URLParams)}
 	c.packageNameid = packageNameid
@@ -11436,7 +11430,7 @@ func (c *ReviewsListCall) Do(opts ...googleapi.CallOption) (*ReviewsListResponse
 	}
 	return ret, nil
 	// {
-	//   "description": "Returns a list of reviews. Only reviews from last week will be returned.",
+	//   "description": "Returns a list of reviews.",
 	//   "httpMethod": "GET",
 	//   "id": "androidpublisher.reviews.list",
 	//   "parameterOrder": [

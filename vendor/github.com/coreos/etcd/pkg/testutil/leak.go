@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -42,17 +43,18 @@ func CheckLeakedGoroutine() bool {
 		return false
 	}
 	gs := interestingGoroutines()
-
-	n := 0
-	stackCount := make(map[string]int)
-	for _, g := range gs {
-		stackCount[g]++
-		n++
-	}
-
-	if n == 0 {
+	if len(gs) == 0 {
 		return false
 	}
+
+	stackCount := make(map[string]int)
+	re := regexp.MustCompile(`\(0[0-9a-fx, ]*\)`)
+	for _, g := range gs {
+		// strip out pointer arguments in first function of stack dump
+		normalized := string(re.ReplaceAll([]byte(g), []byte("(...)")))
+		stackCount[normalized]++
+	}
+
 	fmt.Fprintf(os.Stderr, "Too many goroutines running after all test(s).\n")
 	for stack, count := range stackCount {
 		fmt.Fprintf(os.Stderr, "%d instances of:\n%s\n", count, stack)
@@ -60,10 +62,11 @@ func CheckLeakedGoroutine() bool {
 	return true
 }
 
-func AfterTest(t *testing.T) {
+// CheckAfterTest returns an error if AfterTest would fail with an error.
+func CheckAfterTest(d time.Duration) error {
 	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
 	if testing.Short() {
-		return
+		return nil
 	}
 	var bad string
 	badSubstring := map[string]string{
@@ -72,16 +75,13 @@ func AfterTest(t *testing.T) {
 		"timeoutHandler":                               "a TimeoutHandler",
 		"net.(*netFD).connect(":                        "a timing out dial",
 		").noteClientGone(":                            "a closenotifier sender",
-	}
-
-	// readLoop was buggy before go1.5:
-	// https://github.com/golang/go/issues/10457
-	if getAtLeastGo15() {
-		badSubstring[").readLoop("] = "a Transport"
+		").readLoop(":                                  "a Transport",
+		".grpc":                                        "a gRPC resource",
 	}
 
 	var stacks string
-	for i := 0; i < 6; i++ {
+	begin := time.Now()
+	for time.Since(begin) < d {
 		bad = ""
 		stacks = strings.Join(interestingGoroutines(), "\n\n")
 		for substr, what := range badSubstring {
@@ -90,13 +90,22 @@ func AfterTest(t *testing.T) {
 			}
 		}
 		if bad == "" {
-			return
+			return nil
 		}
 		// Bad stuff found, but goroutines might just still be
 		// shutting down, so give it some time.
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Errorf("Test appears to have leaked %s:\n%s", bad, stacks)
+	return fmt.Errorf("appears to have leaked %s:\n%s", bad, stacks)
+}
+
+// AfterTest is meant to run in a defer that executes after a test completes.
+// It will detect common goroutine leaks, retrying in case there are goroutines
+// not synchronously torn down, and fail the test if any goroutines are stuck.
+func AfterTest(t *testing.T) {
+	if err := CheckAfterTest(300 * time.Millisecond); err != nil {
+		t.Errorf("Test %v", err)
+	}
 }
 
 func interestingGoroutines() (gs []string) {
@@ -109,6 +118,10 @@ func interestingGoroutines() (gs []string) {
 		}
 		stack := strings.TrimSpace(sl[1])
 		if stack == "" ||
+			strings.Contains(stack, "sync.(*WaitGroup).Done") ||
+			strings.Contains(stack, "os.(*file).close") ||
+			strings.Contains(stack, "created by os/signal.init") ||
+			strings.Contains(stack, "runtime/panic.go") ||
 			strings.Contains(stack, "created by testing.RunTests") ||
 			strings.Contains(stack, "testing.Main(") ||
 			strings.Contains(stack, "runtime.goexit") ||
@@ -123,12 +136,4 @@ func interestingGoroutines() (gs []string) {
 	}
 	sort.Strings(gs)
 	return
-}
-
-// getAtLeastGo15 returns true if the runtime has go1.5+.
-func getAtLeastGo15() bool {
-	var major, minor int
-	var discard string
-	i, err := fmt.Sscanf(runtime.Version(), "go%d.%d%s", &major, &minor, &discard)
-	return (err == nil && i == 3 && (major > 1 || major == 1 && minor >= 5))
 }

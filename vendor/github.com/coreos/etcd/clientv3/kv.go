@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,200 +15,170 @@
 package clientv3
 
 import (
-	"sync"
+	"context"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/lease"
+
+	"google.golang.org/grpc"
 )
 
 type (
-	PutResponse         pb.PutResponse
-	RangeResponse       pb.RangeResponse
-	GetResponse         pb.RangeResponse
-	DeleteRangeResponse pb.DeleteRangeResponse
-	DeleteResponse      pb.DeleteRangeResponse
-	TxnResponse         pb.TxnResponse
+	CompactResponse pb.CompactionResponse
+	PutResponse     pb.PutResponse
+	GetResponse     pb.RangeResponse
+	DeleteResponse  pb.DeleteRangeResponse
+	TxnResponse     pb.TxnResponse
 )
 
 type KV interface {
-	// PUT puts a key-value pair into etcd.
+	// Put puts a key-value pair into etcd.
 	// Note that key,value can be plain bytes array and string is
 	// an immutable representation of that bytes array.
-	// To get a string of bytes, do string([]byte(0x10, 0x20)).
-	Put(key, val string, leaseID lease.LeaseID) (*PutResponse, error)
+	// To get a string of bytes, do string([]byte{0x10, 0x20}).
+	Put(ctx context.Context, key, val string, opts ...OpOption) (*PutResponse, error)
 
-	// Range gets the keys [key, end) in the range at rev.
-	// If revev <=0, range gets the keys at currentRev.
-	// Limit limits the number of keys returned.
-	// If the required rev is compacted, ErrCompacted will be returned.
-	Range(key, end string, limit, rev int64, sort *SortOption) (*RangeResponse, error)
+	// Get retrieves keys.
+	// By default, Get will return the value for "key", if any.
+	// When passed WithRange(end), Get will return the keys in the range [key, end).
+	// When passed WithFromKey(), Get returns keys greater than or equal to key.
+	// When passed WithRev(rev) with rev > 0, Get retrieves keys at the given revision;
+	// if the required revision is compacted, the request will fail with ErrCompacted .
+	// When passed WithLimit(limit), the number of returned keys is bounded by limit.
+	// When passed WithSort(), the keys will be sorted.
+	Get(ctx context.Context, key string, opts ...OpOption) (*GetResponse, error)
 
-	// Get is like Range. A shortcut for ranging single key like [key, key+1).
-	Get(key string, rev int64) (*GetResponse, error)
-
-	// DeleteRange deletes the given range [key, end).
-	DeleteRange(key, end string) (*DeleteRangeResponse, error)
-
-	// Delete is like DeleteRange. A shortcut for deleting single key like [key, key+1).
-	Delete(key string) (*DeleteResponse, error)
+	// Delete deletes a key, or optionally using WithRange(end), [key, end).
+	Delete(ctx context.Context, key string, opts ...OpOption) (*DeleteResponse, error)
 
 	// Compact compacts etcd KV history before the given rev.
-	Compact(rev int64) error
+	Compact(ctx context.Context, rev int64, opts ...CompactOption) (*CompactResponse, error)
+
+	// Do applies a single Op on KV without a transaction.
+	// Do is useful when creating arbitrary operations to be issued at a
+	// later time; the user can range over the operations, calling Do to
+	// execute them. Get/Put/Delete, on the other hand, are best suited
+	// for when the operation should be issued at the time of declaration.
+	Do(ctx context.Context, op Op) (OpResponse, error)
 
 	// Txn creates a transaction.
-	Txn() Txn
+	Txn(ctx context.Context) Txn
+}
+
+type OpResponse struct {
+	put *PutResponse
+	get *GetResponse
+	del *DeleteResponse
+	txn *TxnResponse
+}
+
+func (op OpResponse) Put() *PutResponse    { return op.put }
+func (op OpResponse) Get() *GetResponse    { return op.get }
+func (op OpResponse) Del() *DeleteResponse { return op.del }
+func (op OpResponse) Txn() *TxnResponse    { return op.txn }
+
+func (resp *PutResponse) OpResponse() OpResponse {
+	return OpResponse{put: resp}
+}
+func (resp *GetResponse) OpResponse() OpResponse {
+	return OpResponse{get: resp}
+}
+func (resp *DeleteResponse) OpResponse() OpResponse {
+	return OpResponse{del: resp}
+}
+func (resp *TxnResponse) OpResponse() OpResponse {
+	return OpResponse{txn: resp}
 }
 
 type kv struct {
-	c *Client
-
-	mu     sync.Mutex       // guards all fields
-	conn   *grpc.ClientConn // conn in-use
 	remote pb.KVClient
 }
 
 func NewKV(c *Client) KV {
-	conn := c.activeConnection()
-	remote := pb.NewKVClient(conn)
-
-	return &kv{
-		conn:   c.activeConnection(),
-		remote: remote,
-
-		c: c,
-	}
+	return &kv{remote: RetryKVClient(c)}
 }
 
-func (kv *kv) Put(key, val string, leaseID lease.LeaseID) (*PutResponse, error) {
-	r, err := kv.do(OpPut(key, val, leaseID))
+func NewKVFromKVClient(remote pb.KVClient) KV {
+	return &kv{remote: remote}
+}
+
+func (kv *kv) Put(ctx context.Context, key, val string, opts ...OpOption) (*PutResponse, error) {
+	r, err := kv.Do(ctx, OpPut(key, val, opts...))
+	return r.put, toErr(ctx, err)
+}
+
+func (kv *kv) Get(ctx context.Context, key string, opts ...OpOption) (*GetResponse, error) {
+	r, err := kv.Do(ctx, OpGet(key, opts...))
+	return r.get, toErr(ctx, err)
+}
+
+func (kv *kv) Delete(ctx context.Context, key string, opts ...OpOption) (*DeleteResponse, error) {
+	r, err := kv.Do(ctx, OpDelete(key, opts...))
+	return r.del, toErr(ctx, err)
+}
+
+func (kv *kv) Compact(ctx context.Context, rev int64, opts ...CompactOption) (*CompactResponse, error) {
+	resp, err := kv.remote.Compact(ctx, OpCompact(rev, opts...).toRequest())
 	if err != nil {
-		return nil, err
+		return nil, toErr(ctx, err)
 	}
-	return (*PutResponse)(r.GetResponsePut()), nil
+	return (*CompactResponse)(resp), err
 }
 
-func (kv *kv) Range(key, end string, limit, rev int64, sort *SortOption) (*RangeResponse, error) {
-	r, err := kv.do(OpRange(key, end, limit, rev, sort))
-	if err != nil {
-		return nil, err
-	}
-	return (*RangeResponse)(r.GetResponseRange()), nil
-}
-
-func (kv *kv) Get(key string, rev int64) (*GetResponse, error) {
-	r, err := kv.do(OpGet(key, rev))
-	if err != nil {
-		return nil, err
-	}
-	return (*GetResponse)(r.GetResponseRange()), nil
-}
-
-func (kv *kv) DeleteRange(key, end string) (*DeleteRangeResponse, error) {
-	r, err := kv.do(OpDeleteRange(key, end))
-	if err != nil {
-		return nil, err
-	}
-	return (*DeleteRangeResponse)(r.GetResponseDeleteRange()), nil
-}
-
-func (kv *kv) Delete(key string) (*DeleteResponse, error) {
-	r, err := kv.do(OpDelete(key))
-	if err != nil {
-		return nil, err
-	}
-	return (*DeleteResponse)(r.GetResponseDeleteRange()), nil
-}
-
-func (kv *kv) Compact(rev int64) error {
-	for {
-		r := &pb.CompactionRequest{Revision: rev}
-		_, err := kv.getRemote().Compact(context.TODO(), r)
-		if err == nil {
-			return nil
-		}
-
-		if isRPCError(err) {
-			return err
-		}
-
-		if nerr := kv.switchRemote(err); nerr != nil {
-			return nerr
-		}
-	}
-}
-
-func (kv *kv) Txn() Txn {
+func (kv *kv) Txn(ctx context.Context) Txn {
 	return &txn{
-		kv: kv,
+		kv:  kv,
+		ctx: ctx,
 	}
 }
 
-func (kv *kv) do(op Op) (*pb.ResponseUnion, error) {
+func (kv *kv) Do(ctx context.Context, op Op) (OpResponse, error) {
 	for {
-		var err error
-		switch op.t {
-		// TODO: handle other ops
-		case tRange:
-			var resp *pb.RangeResponse
-			r := &pb.RangeRequest{Key: op.key, RangeEnd: op.end, Limit: op.limit, Revision: op.rev}
-			if op.sort != nil {
-				r.SortOrder = pb.RangeRequest_SortOrder(op.sort.Order)
-				r.SortTarget = pb.RangeRequest_SortTarget(op.sort.Target)
-			}
-
-			resp, err = kv.getRemote().Range(context.TODO(), r)
-			if err == nil {
-				respu := &pb.ResponseUnion_ResponseRange{ResponseRange: resp}
-				return &pb.ResponseUnion{Response: respu}, nil
-			}
-		case tPut:
-			var resp *pb.PutResponse
-			r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID)}
-			resp, err = kv.getRemote().Put(context.TODO(), r)
-			if err == nil {
-				respu := &pb.ResponseUnion_ResponsePut{ResponsePut: resp}
-				return &pb.ResponseUnion{Response: respu}, nil
-			}
-		case tDeleteRange:
-			var resp *pb.DeleteRangeResponse
-			r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end}
-			resp, err = kv.getRemote().DeleteRange(context.TODO(), r)
-			if err == nil {
-				respu := &pb.ResponseUnion_ResponseDeleteRange{ResponseDeleteRange: resp}
-				return &pb.ResponseUnion{Response: respu}, nil
-			}
-		default:
-			panic("Unknown op")
+		resp, err := kv.do(ctx, op)
+		if err == nil {
+			return resp, nil
 		}
 
-		if isRPCError(err) {
-			return nil, err
+		if isHaltErr(ctx, err) {
+			return resp, toErr(ctx, err)
 		}
-
-		if nerr := kv.switchRemote(err); nerr != nil {
-			return nil, nerr
+		// do not retry on modifications
+		if op.isWrite() {
+			return resp, toErr(ctx, err)
 		}
 	}
 }
 
-func (kv *kv) switchRemote(prevErr error) error {
-	newConn, err := kv.c.retryConnection(kv.conn, prevErr)
-	if err != nil {
-		return err
+func (kv *kv) do(ctx context.Context, op Op) (OpResponse, error) {
+	var err error
+	switch op.t {
+	case tRange:
+		var resp *pb.RangeResponse
+		resp, err = kv.remote.Range(ctx, op.toRangeRequest(), grpc.FailFast(false))
+		if err == nil {
+			return OpResponse{get: (*GetResponse)(resp)}, nil
+		}
+	case tPut:
+		var resp *pb.PutResponse
+		r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID), PrevKv: op.prevKV, IgnoreValue: op.ignoreValue, IgnoreLease: op.ignoreLease}
+		resp, err = kv.remote.Put(ctx, r)
+		if err == nil {
+			return OpResponse{put: (*PutResponse)(resp)}, nil
+		}
+	case tDeleteRange:
+		var resp *pb.DeleteRangeResponse
+		r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end, PrevKv: op.prevKV}
+		resp, err = kv.remote.DeleteRange(ctx, r)
+		if err == nil {
+			return OpResponse{del: (*DeleteResponse)(resp)}, nil
+		}
+	case tTxn:
+		var resp *pb.TxnResponse
+		resp, err = kv.remote.Txn(ctx, op.toTxnRequest())
+		if err == nil {
+			return OpResponse{txn: (*TxnResponse)(resp)}, nil
+		}
+	default:
+		panic("Unknown op")
 	}
-
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	kv.conn = newConn
-	kv.remote = pb.NewKVClient(kv.conn)
-	return nil
-}
-
-func (kv *kv) getRemote() pb.KVClient {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	return kv.remote
+	return OpResponse{}, err
 }

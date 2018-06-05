@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,16 +24,15 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/crypto/bcrypt"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	etcderr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/types"
+	"github.com/coreos/pkg/capnslog"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -47,7 +47,7 @@ const (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd/etcdserver", "auth")
+	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcdserver/auth")
 )
 
 var rootRole = Role{
@@ -101,8 +101,6 @@ type store struct {
 	server      doer
 	timeout     time.Duration
 	ensuredOnce bool
-
-	mu sync.Mutex // protect enabled
 
 	PasswordStore
 }
@@ -170,7 +168,7 @@ func (_ passwordStore) HashPassword(password string) (string, error) {
 }
 
 func (s *store) AllUsers() ([]string, error) {
-	resp, err := s.requestResource("/users/", false)
+	resp, err := s.requestResource("/users/", false, false)
 	if err != nil {
 		if e, ok := err.(*etcderr.Error); ok {
 			if e.ErrorCode == etcderr.EcodeKeyNotFound {
@@ -188,33 +186,13 @@ func (s *store) AllUsers() ([]string, error) {
 	return nodes, nil
 }
 
-func (s *store) GetUser(name string) (User, error) {
-	resp, err := s.requestResource("/users/"+name, false)
-	if err != nil {
-		if e, ok := err.(*etcderr.Error); ok {
-			if e.ErrorCode == etcderr.EcodeKeyNotFound {
-				return User{}, authErr(http.StatusNotFound, "User %s does not exist.", name)
-			}
-		}
-		return User{}, err
-	}
-	var u User
-	err = json.Unmarshal([]byte(*resp.Event.Node.Value), &u)
-	if err != nil {
-		return u, err
-	}
-	// Attach root role to root user.
-	if u.User == "root" {
-		u = attachRootRole(u)
-	}
-	return u, nil
-}
+func (s *store) GetUser(name string) (User, error) { return s.getUser(name, false) }
 
 // CreateOrUpdateUser should be only used for creating the new user or when you are not
 // sure if it is a create or update. (When only password is passed in, we are not sure
 // if it is a update or create)
 func (s *store) CreateOrUpdateUser(user User) (out User, created bool, err error) {
-	_, err = s.GetUser(user.User)
+	_, err = s.getUser(user.User, true)
 	if err == nil {
 		out, err = s.UpdateUser(user)
 		return out, false, err
@@ -274,7 +252,7 @@ func (s *store) DeleteUser(name string) error {
 }
 
 func (s *store) UpdateUser(user User) (User, error) {
-	old, err := s.GetUser(user.User)
+	old, err := s.getUser(user.User, true)
 	if err != nil {
 		if e, ok := err.(*etcderr.Error); ok {
 			if e.ErrorCode == etcderr.EcodeKeyNotFound {
@@ -284,13 +262,7 @@ func (s *store) UpdateUser(user User) (User, error) {
 		return old, err
 	}
 
-	hash, err := s.HashPassword(user.Password)
-	if err != nil {
-		return old, err
-	}
-	user.Password = hash
-
-	newUser, err := old.merge(user)
+	newUser, err := old.merge(user, s.PasswordStore)
 	if err != nil {
 		return old, err
 	}
@@ -306,7 +278,7 @@ func (s *store) UpdateUser(user User) (User, error) {
 
 func (s *store) AllRoles() ([]string, error) {
 	nodes := []string{RootRoleName}
-	resp, err := s.requestResource("/roles/", false)
+	resp, err := s.requestResource("/roles/", false, false)
 	if err != nil {
 		if e, ok := err.(*etcderr.Error); ok {
 			if e.ErrorCode == etcderr.EcodeKeyNotFound {
@@ -323,27 +295,7 @@ func (s *store) AllRoles() ([]string, error) {
 	return nodes, nil
 }
 
-func (s *store) GetRole(name string) (Role, error) {
-	if name == RootRoleName {
-		return rootRole, nil
-	}
-	resp, err := s.requestResource("/roles/"+name, false)
-	if err != nil {
-		if e, ok := err.(*etcderr.Error); ok {
-			if e.ErrorCode == etcderr.EcodeKeyNotFound {
-				return Role{}, authErr(http.StatusNotFound, "Role %s does not exist.", name)
-			}
-		}
-		return Role{}, err
-	}
-	var r Role
-	err = json.Unmarshal([]byte(*resp.Event.Node.Value), &r)
-	if err != nil {
-		return r, err
-	}
-
-	return r, nil
-}
+func (s *store) GetRole(name string) (Role, error) { return s.getRole(name, false) }
 
 func (s *store) CreateRole(role Role) error {
 	if role.Role == RootRoleName {
@@ -385,7 +337,7 @@ func (s *store) UpdateRole(role Role) (Role, error) {
 	if role.Role == RootRoleName {
 		return Role{}, authErr(http.StatusForbidden, "Cannot modify role %s: is root role.", role.Role)
 	}
-	old, err := s.GetRole(role.Role)
+	old, err := s.getRole(role.Role, true)
 	if err != nil {
 		if e, ok := err.(*etcderr.Error); ok {
 			if e.ErrorCode == etcderr.EcodeKeyNotFound {
@@ -409,9 +361,6 @@ func (s *store) UpdateRole(role Role) (Role, error) {
 }
 
 func (s *store) AuthEnabled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	return s.detectAuth()
 }
 
@@ -420,13 +369,10 @@ func (s *store) EnableAuth() error {
 		return authErr(http.StatusConflict, "already enabled")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := s.GetUser("root"); err != nil {
+	if _, err := s.getUser("root", true); err != nil {
 		return authErr(http.StatusConflict, "No root user available, please create one")
 	}
-	if _, err := s.GetRole(GuestRoleName); err != nil {
+	if _, err := s.getRole(GuestRoleName, true); err != nil {
 		plog.Printf("no guest role access found, creating default")
 		if err := s.CreateRole(guestRole); err != nil {
 			plog.Errorf("error creating guest role. aborting auth enable.")
@@ -448,9 +394,6 @@ func (s *store) DisableAuth() error {
 		return authErr(http.StatusConflict, "already disabled")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	err := s.disableAuth()
 	if err == nil {
 		plog.Noticef("auth: disabled auth")
@@ -464,29 +407,33 @@ func (s *store) DisableAuth() error {
 // is called and returns a new User with these modifications applied. Think of
 // all Users as immutable sets of data. Merge allows you to perform the set
 // operations (desired grants and revokes) atomically
-func (u User) merge(n User) (User, error) {
+func (ou User) merge(nu User, s PasswordStore) (User, error) {
 	var out User
-	if u.User != n.User {
-		return out, authErr(http.StatusConflict, "Merging user data with conflicting usernames: %s %s", u.User, n.User)
+	if ou.User != nu.User {
+		return out, authErr(http.StatusConflict, "Merging user data with conflicting usernames: %s %s", ou.User, nu.User)
 	}
-	out.User = u.User
-	if n.Password != "" {
-		out.Password = n.Password
+	out.User = ou.User
+	if nu.Password != "" {
+		hash, err := s.HashPassword(nu.Password)
+		if err != nil {
+			return ou, err
+		}
+		out.Password = hash
 	} else {
-		out.Password = u.Password
+		out.Password = ou.Password
 	}
-	currentRoles := types.NewUnsafeSet(u.Roles...)
-	for _, g := range n.Grant {
+	currentRoles := types.NewUnsafeSet(ou.Roles...)
+	for _, g := range nu.Grant {
 		if currentRoles.Contains(g) {
-			plog.Noticef("granting duplicate role %s for user %s", g, n.User)
-			return User{}, authErr(http.StatusConflict, fmt.Sprintf("Granting duplicate role %s for user %s", g, n.User))
+			plog.Noticef("granting duplicate role %s for user %s", g, nu.User)
+			return User{}, authErr(http.StatusConflict, fmt.Sprintf("Granting duplicate role %s for user %s", g, nu.User))
 		}
 		currentRoles.Add(g)
 	}
-	for _, r := range n.Revoke {
+	for _, r := range nu.Revoke {
 		if !currentRoles.Contains(r) {
-			plog.Noticef("revoking ungranted role %s for user %s", r, n.User)
-			return User{}, authErr(http.StatusConflict, fmt.Sprintf("Revoking ungranted role %s for user %s", r, n.User))
+			plog.Noticef("revoking ungranted role %s for user %s", r, nu.User)
+			return User{}, authErr(http.StatusConflict, fmt.Sprintf("Revoking ungranted role %s for user %s", r, nu.User))
 		}
 		currentRoles.Remove(r)
 	}
@@ -509,10 +456,7 @@ func (r Role) merge(n Role) (Role, error) {
 		return out, err
 	}
 	out.Permissions, err = out.Permissions.Revoke(n.Revoke)
-	if err != nil {
-		return out, err
-	}
-	return out, nil
+	return out, err
 }
 
 func (r Role) HasKeyAccess(key string, write bool) bool {
@@ -661,4 +605,44 @@ func attachRootRole(u User) User {
 		u.Roles = append(u.Roles, RootRoleName)
 	}
 	return u
+}
+
+func (s *store) getUser(name string, quorum bool) (User, error) {
+	resp, err := s.requestResource("/users/"+name, false, quorum)
+	if err != nil {
+		if e, ok := err.(*etcderr.Error); ok {
+			if e.ErrorCode == etcderr.EcodeKeyNotFound {
+				return User{}, authErr(http.StatusNotFound, "User %s does not exist.", name)
+			}
+		}
+		return User{}, err
+	}
+	var u User
+	err = json.Unmarshal([]byte(*resp.Event.Node.Value), &u)
+	if err != nil {
+		return u, err
+	}
+	// Attach root role to root user.
+	if u.User == "root" {
+		u = attachRootRole(u)
+	}
+	return u, nil
+}
+
+func (s *store) getRole(name string, quorum bool) (Role, error) {
+	if name == RootRoleName {
+		return rootRole, nil
+	}
+	resp, err := s.requestResource("/roles/"+name, false, quorum)
+	if err != nil {
+		if e, ok := err.(*etcderr.Error); ok {
+			if e.ErrorCode == etcderr.EcodeKeyNotFound {
+				return Role{}, authErr(http.StatusNotFound, "Role %s does not exist.", name)
+			}
+		}
+		return Role{}, err
+	}
+	var r Role
+	err = json.Unmarshal([]byte(*resp.Event.Node.Value), &r)
+	return r, err
 }

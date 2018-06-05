@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@
 package discovery
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -29,11 +29,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/jonboulle/clockwork"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/client"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
+
+	"github.com/coreos/pkg/capnslog"
+	"github.com/jonboulle/clockwork"
 )
 
 var (
@@ -52,7 +53,8 @@ var (
 
 var (
 	// Number of retries discovery will attempt before giving up and erroring out.
-	nRetries = uint(math.MaxUint32)
+	nRetries             = uint(math.MaxUint32)
+	maxExpoentialRetries = uint(8)
 )
 
 // JoinCluster will connect to the discovery service at the given url, and
@@ -124,16 +126,15 @@ func newDiscovery(durl, dproxyurl string, id types.ID) (*discovery, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO: add ResponseHeaderTimeout back when watch on discovery service writes header early
+	tr, err := transport.NewTransport(transport.TLSInfo{}, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	tr.Proxy = pf
 	cfg := client.Config{
-		Transport: &http.Transport{
-			Proxy: pf,
-			Dial: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 10 * time.Second,
-			// TODO: add ResponseHeaderTimeout back when watch on discovery service writes header early
-		},
+		Transport: tr,
 		Endpoints: []string{u.String()},
 	}
 	c, err := client.New(cfg)
@@ -244,7 +245,7 @@ func (d *discovery) checkCluster() ([]*client.Node, int, uint64, error) {
 		}
 		return nil, 0, 0, err
 	}
-	nodes := make([]*client.Node, 0)
+	var nodes []*client.Node
 	// append non-config keys to nodes
 	for _, n := range resp.Node.Nodes {
 		if !(path.Base(n.Key) == path.Base(configKey)) {
@@ -269,9 +270,14 @@ func (d *discovery) checkCluster() ([]*client.Node, int, uint64, error) {
 
 func (d *discovery) logAndBackoffForRetry(step string) {
 	d.retries++
-	retryTime := time.Second * (0x1 << d.retries)
-	plog.Infof("%s: error connecting to %s, retrying in %s", step, d.url, retryTime)
-	d.clock.Sleep(retryTime)
+	// logAndBackoffForRetry stops exponential backoff when the retries are more than maxExpoentialRetries and is set to a constant backoff afterward.
+	retries := d.retries
+	if retries > maxExpoentialRetries {
+		retries = maxExpoentialRetries
+	}
+	retryTimeInSecond := time.Duration(0x1<<retries) * time.Second
+	plog.Infof("%s: error connecting to %s, retrying in %s", step, d.url, retryTimeInSecond)
+	d.clock.Sleep(retryTimeInSecond)
 }
 
 func (d *discovery) checkClusterRetry() ([]*client.Node, int, uint64, error) {

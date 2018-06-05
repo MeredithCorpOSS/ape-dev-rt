@@ -29,6 +29,30 @@ type StorageClientSuite struct{}
 
 var _ = chk.Suite(&StorageClientSuite{})
 
+func setHeaders(haystack http.Header, predicate func(string) bool, value string) {
+	for key := range haystack {
+		if predicate(key) {
+			haystack[key] = []string{value}
+		}
+	}
+}
+
+func deleteHeaders(haystack http.Header, predicate func(string) bool) {
+	for key := range haystack {
+		if predicate(key) {
+			delete(haystack, key)
+		}
+	}
+}
+func getHeaders(haystack http.Header, predicate func(string) bool) string {
+	for key, value := range haystack {
+		if predicate(key) && len(value) > 0 {
+			return value[0]
+		}
+	}
+	return ""
+}
+
 // getBasicClient returns a test client from storage credentials in the env
 func getBasicClient(c *chk.C) *Client {
 	name := os.Getenv("ACCOUNT_NAME")
@@ -114,36 +138,51 @@ func compareHeaders(r *http.Request, i cassette.Request) bool {
 	requestHeaders := r.Header
 	cassetteHeaders := i.Headers
 	// Some headers shall not be compared...
-	requestHeaders.Del("User-Agent")
-	requestHeaders.Del("Authorization")
-	requestHeaders.Del("X-Ms-Date")
 
-	cassetteHeaders.Del("User-Agent")
-	cassetteHeaders.Del("Authorization")
-	cassetteHeaders.Del("X-Ms-Date")
+	getHeaderMatchPredicate := func(needle string) func(string) bool {
+		return func(straw string) bool {
+			return strings.EqualFold(needle, straw)
+		}
+	}
 
-	srcURLstr := requestHeaders.Get("X-Ms-Copy-Source")
+	isUserAgent := getHeaderMatchPredicate("User-Agent")
+	isAuthorization := getHeaderMatchPredicate("Authorization")
+	isDate := getHeaderMatchPredicate("x-ms-date")
+	deleteHeaders(requestHeaders, isUserAgent)
+	deleteHeaders(requestHeaders, isAuthorization)
+	deleteHeaders(requestHeaders, isDate)
+
+	deleteHeaders(cassetteHeaders, isUserAgent)
+	deleteHeaders(cassetteHeaders, isAuthorization)
+	deleteHeaders(cassetteHeaders, isDate)
+
+	isCopySource := getHeaderMatchPredicate("X-Ms-Copy-Source")
+	srcURLstr := getHeaders(requestHeaders, isCopySource)
 	if srcURLstr != "" {
 		srcURL, err := url.Parse(srcURLstr)
 		if err != nil {
 			return false
 		}
 		modifiedURL := modifyURL(srcURL)
-		requestHeaders.Set("X-Ms-Copy-Source", modifiedURL.String())
+		setHeaders(requestHeaders, isCopySource, modifiedURL.String())
 	}
 
 	// Do not compare the complete Content-Type header in table batch requests
 	if isBatchOp(r.URL.String()) {
 		// They all start like this, but then they have a UUID...
 		ctPrefixBatch := "multipart/mixed; boundary=batch_"
-		contentTypeRequest := requestHeaders.Get("Content-Type")
-		contentTypeCassette := cassetteHeaders.Get("Content-Type")
+
+		isContentType := getHeaderMatchPredicate("Content-Type")
+
+		contentTypeRequest := getHeaders(requestHeaders, isContentType)
+		contentTypeCassette := getHeaders(cassetteHeaders, isContentType)
 		if !(strings.HasPrefix(contentTypeRequest, ctPrefixBatch) &&
 			strings.HasPrefix(contentTypeCassette, ctPrefixBatch)) {
 			return false
 		}
-		requestHeaders.Del("Content-Type")
-		cassetteHeaders.Del("Content-Type")
+
+		deleteHeaders(requestHeaders, isContentType)
+		deleteHeaders(cassetteHeaders, isContentType)
 	}
 
 	return reflect.DeepEqual(requestHeaders, cassetteHeaders)
@@ -325,21 +364,38 @@ func (s *StorageClientSuite) Test_getStandardHeaders(c *chk.C) {
 }
 
 func (s *StorageClientSuite) TestReturnsStorageServiceError(c *chk.C) {
-	// attempt to delete a nonexisting container
-	cli := getBlobClient(c)
-	rec := cli.client.appendRecorder(c)
+	// attempt to delete nonexisting resources
+	cli := getBasicClient(c)
+	rec := cli.appendRecorder(c)
 	defer rec.Stop()
 
-	cnt := cli.GetContainerReference(containerName(c))
-	_, err := cnt.delete(nil)
+	// XML response
+	blobCli := cli.GetBlobService()
+	cnt := blobCli.GetContainerReference(containerName(c))
+	err := cnt.Delete(nil)
 	c.Assert(err, chk.NotNil)
 
 	v, ok := err.(AzureStorageServiceError)
 	c.Check(ok, chk.Equals, true)
 	c.Assert(v.StatusCode, chk.Equals, 404)
 	c.Assert(v.Code, chk.Equals, "ContainerNotFound")
-	c.Assert(v.Code, chk.Not(chk.Equals), "")
 	c.Assert(v.RequestID, chk.Not(chk.Equals), "")
+	c.Assert(v.Date, chk.Not(chk.Equals), "")
+	c.Assert(v.APIVersion, chk.Not(chk.Equals), "")
+
+	// JSON response
+	tableCli := cli.GetTableService()
+	table := tableCli.GetTableReference(tableName(c))
+	err = table.Delete(30, nil)
+	c.Assert(err, chk.NotNil)
+
+	v, ok = err.(AzureStorageServiceError)
+	c.Check(ok, chk.Equals, true)
+	c.Assert(v.StatusCode, chk.Equals, 404)
+	c.Assert(v.Code, chk.Equals, "ResourceNotFound")
+	c.Assert(v.RequestID, chk.Not(chk.Equals), "")
+	c.Assert(v.Date, chk.Not(chk.Equals), "")
+	c.Assert(v.APIVersion, chk.Not(chk.Equals), "")
 }
 
 func (s *StorageClientSuite) TestReturnsStorageServiceError_withoutResponseBody(c *chk.C) {

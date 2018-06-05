@@ -7,15 +7,15 @@ import (
 
 	"github.com/TimeIncOSS/ape-dev-rt/commons"
 	"github.com/TimeIncOSS/ape-dev-rt/git"
-	"github.com/hashicorp/terraform/terraform"
+	tf_version "github.com/hashicorp/terraform/version"
 )
 
 // The following will be filled in by the compiler
 var GitCommit string
 var TerraformCommit string
 
-const TerraformVersion = terraform.Version
-const Version = "0.9.3"
+const TerraformVersion = tf_version.Version
+const Version = "0.10.0-alpha"
 
 func GetVersion(c *commons.Context) error {
 	fmt.Printf("rt %s (%s)\n", Version, GitCommit)
