@@ -1,8 +1,8 @@
-# Release Tool - `ape-dev-rt` [![Circle CI](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master.svg?style=svg&circle-token=574cbecafc9b1fdd09ecb49fdf007ca5b65721d3)](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master)
+# Release Tool - `ape-dev-rt` [![Circle CI](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master.svg?style=svg&circle-token=00d956b235feb307d57ec9aafe278637e21aaf86)](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master)
 
 The Release Tool deploys apps (defined in [ape-dev-rt-apps](https://github.com/TimeIncOSS/ape-dev-rt-apps)) into AWS environments (prerequisites defined in [ape-dev-terraform](https://github.com/TimeIncOSS/ape-dev-terraform)).
 
-Terraform version RT uses is: [v0.9.11](https://github.com/hashicorp/terraform/tree/v0.9.11/website/source/docs/)
+Terraform version RT uses is: [v0.10.8](https://github.com/hashicorp/terraform/tree/v0.10.8/website/docs/)
 
 - [Installation](docs/install.md)
 - [About](docs/about.md)
