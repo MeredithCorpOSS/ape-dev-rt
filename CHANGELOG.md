@@ -1,3 +1,8 @@
+## 0.10.0 (June 6, 2018)
+IMPROVEMENTS:
+ - Upgraded to Terraform 0.10.8
+ - Added mkSlice function as helper to template
+
 ## 0.9.3 (December 12, 2017)
 BUG FIX:
  - Cleanup leftover files (backend-config.tf.json and terraform.tfstate.backup)

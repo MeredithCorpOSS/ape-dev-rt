@@ -89,7 +89,7 @@ func realMain(output *os.File) int {
 	}
 	mainError := wrappedMain()
 	if mainError != nil {
-		fmt.Fprintf(output, errorStyle("[ERROR] " + mainError.Error()))
+		fmt.Fprintf(output, errorStyle("[ERROR] "+mainError.Error()))
 		return 1
 	}
 	return 0
