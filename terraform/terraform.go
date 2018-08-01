@@ -402,22 +402,25 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 		Color: true,
 	}
 
+	new_meta := Meta {
+		Ui: streamedUi,
+		Color: true,
+	}
+
+
 	commands := map[string]m_cli.Command{
-		"apply": &command.ApplyCommand{
-			Meta: meta,
-		},
+		"apply": &ApplyCommand{TfCommand{
+			Meta: new_meta}},
 		"get": &command.GetCommand{
 			Meta: meta,
 		},
 		"output": &command.OutputCommand{
 			Meta: meta,
 		},
-		"plan": &command.PlanCommand{
-			Meta: meta,
-		},
-		"init": &command.InitCommand{
-			Meta: meta,
-		},
+		"plan": &PlanCommand{TfCommand{
+			Meta: new_meta}},
+		"init": &InitCommand{TfCommand{
+			Meta: new_meta}},
 		"show": &command.ShowCommand{
 			Meta: meta,
 		},
