@@ -12,20 +12,19 @@ import (
 // This output is shown if a panic happens.
 const panicOutput = `
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!! TERRAFORM CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!! CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-Terraform crashed! This is always indicative of a bug within Terraform.
+This is indicative of a bug within the application.
 A crash log has been placed at "crash.log" relative to your current
 working directory. It would be immensely helpful if you could please
-report the crash with Terraform[1] so that we can fix this.
+report the crash with the tool[1] so that we can fix this.
 
-When reporting bugs, please include your terraform version. That
-information is available on the first line of crash.log. You can also
-get it by running 'terraform --version' on the command line.
+When reporting bugs, please include your app version. That
+information is available on the first line of crash.log.
 
-[1]: https://github.com/hashicorp/terraform/issues
+[1]: https://github.com/TimeIncOSS/ape-dev-rt/issues
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!! TERRAFORM CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!! CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 `
 
 // panicHandler is what is called by panicwrap when a panic is encountered
