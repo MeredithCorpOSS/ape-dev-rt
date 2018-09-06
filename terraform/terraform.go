@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/TimeIncOSS/ape-dev-rt/ui"
-	"github.com/hashicorp/terraform/command"
 	m_cli "github.com/mitchellh/cli"
 	"io"
 	"io/ioutil"
@@ -397,46 +396,32 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 	streamedUi.OutputWriter = stdoutW
 	streamedUi.ErrorWriter = stderrW
 
-	meta := command.Meta{
-		Ui:    streamedUi,
-		Color: true,
-	}
-
-	new_meta := Meta {
+	meta := Meta {
 		Ui: streamedUi,
 		Color: true,
 	}
 
-
 	commands := map[string]m_cli.Command{
-		"apply": &ApplyCommand{TfCommand{
-			Meta: new_meta}},
-		"get": &command.GetCommand{
-			Meta: meta,
-		},
-		"output": &command.OutputCommand{
-			Meta: meta,
-		},
-		"plan": &PlanCommand{TfCommand{
-			Meta: new_meta}},
-		"init": &InitCommand{TfCommand{
-			Meta: new_meta}},
-		"show": &command.ShowCommand{
-			Meta: meta,
-		},
-		"destroy": &command.ApplyCommand{
-			Meta:    meta,
-			Destroy: true,
-		},
-		"taint": &command.TaintCommand{
-			Meta: meta,
-		},
-		"untaint": &command.UntaintCommand{
-			Meta: meta,
-		},
-		"validate": &command.ValidateCommand{
-			Meta: meta,
-		},
+		"apply": &ApplyCommand{
+			TfCommand{Meta: meta}},
+		"get": &GetCommand{
+			TfCommand{Meta: meta}},
+		"output": &OutputCommand{
+			TfCommand{Meta: meta}},
+		"plan": &PlanCommand{
+			TfCommand{Meta: meta}},
+		"init": &InitCommand{
+			TfCommand{Meta: meta}},
+		"show": &ShowCommand{
+			TfCommand{Meta: meta}},
+		"destroy": &DestroyCommand{
+			TfCommand{Meta: meta}},
+		"taint": &TaintCommand{
+			TfCommand{Meta: meta}},
+		"untaint": &UntaintCommand{
+			TfCommand{Meta: meta}},
+		"validate": &ValidateCommand{
+			TfCommand{Meta: meta}},
 	}
 
 	cmd, ok := commands[cmdName]

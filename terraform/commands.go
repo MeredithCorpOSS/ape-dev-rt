@@ -1,7 +1,6 @@
 package terraform
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,14 +26,14 @@ func (c *TfCommand) Execute(args []string) int {
 
 	cmd := exec.Command(binary, args...)
 	stdoutPipe, _ := cmd.StdoutPipe()
-	stdout, doneChan := c.Meta.Ui.AttachOutputReadCloser(stdoutPipe)
-	//cmd.Stdout = c.Meta.Ui.OutputWriter
+	_, doneChan := c.Meta.Ui.AttachOutputReadCloser(stdoutPipe)
+	cmd.Stdout = c.Meta.Ui.OutputWriter
 
 	stderrPipe, _ := cmd.StderrPipe()
 	c.Meta.Ui.AttachErrorReadCloser(stderrPipe)
-	//cmd.Stderr = c.Meta.Ui.ErrorWriter
-	var stderr *bytes.Buffer
-	stderr = c.Meta.Ui.ErrorBuffer
+	cmd.Stderr = c.Meta.Ui.ErrorWriter
+	//var stderr *bytes.Buffer
+	//stderr = c.Meta.Ui.ErrorBuffer
 
 	c.Meta.Ui.FlushBuffers()
 	cmd.Start()
@@ -42,12 +41,12 @@ func (c *TfCommand) Execute(args []string) int {
 	err = cmd.Wait()
 	if err != nil {
 		//fmt.Fprintf(os.Stderr, "Terraform error with %q, %s\n\n%s\n", args, err.Error(), "stderr")
-		fmt.Fprintf(os.Stderr, "Terraform error with %q, %s\n\n%s\n", args, err.Error(), stderr.String())
+		//fmt.Fprintf(os.Stderr, "stderr Terraform error with %q, %s\n\n", args, err.Error())
+		//fmt.Fprintf(os.Stdout, "stdout Terraform error with %q, %s\n\n", args, err.Error())
 		return 1
 	}
 	<-doneChan
-	fmt.Fprintf(os.Stdout, stdout.String())
-	//fmt.Fprintf(os.Stdout, "hi")
+	//fmt.Fprintf(os.Stdout, stdout.String())
 	return 0
 }
 
@@ -56,9 +55,7 @@ type ApplyCommand struct {
 }
 
 func (c *ApplyCommand) Run(args []string) int {
-	fmt.Fprintf(os.Stderr, "trying to run ApplyCommand: %q\n", args)
 	args = append([]string{"apply"}, args...)
-
 	return c.Execute(args)
 }
 
@@ -67,9 +64,7 @@ type PlanCommand struct {
 }
 
 func (c *PlanCommand) Run(args []string) int {
-	fmt.Fprintf(os.Stderr, "trying to run PlanCommand: %q\n", args)
 	args = append([]string{"plan"}, args...)
-
 	return c.Execute(args)
 }
 
@@ -78,9 +73,70 @@ type InitCommand struct {
 }
 
 func (c *InitCommand) Run(args []string) int {
-	fmt.Fprintf(os.Stderr, "trying to run InitCommand: %q\n", args)
 	args = append([]string{"init"}, args...)
+	return c.Execute(args)
+}
 
+type GetCommand struct {
+	TfCommand
+}
+
+func (c *GetCommand) Run(args []string) int {
+	args = append([]string{"get"}, args...)
+	return c.Execute(args)
+}
+
+type OutputCommand struct {
+	TfCommand
+}
+
+func (c *OutputCommand) Run(args []string) int {
+	args = append([]string{"output"}, args...)
+	return c.Execute(args)
+}
+
+type ShowCommand struct {
+	TfCommand
+}
+
+func (c *ShowCommand) Run(args []string) int {
+	args = append([]string{"show"}, args...)
+	return c.Execute(args)
+}
+
+type DestroyCommand struct {
+	TfCommand
+}
+
+func (c *DestroyCommand) Run(args []string) int {
+	args = append([]string{"destroy"}, args...)
+	return c.Execute(args)
+}
+
+type TaintCommand struct {
+	TfCommand
+}
+
+func (c *TaintCommand) Run(args []string) int {
+	args = append([]string{"taint"}, args...)
+	return c.Execute(args)
+}
+
+type UntaintCommand struct {
+	TfCommand
+}
+
+func (c *UntaintCommand) Run(args []string) int {
+	args = append([]string{"untaint"}, args...)
+	return c.Execute(args)
+}
+
+type ValidateCommand struct {
+	TfCommand
+}
+
+func (c *ValidateCommand) Run(args []string) int {
+	args = append([]string{"validate"}, args...)
 	return c.Execute(args)
 }
 
