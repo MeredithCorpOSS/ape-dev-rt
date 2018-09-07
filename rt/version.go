@@ -26,6 +26,6 @@ func GetVersion(c *commons.Context) error {
 		fmt.Fprintf(os.Stderr, "git - Unable to get version (%s)\n", err.Error())
 	}
 
-	fmt.Printf("Terraform v%s\n", TerraformVersion)
+	fmt.Printf("requires Terraform v%s\n", TerraformVersion)
 	return nil
 }
