@@ -296,7 +296,7 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 
 	var output string
 
-	out, err := Cmd("init", nil, rootPath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("init", nil, rootPath, os.Stdout, os.Stderr)
 	if err != nil {
 		return "", err
 	}
