@@ -4,12 +4,6 @@ ignore:
 - github.com/Unknwon/macaron/inject
 - github.com/hashicorp/terraform-provider-opc/opc
 import:
-- package: github.com/hashicorp/terraform
-  version: v0.10.8
-  subpackages:
-  - builtin/provisioners/local-exec
-  - command
-  - terraform
 - package: github.com/RevH/ipinfo
   version: 09a74906140aa8a7eb40bdb3f750d77318912ed7
 - package: github.com/aws/aws-sdk-go
@@ -46,8 +40,6 @@ import:
   - service/sts
 - package: github.com/briandowns/spinner
   version: a00ac22c746220ee70a0891a0ec4aa6c56c6bb6a
-- package: github.com/fatih/color
-  version: dea9d3a26a087187530244679c1cfb3a42937794
 - package: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - package: github.com/ninibe/bigduration
@@ -56,4 +48,3 @@ import:
   version: 22c06c80ed312dcb6e1cf394f9634aa2c4676e22
 - package: github.com/urfave/cli
   version: v1.18.0
-- package: github.com/mitchellh/prefixedio
