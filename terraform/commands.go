@@ -2,15 +2,15 @@ package terraform
 
 import (
 	"fmt"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"os"
 	"os/exec"
 	"strings"
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
 )
 
 type Meta struct {
-	Color            bool             // True if output should be colored
-	Ui               *ui.StreamedUi           // Ui for output
+	Color bool           // True if output should be colored
+	Ui    *ui.StreamedUi // Ui for output
 }
 
 type TfCommand struct {

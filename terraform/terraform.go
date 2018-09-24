@@ -396,8 +396,8 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 	streamedUi.OutputWriter = stdoutW
 	streamedUi.ErrorWriter = stderrW
 
-	meta := Meta {
-		Ui: streamedUi,
+	meta := Meta{
+		Ui:    streamedUi,
 		Color: true,
 	}
 
