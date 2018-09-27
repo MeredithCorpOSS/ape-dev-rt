@@ -32,21 +32,15 @@ func (c *TfCommand) Execute(args []string) int {
 	stderrPipe, _ := cmd.StderrPipe()
 	c.Meta.Ui.AttachErrorReadCloser(stderrPipe)
 	cmd.Stderr = c.Meta.Ui.ErrorWriter
-	//var stderr *bytes.Buffer
-	//stderr = c.Meta.Ui.ErrorBuffer
 
 	c.Meta.Ui.FlushBuffers()
 	cmd.Start()
 
 	err = cmd.Wait()
 	if err != nil {
-		//fmt.Fprintf(os.Stderr, "Terraform error with %q, %s\n\n%s\n", args, err.Error(), "stderr")
-		//fmt.Fprintf(os.Stderr, "stderr Terraform error with %q, %s\n\n", args, err.Error())
-		//fmt.Fprintf(os.Stdout, "stdout Terraform error with %q, %s\n\n", args, err.Error())
 		return 1
 	}
 	<-doneChan
-	//fmt.Fprintf(os.Stdout, stdout.String())
 	return 0
 }
 
