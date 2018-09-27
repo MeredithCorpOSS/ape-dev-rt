@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/TimeIncOSS/ape-dev-rt/ui"
-	"github.com/hashicorp/terraform/command"
 	m_cli "github.com/mitchellh/cli"
 	"io"
 	"io/ioutil"
@@ -297,7 +296,7 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 
 	var output string
 
-	out, err := Cmd("init", nil, rootPath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("init", nil, rootPath, os.Stdout, os.Stderr)
 	if err != nil {
 		return "", err
 	}
@@ -397,43 +396,32 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 	streamedUi.OutputWriter = stdoutW
 	streamedUi.ErrorWriter = stderrW
 
-	meta := command.Meta{
+	meta := Meta{
 		Ui:    streamedUi,
 		Color: true,
 	}
 
 	commands := map[string]m_cli.Command{
-		"apply": &command.ApplyCommand{
-			Meta: meta,
-		},
-		"get": &command.GetCommand{
-			Meta: meta,
-		},
-		"output": &command.OutputCommand{
-			Meta: meta,
-		},
-		"plan": &command.PlanCommand{
-			Meta: meta,
-		},
-		"init": &command.InitCommand{
-			Meta: meta,
-		},
-		"show": &command.ShowCommand{
-			Meta: meta,
-		},
-		"destroy": &command.ApplyCommand{
-			Meta:    meta,
-			Destroy: true,
-		},
-		"taint": &command.TaintCommand{
-			Meta: meta,
-		},
-		"untaint": &command.UntaintCommand{
-			Meta: meta,
-		},
-		"validate": &command.ValidateCommand{
-			Meta: meta,
-		},
+		"apply": &ApplyCommand{
+			TfCommand{Meta: meta}},
+		"get": &GetCommand{
+			TfCommand{Meta: meta}},
+		"output": &OutputCommand{
+			TfCommand{Meta: meta}},
+		"plan": &PlanCommand{
+			TfCommand{Meta: meta}},
+		"init": &InitCommand{
+			TfCommand{Meta: meta}},
+		"show": &ShowCommand{
+			TfCommand{Meta: meta}},
+		"destroy": &DestroyCommand{
+			TfCommand{Meta: meta}},
+		"taint": &TaintCommand{
+			TfCommand{Meta: meta}},
+		"untaint": &UntaintCommand{
+			TfCommand{Meta: meta}},
+		"validate": &ValidateCommand{
+			TfCommand{Meta: meta}},
 	}
 
 	cmd, ok := commands[cmdName]

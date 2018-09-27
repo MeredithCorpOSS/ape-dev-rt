@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/TimeIncOSS/ape-dev-rt/aws"
@@ -67,6 +68,19 @@ func TaintUntaintInfraResource(c *commons.Context) error {
 
 	rootDir := cfgPath
 
+	templateVars := ApplicationTemplateVars{
+		AwsAccountId: namespace,
+		AppName:      c.String("app"),
+		Environment:  c.String("env"),
+	}
+
+	filesToCleanup := make([]string, 0)
+
+	filesToCleanup, err = commons.ProcessTemplates(rootDir, "tpl", templateVars)
+	if err != nil {
+		return err
+	}
+
 	remoteState, err := terraform.GetRemoteStateForApp(&terraform.RemoteState{
 		Backend: rs.Backend,
 		Config:  rs.Config,
@@ -75,7 +89,20 @@ func TaintUntaintInfraResource(c *commons.Context) error {
 		return err
 	}
 
-	filesToCleanup := make([]string, 0)
+	vars := c.StringSlice("var")
+	tfVariables := make(map[string]string, 0)
+	for _, v := range vars {
+		parts := strings.Split(v, "=")
+		key, value := parts[0], parts[1]
+		tfVariables[key] = value
+	}
+
+	tfVariables["app_name"] = c.String("app")
+	tfVariables["environment"] = c.String("env")
+	filesToCleanup = append(filesToCleanup, path.Join(rootDir, ".terraform"))
+	filesToCleanup = append(filesToCleanup, path.Join(rootDir, "terraform.tfstate.backup"))
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
+
 	_, err = terraform.ReenableRemoteState(remoteState, rootDir)
 	if err != nil {
 		return err
