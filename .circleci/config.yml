@@ -15,11 +15,13 @@ jobs:
       - run: unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
       - run:
           name: install deps
-          command: | cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
+          command: |
+             cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
              make installdeps
       - run:
           name: run test
-          command: | cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
+          command: |
+             cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
              make test
 workflows:
   version: 2
