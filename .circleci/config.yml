@@ -1,7 +1,6 @@
 version: 2
 jobs:
   test:
-    working_directory: ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
     machine: true
     steps:
       - run: echo 'export PATH="$GOPATH/bin:$PATH"' >> $BASH_ENV
@@ -9,12 +8,19 @@ jobs:
       - run: sudo rm -rf /usr/local/go
       - run: wget https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz
       - run: sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
+      - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
       - run: go get github.com/TimeIncOSS/ape-dev-rt
       - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
       - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip
       - run: unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
-      - run: make installdeps
-      - run: make test
+      - run:
+          name: install deps
+          command: | cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
+             make installdeps
+      - run:
+          name: run test
+          command: | cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
+             make test
 workflows:
   version: 2
   deployment-workflow:
