@@ -15,7 +15,7 @@ dependencies:
     - sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
     - mkdir -p ~/.go_project/src/github.com/TimeIncOSS
     - ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
-    - wget https://releases.hashicorp.com/terraform/0.10.8/
+    - wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip 
     - sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin 
     - echo $PATH
   override:
