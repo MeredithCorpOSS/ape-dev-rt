@@ -550,3 +550,14 @@ func TestGenerateBackendConfig(t *testing.T) {
 		fmt.Println("failed to remove test backend config file")
 	}
 }
+
+func TestCheckTerraform(t *testing.T) {
+	expected := "terraform"
+	tfBinaryPath, err := CheckTerraform()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expected != tfBinaryPath[len(tfBinaryPath)-len(expected):] {  // check binary path for expected at the end
+		t.Fatalf("Did not get terraform binary")
+	}
+}

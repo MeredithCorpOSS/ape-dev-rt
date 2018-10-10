@@ -1,8 +1,11 @@
 package terraform
 
 import (
+	"bytes"
+	"bufio"
 	"fmt"
 	"github.com/TimeIncOSS/ape-dev-rt/ui"
+	"github.com/TimeIncOSS/ape-dev-rt/rt"
 	"os"
 	"os/exec"
 	"strings"
@@ -148,5 +151,34 @@ func (c *TfCommand) Synopsis() string {
 }
 
 func CheckTerraform() (string, error) {
-	return "/Users/zshepherd1271/devwork/ape-dev-terraform/bin108/terraform", nil
+	binaryPathBytes, err := exec.Command("which", "terraform").Output()  // output returns a byte slice
+	if err != nil {
+		fmt.Printf("Error with `which terraform`: %s\n", err.Error())
+		return "", err
+	}
+	binaryPath := strings.Trim(string(binaryPathBytes[:]), "\n")
+	binaryVersion, err := exec.Command(binaryPath, "version").Output()
+	if err != nil {
+		fmt.Printf("Error with `terraform version`: %s\n", err.Error())
+		return "", err
+	}
+	bytesReader := bytes.NewReader([]byte(binaryVersion))
+	bufReader := bufio.NewReader(bytesReader)
+	firstLine, isPrefix, err := bufReader.ReadLine()
+	if isPrefix {
+		fmt.Printf("Line too long")
+		return "", fmt.Errorf("Unable to read `terraform version` output")
+	}
+	if err != nil {
+		fmt.Printf("Error with `terraform version`: %s\n", err.Error())
+		return "", err
+	}
+	versionStr := strings.Trim(string(firstLine[:]), "\n")
+	expectedVersionStr := "Terraform v" + rt.TerraformVersion
+	if expectedVersionStr != versionStr {
+		errorStr := fmt.Sprintf("unexpected version of terraform: %s (wanted %s)\n", versionStr, expectedVersionStr)
+		fmt.Printf(errorStr)
+		return "", fmt.Errorf(errorStr)
+	}
+	return binaryPath, nil
 }
