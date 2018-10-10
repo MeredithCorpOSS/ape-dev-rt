@@ -2,10 +2,9 @@ version: 2
 jobs:
   test:
     machine: true
-    environment:
-      PATH: "$HOME/.go_project/bin:$PATH"
-      GOPATH: "$HOME/.go_project"
     steps:
+      - run: echo 'export PATH="$GOPATH/bin:$PATH"' >> $BASH_ENV
+      - run: echo 'export GOPATH="$HOME/.go_project"' >> $BASH_ENV
       - run: rm -rf /usr/local/go
       - run: wget https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz
       - run: tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
