@@ -2,6 +2,9 @@ version: 2
 jobs:
   test:
     machine: true
+      environment:
+        PATH: "$HOME/.go_project/bin:$PATH"
+        GOPATH: "$HOME/.go_project"
     steps:
       - checkout
       - run: sudo rm -rf /usr/local/go
