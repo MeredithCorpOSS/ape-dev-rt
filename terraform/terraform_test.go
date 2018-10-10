@@ -557,7 +557,7 @@ func TestCheckTerraform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expected != tfBinaryPath[len(tfBinaryPath)-len(expected):] {  // check binary path for expected at the end
+	if expected != tfBinaryPath[len(tfBinaryPath)-len(expected):] { // check binary path for expected at the end
 		t.Fatalf("Did not get terraform binary")
 	}
 }

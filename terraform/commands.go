@@ -1,11 +1,11 @@
 package terraform
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"fmt"
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"github.com/TimeIncOSS/ape-dev-rt/rt"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"os"
 	"os/exec"
 	"strings"
@@ -151,7 +151,7 @@ func (c *TfCommand) Synopsis() string {
 }
 
 func CheckTerraform() (string, error) {
-	binaryPathBytes, err := exec.Command("which", "terraform").Output()  // output returns a byte slice
+	binaryPathBytes, err := exec.Command("which", "terraform").Output() // output returns a byte slice
 	if err != nil {
 		fmt.Printf("Error with `which terraform`: %s\n", err.Error())
 		return "", err
