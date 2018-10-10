@@ -5,9 +5,9 @@ jobs:
     steps:
       - run: echo 'export PATH="$GOPATH/bin:$PATH"' >> $BASH_ENV
       - run: echo 'export GOPATH="$HOME/.go_project"' >> $BASH_ENV
-      - run: rm -rf /usr/local/go
+      - run: sudo rm -rf /usr/local/go
       - run: wget https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz
-      - run: tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
+      - run: sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
       - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
       - checkout
       - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
