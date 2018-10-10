@@ -4,7 +4,6 @@ jobs:
     working_directory: ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
     machine: true
     steps:
-      - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
       - run: echo 'export PATH="$GOPATH/bin:$PATH"' >> $BASH_ENV
       - run: echo 'export GOPATH="$HOME/.go_project"' >> $BASH_ENV
       - run: sudo rm -rf /usr/local/go
