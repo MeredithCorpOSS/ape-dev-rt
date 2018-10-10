@@ -8,19 +8,15 @@ jobs:
       - run: sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
       - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
       - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
-      - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip 
-      - run: sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin 
+      - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip
+      - run: sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
       - checkout
       - run: make test
-
 workflows:
   version: 2
   deployment-workflow:
     jobs:
       - test:
-        filters:
-          branches:
-            only: /.*/
-          tags:
-            only: /.*/
-
+          filters:
+            tags:
+              only: /.*/
