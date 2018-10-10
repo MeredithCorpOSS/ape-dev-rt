@@ -3,6 +3,7 @@ jobs:
   test:
     machine: true
     steps:
+      - checkout
       - run: sudo rm -rf /usr/local/go
       - run: wget https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz
       - run: sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
@@ -10,7 +11,6 @@ jobs:
       - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
       - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip
       - run: sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
-      - checkout
       - run: make test
 workflows:
   version: 2
