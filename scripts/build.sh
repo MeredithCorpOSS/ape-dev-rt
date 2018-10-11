@@ -14,11 +14,6 @@ cd "$DIR"
 GIT_COMMIT=$(git rev-parse HEAD)
 GIT_DIRTY=$(test -n "`git status --porcelain`" && echo "+CHANGES" || true)
 
-# Get the Terraform git commit
-TF_PATH="vendor/github.com/hashicorp/terraform"
-TF_GIT_COMMIT=$(git -C $TF_PATH rev-parse HEAD)
-TF_GIT_DIRTY=$(test -n "`git -C $TF_PATH status --porcelain`" && echo "+CHANGES" || true)
-
 # Delete the old dir
 echo "==> Removing old directory..."
 rm -f bin/*
@@ -40,7 +35,7 @@ echo "==> Building..."
 gox \
     -os="${XC_OS}" \
     -arch="${XC_ARCH}" \
-    -ldflags "-X github.com/TimeIncOSS/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY} -X github.com/TimeIncOSS/ape-dev-rt/rt.TerraformCommit=${TF_GIT_COMMIT}${TF_GIT_DIRTY}" \
+    -ldflags "-X github.com/TimeIncOSS/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY}" \
     -output "pkg/{{.OS}}_{{.Arch}}/{{.Dir}}" \
     $(go list ./... | grep -v /vendor/)
 
