@@ -13,7 +13,7 @@ import (
 var GitCommit string
 
 const TerraformVersion = "0.10.8"
-const Version = "0.10.0"
+const Version = "0.10.1"
 
 func GetVersion(c *commons.Context) error {
 	fmt.Printf("rt %s (%s)\n", Version, GitCommit)
