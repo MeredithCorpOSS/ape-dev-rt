@@ -6,7 +6,6 @@ import (
 	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	m_cli "github.com/mitchellh/cli"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -227,7 +226,7 @@ func FreshShow(remoteState *RemoteState, rootPath string) (string, error) {
 func Show(rootPath string) (string, error) {
 	var args []string
 	args = append(args, "-no-color")
-	out, err := Cmd("show", args, rootPath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("show", args, rootPath, os.Stdout, os.Stderr)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +310,7 @@ func ReenableRemoteState(remoteState *RemoteState, rootPath string) (string, err
 }
 
 func Get(rootPath string) error {
-	out, err := Cmd("get", []string{"-update"}, rootPath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("get", []string{"-update"}, rootPath, os.Stdout, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -338,7 +337,7 @@ func Output(rootPath string) (map[string]string, error) {
 		// "-json",
 	}
 
-	out, err := Cmd("output", args, rootPath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("output", args, rootPath, os.Stdout, os.Stderr)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +350,7 @@ func Output(rootPath string) (map[string]string, error) {
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("Error(s) occured (exit code %d). Stderr:\n%s",
+		return nil, fmt.Errorf("Error(s) occured with output (exit code %d). Stderr:\n%s",
 			out.ExitCode, out.Stderr)
 	}
 
@@ -371,7 +370,7 @@ func Output(rootPath string) (map[string]string, error) {
 }
 
 func Validate(rootpath string) (*CmdOutput, error) {
-	out, err := Cmd("validate", []string{}, rootpath, ioutil.Discard, ioutil.Discard)
+	out, err := Cmd("validate", []string{}, rootpath, os.Stdout, os.Stderr)
 	if err != nil {
 		return nil, err
 	}

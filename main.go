@@ -55,6 +55,7 @@ func main() {
 		errorStr := errorStyle("[ERROR] " + err.Error())
 		log.Printf(err.Error())
 		// Since logging setup can fail too, we also write to stderr
+		fmt.Fprintln(os.Stderr, "hello")
 		fmt.Fprintln(os.Stderr, errorStr) // will end up in terraform.log
 		os.Exit(1)
 	}
