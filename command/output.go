@@ -48,6 +48,19 @@ func Output(c *commons.Context) error {
 		namespace = c.String("namespace")
 	}
 
+	templateVars := ApplicationTemplateVars{
+		AwsAccountId: namespace,
+		AppName:      c.String("app"),
+		Environment:  c.String("env"),
+	}
+
+	filesToCleanup := make([]string, 0)
+
+	filesToCleanup, err = commons.ProcessTemplates(rootDir, "tpl", templateVars)
+	if err != nil {
+		return err
+	}
+
 	remoteState, err := terraform.GetRemoteStateForApp(&terraform.RemoteState{
 		Backend: rs.Backend,
 		Config:  rs.Config,
@@ -56,12 +69,12 @@ func Output(c *commons.Context) error {
 		return err
 	}
 
-	filesToCleanup := make([]string, 0)
+	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
+
 	outputs, err := terraform.FreshOutput(remoteState, cfgPath)
 	if err != nil {
 		return err
 	}
-	filesToCleanup = append(filesToCleanup, terraform.GetBackendConfigFilename(rootDir))
 
 	outputMessage, err := generateOutputMessage(c.String("app"), c.String("env"), "", c.String("name"), outputs)
 	if err != nil {
