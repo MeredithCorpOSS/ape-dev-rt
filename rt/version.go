@@ -12,7 +12,7 @@ import (
 // The following will be filled in by the compiler
 var GitCommit string
 
-const TerraformVersion = "0.10.8"
+const TerraformVersion = "0.11.0"
 const Version = "0.10.1"
 
 func GetVersion(c *commons.Context) error {

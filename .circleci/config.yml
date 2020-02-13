@@ -11,8 +11,8 @@ jobs:
       - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
       - run: go get github.com/TimeIncOSS/ape-dev-rt
       - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
-      - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip
-      - run: sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
+      - run: wget https://releases.hashicorp.com/terraform/0.11.0/terraform_0.11.0_linux_386.zip
+      - run: sudo unzip terraform_0.11.0_linux_386.zip -d /usr/local/bin
       - run:
           name: install deps
           command: |
