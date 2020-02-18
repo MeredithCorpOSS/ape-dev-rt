@@ -107,7 +107,7 @@ func ApplyInfra(c *commons.Context) error {
 		planStartTime.String(), planFinishTime.String())
 
 	if planOut.ExitCode != 0 {
-		return fmt.Errorf("Plan failed (exit code %d). Stderr:\n", planOut.ExitCode, planOut.Stderr)
+		return fmt.Errorf("Plan failed (exit code %d). Stderr:\n%v", planOut.ExitCode, planOut.Stderr)
 	}
 
 	diff := planOut.Diff
@@ -120,9 +120,7 @@ func ApplyInfra(c *commons.Context) error {
 		c.String("app"), namespace, c.String("env"))
 	yesOverride := c.Bool("y")
 	isSensitive := isEnvironmentSensitive(c.String("env"))
-	var applyStartTime time.Time
 	applyOut, confirmed, err := clippy.BoolPrompt(note, yesOverride, isSensitive, func() (interface{}, error) {
-		applyStartTime = time.Now().UTC()
 		input := terraform.ApplyInput{
 			RootPath:     rootDir,
 			Target:       "",
@@ -150,7 +148,7 @@ func ApplyInfra(c *commons.Context) error {
 	}
 	isActive = !isStateEmpty
 
-	log.Printf("[DEBUG] Marking app %q as active? %t", isActive)
+	log.Printf("[DEBUG] Marking app as active? %t", isActive)
 
 	appData.LastInfraChangeTime = time.Now().UTC()
 	err = FinishApplicationOperation(c.String("app"), appData, isActive, ao.Outputs, ds)

@@ -21,6 +21,6 @@ generate:
 test: generate
 	sh -c "'$(CURDIR)/scripts/fmtcheck.sh'"
 	go test -cover $$(go list ./... | grep -v /vendor/)
-	go tool vet $$(find . -path ./vendor -prune -o -name '*.go' -print)
+	go vet
 
 .PHONY: default installdeps dev

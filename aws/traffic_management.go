@@ -169,7 +169,7 @@ func (a *AWS) GetBalancersForApp(appName string) ([]string, error) {
 
 	var tagDescriptions []*elb.TagDescription
 	for len(allBalancerNames) > 0 {
-		log.Printf("[DEBUG] checking tags for some load balancers: %q", allBalancerNames)
+		log.Printf("[DEBUG] checking tags for some load balancers: %v", allBalancerNames)
 		var batchOfNames []*string
 		if len(allBalancerNames) > 20 {
 			batchOfNames = allBalancerNames[:20]

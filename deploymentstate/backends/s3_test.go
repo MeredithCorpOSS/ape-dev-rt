@@ -66,7 +66,7 @@ func TestSaveAndGetSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*insertedSlotData, *receivedSlotData) {
-		t.Fatalf("Expected slot data to match.\nInserted: %s\nReceived: %s",
+		t.Fatalf("Expected slot data to match.\nInserted: %v\nReceived: %v",
 			*insertedSlotData, *receivedSlotData)
 	}
 }
@@ -208,7 +208,7 @@ func TestGetSlot_notFound(t *testing.T) {
 	}
 	_, ok := err.(*SlotNotFound)
 	if !ok {
-		t.Fatal("Expected SlotNotFound error, received: %s", err)
+		t.Fatalf("Expected SlotNotFound error, received: %s", err)
 	}
 }
 
@@ -230,7 +230,7 @@ func TestGetApplication_notFound(t *testing.T) {
 	}
 	_, ok := err.(*AppNotFound)
 	if !ok {
-		t.Fatal("Expected AppNotFound error, received: %s", err)
+		t.Fatalf("Expected AppNotFound error, received: %s", err)
 	}
 }
 
