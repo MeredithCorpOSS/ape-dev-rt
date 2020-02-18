@@ -1,6 +1,6 @@
 ## 0.11.0 (February 13, 2020)
 IMPROVEMENTS:
- - Upgraded to Terrafform 0.11.0
+ - Upgraded to Terrafform 0.11.14
 
 ## 0.10.0 (June 6, 2018)
 IMPROVEMENTS:
