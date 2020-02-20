@@ -125,7 +125,7 @@ func DestroyInfra(c *commons.Context) error {
 		planStartTime.String(), planFinishTime.String())
 
 	if planOut.ExitCode != 0 {
-		return fmt.Errorf("Planning failed (exit code %d). Stderr:\n", planOut.ExitCode, planOut.Stderr)
+		return fmt.Errorf("Planning failed (exit code %d). Stderr:\n%v", planOut.ExitCode, planOut.Stderr)
 	}
 
 	diff := planOut.Diff
@@ -138,9 +138,7 @@ func DestroyInfra(c *commons.Context) error {
 		c.String("app"), namespace, c.String("env"))
 	yesOverride := c.Bool("y")
 	isSensitive := isEnvironmentSensitive(c.String("env"))
-	var destroyStartTime time.Time
 	destroyOut, confirmed, err := clippy.BoolPrompt(note, yesOverride, isSensitive, func() (interface{}, error) {
-		destroyStartTime = time.Now().UTC()
 		input := terraform.DestroyInput{
 			RootPath:     rootDir,
 			Target:       "",

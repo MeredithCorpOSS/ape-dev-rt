@@ -37,7 +37,7 @@ func TestGetBalancersFromScalingGroup(t *testing.T) {
 		&Balancer{Name: "external-loadbalancer", State: "Added"},
 	}
 	if !reflect.DeepEqual(balancers, expectedBalancers) {
-		t.Fatalf("Load balancers don't match:\nGiven: %q\nExpected: %q", balancers, expectedBalancers)
+		t.Fatalf("Load balancers don't match:\nGiven: %v\nExpected: %v", balancers, expectedBalancers)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestDescribeBalancedInstanceHealth(t *testing.T) {
 		&InstanceHealth{"i-00000000", "OutOfService"},
 	}
 	if !reflect.DeepEqual(healths, expectedHealths) {
-		t.Fatalf("Wrong healths received.\nGiven: %q\nExpected: %q\n",
+		t.Fatalf("Wrong healths received.\nGiven: %v\nExpected: %v\n",
 			healths, expectedHealths)
 	}
 }

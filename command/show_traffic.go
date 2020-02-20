@@ -147,7 +147,7 @@ func decorateAndPrintSortedVersions(internalAppName, env string, slots []*slotDa
 			var instanceToIpMap = make(map[string]string, 0)
 			instanceToIpMap, err = a.GetPrivateIpsForInstanceIds(instanceIds)
 			if err != nil {
-				log.Printf("[ERROR] Unable to get private IPs of instance IDs (%q): %s", instanceIds, err)
+				log.Printf("[ERROR] Unable to get private IPs of instance IDs (%v): %s", instanceIds, err)
 			}
 
 			for _, b := range balancers {

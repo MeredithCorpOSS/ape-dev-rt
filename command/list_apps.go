@@ -25,7 +25,7 @@ func ListApps(c *commons.Context) error {
 		return err
 	}
 	if len(apps) == 0 {
-		fmt.Println(colour.boldWhite("No applications found."), " Did you eat them all?! :o\n")
+		fmt.Println(colour.boldWhite("No applications found."), " Did you eat them all?! :o")
 		return nil
 	}
 	for _, a := range apps {

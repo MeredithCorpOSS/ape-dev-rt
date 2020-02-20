@@ -109,7 +109,7 @@ func (ds *DeploymentState) AreBackendsReady() (bool, error) {
 
 func (ds *DeploymentState) ListSlots(appName string) ([]*schema.SlotData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -123,7 +123,7 @@ func (ds *DeploymentState) ListSlots(appName string) ([]*schema.SlotData, error)
 
 func (ds *DeploymentState) GetSlot(appName, slotId string) (*schema.SlotData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -137,7 +137,7 @@ func (ds *DeploymentState) GetSlot(appName, slotId string) (*schema.SlotData, er
 
 func (ds *DeploymentState) ListLastDeployments(appName, slotId string, limit int) ([]*schema.DeploymentData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -152,7 +152,7 @@ func (ds *DeploymentState) ListLastDeployments(appName, slotId string, limit int
 
 func (ds *DeploymentState) ListApplications() ([]*schema.ApplicationData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -165,7 +165,7 @@ func (ds *DeploymentState) ListApplications() ([]*schema.ApplicationData, error)
 
 func (ds *DeploymentState) GetApplication(name string) (*schema.ApplicationData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -189,7 +189,7 @@ func (ds *DeploymentState) SaveApplication(name string, data *schema.Application
 
 func (ds *DeploymentState) SupportsWriteLock() (bool, error) {
 	if len(ds.backendList) < 1 {
-		return false, fmt.Errorf("No backend found: %q", ds.backendList)
+		return false, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
@@ -198,7 +198,7 @@ func (ds *DeploymentState) SupportsWriteLock() (bool, error) {
 
 func (ds *DeploymentState) GetDeployment(appName, slotId, deploymentId string) (*schema.DeploymentData, error) {
 	if len(ds.backendList) < 1 {
-		return nil, fmt.Errorf("No backend found: %q", ds.backendList)
+		return nil, fmt.Errorf("No backend found: %v", ds.backendList)
 	}
 	b := ds.backendList[0]
 
