@@ -11,4 +11,3 @@ Terraform version RT uses is: [v0.11.14](https://github.com/hashicorp/terraform/
 - [Usage](docs/usage.md)
 - [Help](docs/help.md)
 - [Contribute](docs/contribute.md)
-t
