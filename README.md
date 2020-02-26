@@ -1,4 +1,4 @@
-# Release Tool - `ape-dev-rt` 
+# Release Tool - `ape-dev-rt`
 [![Circle CI](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master.svg?style=svg&circle-token=00d956b235feb307d57ec9aafe278637e21aaf86)](https://circleci.com/gh/TimeIncOSS/ape-dev-rt/tree/master)
 
 The Release Tool deploys apps (defined in [ape-dev-rt-apps](https://github.com/TimeIncOSS/ape-dev-rt-apps))
