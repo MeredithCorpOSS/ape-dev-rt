@@ -1,31 +1,25 @@
 version: 2
 jobs:
   test:
-    machine: true
+    docker:
+      - image: circleci/golang:1.13.5
+    working_directory: /go/src/github.com/TimeIncOSS/ape-dev-rt
     steps:
-      - run: echo 'export PATH="$GOPATH/bin:$PATH"' >> $BASH_ENV
-      - run: echo 'export GOPATH="$HOME/.go_project"' >> $BASH_ENV
-      - run: sudo rm -rf /usr/local/go
-      - run: wget https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz
-      - run: sudo tar -C /usr/local -xzf go1.9.linux-amd64.tar.gz
-      - run: mkdir -p ~/.go_project/src/github.com/TimeIncOSS
-      - run: go get github.com/TimeIncOSS/ape-dev-rt
-      - run: ln -s $(pwd) ~/.go_project/src/github.com/TimeIncOSS/ape-dev-rt
-      - run: wget https://releases.hashicorp.com/terraform/0.10.8/terraform_0.10.8_linux_386.zip
-      - run: sudo unzip terraform_0.10.8_linux_386.zip -d /usr/local/bin
+      - checkout
+      - run: wget https://releases.hashicorp.com/terraform/0.11.14/terraform_0.11.14_linux_386.zip
+      - run: sudo unzip terraform_0.11.14_linux_386.zip -d /usr/local/bin
       - run:
           name: install deps
           command: |
-             cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
              make installdeps
       - run:
           name: run test
           command: |
-             cd ../.go_project/src/github.com/TimeIncOSS/ape-dev-rt
              make test
+
 workflows:
   version: 2
-  deployment-workflow:
+  test-workflow:
     jobs:
       - test:
           filters:

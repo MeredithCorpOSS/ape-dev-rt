@@ -3,15 +3,17 @@ package terraform
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
-	m_cli "github.com/mitchellh/cli"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
+	m_cli "github.com/mitchellh/cli"
 )
 
 const AppName = "app"
@@ -226,7 +228,7 @@ func FreshShow(remoteState *RemoteState, rootPath string) (string, error) {
 func Show(rootPath string) (string, error) {
 	var args []string
 	args = append(args, "-no-color")
-	out, err := Cmd("show", args, rootPath, os.Stdout, os.Stderr)
+	out, err := Cmd("show", args, rootPath, ioutil.Discard, ioutil.Discard)
 	if err != nil {
 		return "", err
 	}

@@ -168,7 +168,7 @@ func TestDoesFileOrDirExist(t *testing.T) {
 		t.Fatalf("Error checking if file exists: %s", err.Error())
 	}
 	if !output {
-		t.Errorf("Output: %q\nExpected output: %q", output, false)
+		t.Errorf("Output: %t\nExpected output: %t", output, false)
 	}
 
 	// File shouldn't exist, output should come back as false
@@ -177,7 +177,7 @@ func TestDoesFileOrDirExist(t *testing.T) {
 		t.Fatalf("Error checking if file exists: %s", err.Error())
 	}
 	if output {
-		t.Errorf("Output: %q\nExpected output: %q", output, false)
+		t.Errorf("Output: %t\nExpected output: %t", output, false)
 	}
 
 }

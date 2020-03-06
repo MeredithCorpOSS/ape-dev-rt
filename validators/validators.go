@@ -74,7 +74,7 @@ func IsApplicationNameValid(n string, value interface{}) error {
 	}
 
 	if v == "shared-services" {
-		return fmt.Errorf("%q cannot be called shared-services (for historical reasons), sorry!")
+		return fmt.Errorf("%q cannot be called shared-services (for historical reasons), sorry!", v)
 	}
 
 	if len(v) < 1 {

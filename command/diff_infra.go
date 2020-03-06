@@ -88,7 +88,7 @@ func DiffInfra(c *commons.Context) error {
 		planStartTime.String(), planFinishTime.String())
 
 	if planOut.ExitCode != 0 {
-		return fmt.Errorf("Plan failed (exit code %d). Stderr:\n", planOut.ExitCode, planOut.Stderr)
+		return fmt.Errorf("Plan failed (exit code %d). Stderr:\n%v", planOut.ExitCode, planOut.Stderr)
 	}
 
 	return cleanupFilePaths(filesToCleanup)
