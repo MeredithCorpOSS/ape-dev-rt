@@ -36,7 +36,7 @@ func ApplyInfra(c *commons.Context) error {
 		return err
 	}
 
-	appData, exists, err := BeginApplicationOperation(c.String("env"), c.String("app"), ds)
+	appData, exists, err := BeginApplicationOperation(c.String("env"), c.String("app"), ds, c.Bool("y"))
 	if err != nil {
 		return err
 	}
@@ -115,9 +115,7 @@ func ApplyInfra(c *commons.Context) error {
 		return cleanupFilePaths(filesToCleanup)
 	}
 
-	note := fmt.Sprintf(
-		"It looks like you want to change infrastructure of '%s' in %s/%s.",
-		c.String("app"), namespace, c.String("env"))
+	note := fmt.Sprintf("It looks like you want to change infrastructure of '%s' in %s/%s.", c.String("app"), namespace, c.String("env"))
 	yesOverride := c.Bool("y")
 	isSensitive := isEnvironmentSensitive(c.String("env"))
 	applyOut, confirmed, err := clippy.BoolPrompt(note, yesOverride, isSensitive, func() (interface{}, error) {
