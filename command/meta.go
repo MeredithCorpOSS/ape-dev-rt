@@ -58,15 +58,18 @@ func turnOffColours(c *colours) {
 	c.green = chalk.Reset.Style
 }
 
-func BeginApplicationOperation(env, appName string, ds *deploymentstate.DeploymentState) (*schema.ApplicationData, bool, error) {
+func BeginApplicationOperation(env, appName string, ds *deploymentstate.DeploymentState, yesOverride ...bool) (*schema.ApplicationData, bool, error) {
+	yes := false // use this varaible to control output of creation prompt
+	if len(yesOverride) > 0 {
+		yes = yesOverride[0]
+	}
 	app, err := ds.GetApplication(appName)
 	if err != nil {
 		_, ok := err.(*backends.AppNotFound)
 		if ok {
-			note := fmt.Sprintf("Application %q doesn't exist in %q, do you want to create it?",
-				appName, env)
+			note := fmt.Sprintf("Application %q doesn't exist in %q, do you want to create it?", appName, env)
 			isSensitive := isEnvironmentSensitive(env)
-			out, confirmed, _ := clippy.BoolPrompt(note, false, isSensitive, func() (interface{}, error) {
+			out, confirmed, _ := clippy.BoolPrompt(note, yes, isSensitive, func() (interface{}, error) {
 				return &schema.ApplicationData{
 					UseCentralGitRepo:    false,
 					LastRtVersion:        rt.Version,
