@@ -50,7 +50,6 @@ func Plan(input *PlanInput) (*PlanOutput, error) {
 		tfArguments = append(tfArguments, _var)
 	}
 	tfArguments = append(tfArguments, "-input=false")
-	tfArguments = append(tfArguments, "-module-depth=-1")
 	tfArguments = append(tfArguments, fmt.Sprintf("-out=%s", input.PlanFilePath))
 	tfArguments = append(tfArguments, fmt.Sprintf("-refresh=%t", input.Refresh))
 	if input.Destroy {
@@ -58,9 +57,6 @@ func Plan(input *PlanInput) (*PlanOutput, error) {
 	}
 	if input.Target != "" {
 		tfArguments = append(tfArguments, fmt.Sprintf("-target=%s", input.Target))
-	}
-	if input.XLegacy {
-		tfArguments = append(tfArguments, "-Xlegacy-graph")
 	}
 
 	out, err := Cmd("plan", tfArguments, input.RootPath,
@@ -178,9 +174,6 @@ func Destroy(input *DestroyInput) (*DestroyOutput, error) {
 	if input.Target != "" {
 		tfArguments = append(tfArguments, fmt.Sprintf("-target=%s", input.Target))
 	}
-	if input.XLegacy {
-		tfArguments = append(tfArguments, "-Xlegacy-graph")
-	}
 
 	out, err := Cmd("destroy", tfArguments, input.RootPath,
 		input.StdoutWriter, input.StderrWriter)
@@ -227,7 +220,7 @@ func FreshShow(remoteState *RemoteState, rootPath string) (string, error) {
 
 func Show(rootPath string) (string, error) {
 	var args []string
-	args = append(args, "-no-color")
+	// args = append(args, "-no-color")
 	out, err := Cmd("show", args, rootPath, ioutil.Discard, ioutil.Discard)
 	if err != nil {
 		return "", err
