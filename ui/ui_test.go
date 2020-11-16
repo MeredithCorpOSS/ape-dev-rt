@@ -12,12 +12,15 @@ func TestStreamedUi_Error(t *testing.T) {
 	}
 	ui.Error("HELLO")
 	bufErr := ui.ErrorBuffer
-	if bufErr.String() != "HELLO" {
-		t.Fatalf("bad: %s", bufErr.String())
-	}
+
 	if outErr.String() != "HELLO" {
-		t.Fatalf("bad: %s", outErr.String())
+		t.Fatalf("bad outErr: %s", outErr.String())
 	}
+
+	if bufErr.String() != "HELLO" {
+		t.Fatalf("bad bufErr: %s", bufErr.String())
+	}
+
 }
 
 func TestStreamedUi_Output(t *testing.T) {
