@@ -196,32 +196,20 @@ func Destroy(input *DestroyInput) (*DestroyOutput, error) {
 }
 
 func IsStateEmpty(rootPath string) (bool, error) {
-	// TODO: Use `terraform state list` instead to filter out false negatives due to Outputs section
-	state, err := Show(rootPath)
+	state, err := State(rootPath)
 	if err != nil {
 		return false, err
 	}
 	if len(state) == 0 {
 		return true, nil
 	}
-	if regexp.MustCompile("^Outputs:\n").MatchString(state) {
-		return true, nil
-	}
 	return false, nil
 }
 
-func FreshShow(remoteState *RemoteState, rootPath string) (string, error) {
-	_, err := ReenableRemoteState(remoteState, rootPath)
-	if err != nil {
-		return "", err
-	}
-	return Show(rootPath)
-}
-
-func Show(rootPath string) (string, error) {
+func State(rootPath string) (string, error) {
 	var args []string
-	// args = append(args, "-no-color")
-	out, err := Cmd("show", args, rootPath, ioutil.Discard, ioutil.Discard)
+	args = append(args, "list")
+	out, err := Cmd("state", args, rootPath, ioutil.Discard, ioutil.Discard)
 	if err != nil {
 		return "", err
 	}
@@ -231,7 +219,7 @@ func Show(rootPath string) (string, error) {
 	}
 
 	// Ignoring warnings here as we don't expect any from show cmd
-
+	fmt.Printf("State Resources:\n%v\n\n", strings.TrimSpace(out.Stdout))
 	return strings.TrimSpace(out.Stdout), nil
 }
 
@@ -406,7 +394,7 @@ func Cmd(cmdName string, args []string, basePath string, stdoutW, stderrW io.Wri
 			TfCommand{Meta: meta}},
 		"init": &InitCommand{
 			TfCommand{Meta: meta}},
-		"show": &ShowCommand{
+		"state": &StateCommand{
 			TfCommand{Meta: meta}},
 		"destroy": &DestroyCommand{
 			TfCommand{Meta: meta}},
