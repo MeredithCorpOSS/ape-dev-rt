@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/TimeIncOSS/ape-dev-rt/rt"
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/TimeIncOSS/ape-dev-rt/rt"
+	"github.com/TimeIncOSS/ape-dev-rt/ui"
 )
 
 type Meta struct {
@@ -92,12 +93,12 @@ func (c *OutputCommand) Run(args []string) int {
 	return c.Execute(args)
 }
 
-type ShowCommand struct {
+type StateCommand struct {
 	TfCommand
 }
 
-func (c *ShowCommand) Run(args []string) int {
-	args = append([]string{"show"}, args...)
+func (c *StateCommand) Run(args []string) int {
+	args = append([]string{"state"}, args...)
 	return c.Execute(args)
 }
 

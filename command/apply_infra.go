@@ -154,6 +154,8 @@ func ApplyInfra(c *commons.Context) error {
 		return err
 	}
 
+	fmt.Printf("Apply TimeStamp: %v\n\n", appData.LastInfraChangeTime)
+
 	if ao.ExitCode != 0 {
 		return fmt.Errorf("Apply operation failed (exit code %d). Stderr:\n%s",
 			ao.ExitCode, ao.Stderr)

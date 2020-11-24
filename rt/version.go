@@ -9,12 +9,16 @@ import (
 	"github.com/TimeIncOSS/ape-dev-rt/git"
 )
 
-// The following will be filled in by the compiler
+// GitCommit ... The following will be filled in by the compiler
 var GitCommit string
 
-const TerraformVersion = "0.11.14"
-const Version = "0.11.0"
+// TerraformVersion ... terraform version needed to run
+const TerraformVersion = "0.12.29"
 
+// Version ... current ape-dev-rt version
+const Version = "0.12.0"
+
+// GetVersion ... Return version information for CLI
 func GetVersion(c *commons.Context) error {
 	fmt.Printf("rt %s (%s)\n", Version, GitCommit)
 	fmt.Printf("go %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)

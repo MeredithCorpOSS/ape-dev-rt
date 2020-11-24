@@ -6,8 +6,8 @@ jobs:
     working_directory: /go/src/github.com/TimeIncOSS/ape-dev-rt
     steps:
       - checkout
-      - run: wget https://releases.hashicorp.com/terraform/0.11.14/terraform_0.11.14_linux_386.zip
-      - run: sudo unzip terraform_0.11.14_linux_386.zip -d /usr/local/bin
+      - run: wget https://releases.hashicorp.com/terraform/0.12.29/terraform_0.12.29_linux_386.zip
+      - run: sudo unzip terraform_0.12.29_linux_386.zip -d /usr/local/bin
       - run:
           name: install deps
           command: |

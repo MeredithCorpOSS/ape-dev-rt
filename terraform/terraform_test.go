@@ -240,7 +240,7 @@ variable "single" {}
 		t.Fatal(err)
 	}
 
-	output, err := Show(tmpDir)
+	output, err := State(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
