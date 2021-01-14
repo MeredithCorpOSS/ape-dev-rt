@@ -16,7 +16,7 @@ var GitCommit string
 const TerraformVersion = "0.12.29"
 
 // Version ... current ape-dev-rt version
-const Version = "0.12.0"
+const Version = "0.12.1"
 
 // GetVersion ... Return version information for CLI
 func GetVersion(c *commons.Context) error {
