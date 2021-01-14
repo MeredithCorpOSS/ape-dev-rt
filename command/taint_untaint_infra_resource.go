@@ -111,12 +111,10 @@ func TaintUntaintInfraResource(c *commons.Context) error {
 	args := []string{}
 	var moduleMsg string
 	if c.CliContext.IsSet("module") {
-		module := fmt.Sprintf("-module=%s", c.String("module"))
+		module := fmt.Sprintf("module.%s", c.String("module"))
 		args = append(args, module)
 		moduleMsg = fmt.Sprintf(" in module %s", c.String("module"))
 	}
-	args = append(args, "-no-color")
-	args = append(args, resource)
 
 	fmt.Printf("%sing infra resource %s%s for application %s in %s/%s.\n",
 		strings.Title(action), resource, moduleMsg, c.String("app"), namespace, c.String("env"))
