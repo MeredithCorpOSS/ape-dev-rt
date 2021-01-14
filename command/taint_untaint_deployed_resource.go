@@ -101,12 +101,10 @@ func TaintUntaintDeployedResource(c *commons.Context) error {
 	args := []string{}
 	var moduleMsg string
 	if c.CliContext.IsSet("module") {
-		module := fmt.Sprintf("-module=%s", c.String("module"))
+		module := fmt.Sprintf("module.%s.%s", c.String("module"), resource)
 		args = append(args, module)
 		moduleMsg = fmt.Sprintf(" in module %s", c.String("module"))
 	}
-	args = append(args, "-no-color")
-	args = append(args, resource)
 
 	fmt.Printf("%sing resource %s%s for application %s (slot %s) in %s/%s.\n",
 		strings.Title(action), resource, moduleMsg, c.String("app"), slotId, namespace, c.String("env"))
