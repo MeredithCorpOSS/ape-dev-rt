@@ -13,7 +13,7 @@ import (
 var GitCommit string
 
 // TerraformVersion ... terraform version needed to run
-const TerraformVersion = "0.12.29"
+const TerraformVersion = "0.13.6"
 
 // Version ... current ape-dev-rt version
 const Version = "0.12.1"
