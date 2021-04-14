@@ -3,7 +3,7 @@ default: test
 installdeps:
 	go get -u golang.org/x/tools/cmd/stringer
 	go get -u github.com/mitchellh/gox
-	go get -u github.com/Masterminds/glide
+	go mod download
 
 dev: generate
 	@RT_DEV=1 sh -c "'$(CURDIR)/scripts/build.sh'"

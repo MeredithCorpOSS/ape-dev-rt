@@ -13,9 +13,13 @@ require (
 	github.com/kr/text v0.2.0
 	github.com/mitchellh/cli v1.1.2
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/mitchellh/gox v1.0.1 // indirect
 	github.com/ninibe/bigduration v0.0.0-20160225171748-88d3399741b1
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31
 	github.com/urfave/cli v1.22.5
+	golang.org/x/mod v0.4.2 // indirect
+	golang.org/x/sys v0.0.0-20210414055047-fe65e336abe0 // indirect
+	golang.org/x/tools v0.1.0 // indirect
 	gopkg.in/ini.v1 v1.62.0
 )
