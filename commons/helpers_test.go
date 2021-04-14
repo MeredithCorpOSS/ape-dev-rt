@@ -63,7 +63,7 @@ func TestProcessTemplates_invalid(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected error when processing invalid template.")
 	}
-	expectedSubset := "unexpected bad character"
+	expectedSubset := "bad character U+002F '/'"
 	if !strings.Contains(err.Error(), expectedSubset) {
 		t.Fatalf("Expected error to contain %q: %s", expectedSubset, err.Error())
 	}

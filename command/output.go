@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/TimeIncOSS/ape-dev-rt/aws"
-	"github.com/TimeIncOSS/ape-dev-rt/commons"
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
-	"github.com/TimeIncOSS/ape-dev-rt/hcl"
-	"github.com/TimeIncOSS/ape-dev-rt/terraform"
+	"github.com/MeredithCorpOSS/ape-dev-rt/aws"
+	"github.com/MeredithCorpOSS/ape-dev-rt/commons"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate"
+	"github.com/MeredithCorpOSS/ape-dev-rt/hcl"
+	"github.com/MeredithCorpOSS/ape-dev-rt/terraform"
 )
 
 func Output(c *commons.Context) error {

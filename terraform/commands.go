@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/TimeIncOSS/ape-dev-rt/rt"
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
+	"github.com/MeredithCorpOSS/ape-dev-rt/rt"
+	"github.com/MeredithCorpOSS/ape-dev-rt/ui"
 )
 
 type Meta struct {

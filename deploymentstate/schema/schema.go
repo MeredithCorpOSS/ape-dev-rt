@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TimeIncOSS/ape-dev-rt/terraform"
+	"github.com/MeredithCorpOSS/ape-dev-rt/terraform"
 )
 
 type _SchemaVersion struct {
@@ -117,7 +117,7 @@ type DeploymentData struct {
 	RTVersion string `json:"rt_version"`
 
 	// TODO: Data+configuration of/from hooks
-	// See https://github.com/TimeIncOSS/ape-dev-rt/issues/138
+	// See https://github.com/MeredithCorpOSS/ape-dev-rt/issues/138
 	// PreDeployHooks  []*Hook
 	// PostDeployHooks []*Hook
 }

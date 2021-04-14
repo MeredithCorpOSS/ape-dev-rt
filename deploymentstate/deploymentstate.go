@@ -7,10 +7,10 @@ import (
 	"math"
 	"time"
 
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/backends"
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
-	"github.com/TimeIncOSS/ape-dev-rt/hcl"
-	"github.com/TimeIncOSS/ape-dev-rt/rt"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate/backends"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate/schema"
+	"github.com/MeredithCorpOSS/ape-dev-rt/hcl"
+	"github.com/MeredithCorpOSS/ape-dev-rt/rt"
 	"github.com/hashicorp/go-multierror"
 )
 

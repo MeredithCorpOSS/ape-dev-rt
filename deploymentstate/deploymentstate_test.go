@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/backends/backendstest"
-	"github.com/TimeIncOSS/ape-dev-rt/hcl"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate/backends/backendstest"
+	"github.com/MeredithCorpOSS/ape-dev-rt/hcl"
 )
 
 func TestLoadBackends(t *testing.T) {

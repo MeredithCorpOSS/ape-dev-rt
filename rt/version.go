@@ -5,8 +5,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/TimeIncOSS/ape-dev-rt/commons"
-	"github.com/TimeIncOSS/ape-dev-rt/git"
+	"github.com/MeredithCorpOSS/ape-dev-rt/commons"
+	"github.com/MeredithCorpOSS/ape-dev-rt/git"
 )
 
 // GitCommit ... The following will be filled in by the compiler

@@ -2,8 +2,8 @@ version: 2
 jobs:
   test:
     docker:
-      - image: circleci/golang:1.13.5
-    working_directory: /go/src/github.com/TimeIncOSS/ape-dev-rt
+      - image: circleci/golang:1.16.3
+    working_directory: /go/src/github.com/MeredithCorpOSS/ape-dev-rt
     steps:
       - checkout
       - run: wget https://releases.hashicorp.com/terraform/0.12.29/terraform_0.12.29_linux_386.zip

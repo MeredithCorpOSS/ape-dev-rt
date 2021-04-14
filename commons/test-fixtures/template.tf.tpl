@@ -1,5 +1,5 @@
 module "aws-app" {
-  source = "git@github.com:TimeIncOSS/ape-dev-tf-aws-app.git"
+  source = "git@github.com:MeredithCorpOSS/ape-dev-tf-aws-app.git"
 
   aws_access_key = ""
   aws_secret_key = ""

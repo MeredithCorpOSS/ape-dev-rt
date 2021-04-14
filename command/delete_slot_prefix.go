@@ -5,10 +5,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/TimeIncOSS/ape-dev-rt/clippy"
-	"github.com/TimeIncOSS/ape-dev-rt/commons"
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate/schema"
+	"github.com/MeredithCorpOSS/ape-dev-rt/clippy"
+	"github.com/MeredithCorpOSS/ape-dev-rt/commons"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate/schema"
 )
 
 func DeleteSlotPrefix(c *commons.Context) error {
