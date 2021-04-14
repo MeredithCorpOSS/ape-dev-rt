@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/TimeIncOSS/ape-dev-rt/commons"
-	"github.com/TimeIncOSS/ape-dev-rt/git"
-	"github.com/TimeIncOSS/ape-dev-rt/validators"
+	"github.com/MeredithCorpOSS/ape-dev-rt/commons"
+	"github.com/MeredithCorpOSS/ape-dev-rt/git"
+	"github.com/MeredithCorpOSS/ape-dev-rt/validators"
 	"github.com/urfave/cli"
 )
 

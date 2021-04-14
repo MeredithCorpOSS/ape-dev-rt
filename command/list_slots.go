@@ -3,8 +3,8 @@ package command
 import (
 	"fmt"
 
-	"github.com/TimeIncOSS/ape-dev-rt/commons"
-	"github.com/TimeIncOSS/ape-dev-rt/deploymentstate"
+	"github.com/MeredithCorpOSS/ape-dev-rt/commons"
+	"github.com/MeredithCorpOSS/ape-dev-rt/deploymentstate"
 )
 
 func ListSlots(c *commons.Context) error {

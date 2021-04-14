@@ -9,7 +9,7 @@ import (
 
 const PromptQuestion = "continue?"
 const NegativeAnswer = "\nOK, bailing out.\n¯\\_(ツ)_/¯"
-const IssuesURL = "https://github.com/TimeIncOSS/ape-dev-rt/issues/new"
+const IssuesURL = "https://github.com/MeredithCorpOSS/ape-dev-rt/issues/new"
 
 type pCallback func() (interface{}, error)
 

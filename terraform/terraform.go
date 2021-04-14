@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/TimeIncOSS/ape-dev-rt/ui"
+	"github.com/MeredithCorpOSS/ape-dev-rt/ui"
 	m_cli "github.com/mitchellh/cli"
 )
 

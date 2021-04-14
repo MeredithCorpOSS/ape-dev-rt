@@ -35,7 +35,7 @@ echo "==> Building..."
 gox \
     -os="${XC_OS}" \
     -arch="${XC_ARCH}" \
-    -ldflags "-X github.com/TimeIncOSS/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY}" \
+    -ldflags "-X github.com/MeredithCorpOSS/ape-dev-rt/rt.GitCommit=${GIT_COMMIT}${GIT_DIRTY}" \
     -output "pkg/{{.OS}}_{{.Arch}}/{{.Dir}}" \
     $(go list ./... | grep -v /vendor/)
 
