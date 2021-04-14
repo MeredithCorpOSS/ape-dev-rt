@@ -2,7 +2,7 @@ version: 2
 jobs:
   test:
     docker:
-      - image: circleci/golang:1.13.5
+      - image: circleci/golang:1.16.3
     working_directory: /go/src/github.com/MeredithCorpOSS/ape-dev-rt
     steps:
       - checkout
@@ -11,7 +11,7 @@ jobs:
       - run:
           name: install deps
           command: |
-             make installdeps
+             go mod download
       - run:
           name: run test
           command: |
